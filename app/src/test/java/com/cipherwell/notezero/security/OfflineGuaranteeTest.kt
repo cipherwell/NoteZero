@@ -105,7 +105,7 @@ class OfflineGuaranteeTest {
 
     /** Unit tests run with the module directory as cwd; walk up defensively. */
     private fun findAppDir(): File {
-        var dir: File? = File(System.getProperty("user.dir"))
+        var dir: File? = File(System.getProperty("user.dir") ?: ".")
         repeat(5) {
             val candidate = dir ?: return@repeat
             if (File(candidate, "src/main/AndroidManifest.xml").isFile) return candidate

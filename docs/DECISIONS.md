@@ -15,6 +15,8 @@ owner's directives. Everything here is frozen unless the owner explicitly reopen
 | 8 | Vault key hierarchy | Random 32-byte VMK; password and recovery phrase wrap the VMK; notes are encrypted under the VMK | Password change / recovery rotate wrappers only — notes are never re-encrypted. |
 | 9 | Storage encryption | Field-level AES-256-GCM envelopes in Room (no SQLCipher) | Same bar as VaultZero; ciphertext + redacted structural columns only; auditable in-repo format. |
 | 10 | Search | In-memory decrypted index after unlock (title/tags/folder); no blind-index table | No equality leaks on disk; MVP corpus is small and indexed in RAM while unlocked. |
+| 11 | Biometric prompt API | Platform `android.hardware.biometrics.BiometricPrompt` (**Android 9 / API 28+**); `androidx.biometric` used only for availability checks | androidx.biometric 1.2.0-alpha05's prompt requires `FragmentActivity`; the only fragment runtime on the classpath is the legacy 1.2.5 transitive, which we refuse to put in the launch path. Consequence: on API 24–27 the biometric CTA is hidden and password/recovery unlock is used; the Keystore per-use CryptoObject contract is unchanged on 28+. Revisit if a modern Fragment runtime is adopted. |
+| 12 | Recovery-reset semantics | `resetWithRecoveryPhrase()` re-wraps the SAME phrase under a fresh salt; explicit phrase rotation is `rotateRecoveryPhrase(currentPassword)` | Frozen interface returns no new phrase from reset; silently rotating would strand users who wrote the old phrase. Rotation therefore stays a settings action that shows the new phrase once. |
 
 ## Ownership of build scaffolding
 

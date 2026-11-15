@@ -1,0 +1,174 @@
+# NoteZero — encrypted backup envelope format (v1)
+
+**Owner:** data layer. Implementation: `app/src/main/java/com/cipherwell/notezero/backup/BackupFormat.kt`
+(wire format) + `EncryptedNoteRepository.exportBackup`/`importBackup` (credential handling,
+duplicate policy, atomic restore). Tests: `app/src/test/java/com/cipherwell/notezero/data/BackupFormatTest.kt`
+and the backup cases in `EncryptedNoteRepositoryTest.kt`.
+
+The format is a self-contained, versioned, authenticated binary envelope designed for SAF:
+export writes to an `OutputStream`, import reads one `InputStream`. No Android type is
+referenced in `backup/` and the reader needs no seeking, so a `content://` pipe works
+unchanged. The file can be stored/synced by any external tool; it is useless without the
+vault password, the recovery phrase or the backup password.
+
+## 1. Security model
+
+- The payload contains the **decrypted** items and folders (exactly the in-memory model) and
+  is sealed with AES-256-GCM under the source vault's VMK.
+- AAD = `CryptoAad.BACKUP` (`"notezero.backup.v1"`, UTF-8) followed by the **entire header
+  byte sequence** (fixed header + embedded key-envelope block). Every header field is
+  therefore authenticated: changing a count, mode, flag or envelope blob makes payload
+  decryption fail instead of producing a partially-trusted file.
+- Only *wrapped* key material is in the plaintext header: `KeyEnvelope` blobs wrapping the
+  VMK under the source password / source recovery phrase, or under a backup password. The
+  VMK itself is never present.
+- Nothing is written to the destination vault until the whole file has been read,
+  authenticated, decoded and validated. The write is one Room transaction.
+- Reader is hostile-input safe: bounded allocations, strict length checks, no trailing
+  bytes, no exceptions escape (`read`/`decrypt` return `null`).
+
+## 2. Wire layout (big-endian)
+
+```
+┌──────────────────────── header (plaintext, authenticated as AAD) ───────────────────────┐
+│ off  size  field                                                                         │
+│ 0    4     magic "NZBK"                                                                  │
+│ 4    1     formatVersion = 1                                                             │
+│ 5    1     mode: 0 = MODE_VAULT_KEY, 1 = MODE_EXTRA_PASSWORD                            │
+│ 6    1     flags: bit0 password envelope present, bit1 recovery envelope present        │
+│ 7    1     reserved = 0                                                                  │
+│ 8    8     exportedAt  (i64 epoch millis, informational)                                │
+│ 16   4     itemCount   (u32, must match the payload)                                    │
+│ 20   4     folderCount (u32, must match the payload)                                    │
+│ 24   4     envelopeBlockLen (u32, <= 16 KiB)                                            │
+│ 28   n     envelope block:                                                              │
+│             count u8 (<= 4)                                                             │
+│             per envelope: len u16 (<= KeyEnvelope.MAX_BYTES = 1024) + KeyEnvelope bytes │
+└──────────────────────────────────────────────────────────────────────────────────────────┘
+    4        payloadLen (u32)
+    m        sealed payload = iv(12) || AES-256-GCM ciphertext || tag(16)
+```
+
+Total header = `28 + envelopeBlockLen`. The AAD is exactly
+`"notezero.backup.v1".bytes || file[0 until (28 + envelopeBlockLen)]`.
+
+`payloadLen` is *not* part of the AAD, but the reader requires the stream to end exactly at
+`payloadLen` bytes; truncation, appended bytes or a rewritten length fail the structural
+parse (`read` returns null), and any change to the sealed payload fails GCM authentication
+(`decrypt` returns null). Either way, nothing is imported.
+
+### Decrypted payload layout
+
+```
+u8   payloadVersion = 1
+u32  itemCount            (must equal the header's authenticated itemCount)
+u32  folderCount          (must equal the header's authenticated folderCount)
+repeat itemCount:   u32 encodedLen + ItemCodec payload (see docs/DATA-MODEL.md §2)
+repeat folderCount: u32 encodedLen + FolderCodec payload (docs/DATA-MODEL.md §3)
+```
+
+All lengths are bounds-checked against `ItemCodec`/`FolderCodec` field limits and the whole
+payload against ≥ 1 byte of ciphertext per record (empty payloads are allowed: a valid,
+empty vault backups to `itemCount = folderCount = 0`).
+
+## 3. Modes and credentials
+
+| Mode | Header key material | Payload key | Intended restore credential |
+|---|---|---|---|
+| `MODE_VAULT_KEY` (0) | the source vault's own `KeyEnvelope(PASSWORD)` **and** `KeyEnvelope(RECOVERY)` from `vault_meta` | source VMK | **same-vault restore:** no credential (local VMK matches). **Cross-device/cross-vault restore:** the source master password **or** the source 12-word recovery phrase. |
+| `MODE_EXTRA_PASSWORD` (1) | exactly one `KeyEnvelope(PASSWORD)` wrapping the source VMK under a password chosen for this file (fresh 16-byte salt; PBKDF2-HMAC-SHA256 at the exporting app's `kdfIterations`; wrap AAD = `CryptoAad.BACKUP`) | source VMK | the backup password. |
+
+`exportBackup(out, password = null)` produces `MODE_VAULT_KEY` — this is the "phrase-only"
+mode of the UI contract (`NoteRepository` KDoc): the envelope is not additionally
+password-protected and carries both source key wrappers so either credential works. One of
+the two embedded envelopes may be absent in files produced by future versions; at least one
+is required by the writer/reader validation.
+
+`exportBackup(out, password)` produces `MODE_EXTRA_PASSWORD`. The VMK is still the payload
+key (so a restore on the same vault needs no password); the embedded envelope is only a
+transport wrapper for the backup password. `password` is consumed and zeroized by the
+caller-side KDF.
+
+The header embeds only standard `KeyEnvelope` blobs (documented in CRYPTO-SPEC §6) —
+type/version/KDF/iterations/salt/wrapped-VMK — so the parsing rules and iteration bounds
+(`10_000 .. 10_000_000`) are identical to the live vault meta envelopes.
+
+## 4. Import algorithm (implemented by `EncryptedNoteRepository.importBackup`)
+
+Preconditions: the destination vault must be **unlocked** (imports are re-encrypted under
+the local VMK and need the local AAD). Locked ⇒ `null`. The `password` array, when present,
+is consumed/zeroized by the import.
+
+1. Parse + structurally validate the envelope (`BackupFormat.read`). Any failure ⇒ `null`.
+2. Resolve a VMK that can open the payload, in order:
+   1. the current in-memory VMK — proves a same-vault backup and needs no credential;
+   2. if a credential was supplied:
+      - `MODE_EXTRA_PASSWORD`: unwrap the embedded `PASSWORD` envelope using the credential
+        as the backup password (AAD `BACKUP`);
+      - `MODE_VAULT_KEY`: if the credential is exactly 12 valid BIP-39 words, unwrap the
+        embedded `RECOVERY` envelope (AAD `RECOVERY_WRAP`); otherwise treat it as the source
+        master password and unwrap the embedded `PASSWORD` envelope (AAD `VMK_WRAP`).
+   3. no credential / nothing matched ⇒ `null` (indistinguishable from "wrong credential",
+      by design).
+3. Decrypt + decode the payload (`ItemCodec`/`FolderCodec` strict decode). Any failure ⇒
+   `null`; nothing is written.
+4. Classify every record **against the current index and against earlier records in the
+   same file**:
+   - item id not present: import (one row, re-encrypted under the local VMK + `CryptoAad.item`);
+   - item id present with **equal `updatedAt`**: duplicate — counted, never rewritten;
+   - item id present with **different `updatedAt`**: conflict — counted as skipped, never
+     overwritten (neither newer nor older is written; the destination vault always wins);
+   - same id appearing twice in one file: duplicate;
+   - folder id already present or repeated in the file: duplicate;
+   - record that cannot be re-encoded/re-encrypted (defensive): skipped.
+5. Write all accepted rows in a single Room transaction, then update the in-memory index and
+   flows. Return `BackupImportReport(imported, duplicated, skipped, foldersImported)`.
+
+Consequences: importing the same file twice is a no-op (`imported = 0`; items with unchanged
+`updatedAt` count as duplicates). Deleting an item and re-importing the same backup restores
+it. Items edited after the backup was taken are preserved (counted as skipped), so backups
+can never silently roll back newer local work.
+
+## 5. Failure modes (all return null / false, never throw to the UI)
+
+| Input | Result |
+|---|---|
+| empty / arbitrary / non-`NZBK` stream | `read` ⇒ null |
+| truncated stream, bytes appended after payload, wrong `payloadLen` | `read` ⇒ null |
+| unknown format version, mode, flag bit or non-zero reserved byte | `read` ⇒ null |
+| header count/envelope tamper, embedded envelope tamper | parses structurally, `decrypt`/AAD ⇒ null |
+| oversized header count / envelope block (`> 16 KiB`) / file (`> 64 MiB`) | null (OOM guard) |
+| payload byte/tag tamper, wrong VMK, cross-vault without credential | `decrypt` ⇒ null |
+| wrong backup password / wrong source password / wrong source phrase | `importBackup` ⇒ null |
+| import into a locked vault | `importBackup` ⇒ null |
+| export while locked, or any IO/encode failure | `exportBackup` ⇒ false |
+
+## 6. Limits and versioning
+
+| Limit | Value |
+|---|---|
+| Max total stream size accepted | 64 MiB (`MAX_BACKUP_BYTES`) |
+| Max header (fixed + envelope block) | 16 KiB (`MAX_HEADER_BYTES`) |
+| Max embedded key envelopes | 4 |
+| Max one `KeyEnvelope` | 1024 bytes (`KeyEnvelope.MAX_BYTES`) |
+| Max items / folders in one backup | 500 000 / 100 000 |
+| Payload version | 1 |
+| Envelope format version | 1 |
+
+Rules for future versions: bump `FORMAT_VERSION` (or `payloadVersion`) for any change to
+field layout or meaning; add new flags/modes only with a documented mapping, because current
+readers reject unknown values; never change a published AAD string (create a new domain
+string instead). v1 readers will reject every future-version file with `null` rather than
+misinterpret it.
+
+## 7. Interplay with the vault lifecycle
+
+- Backups embed the *current* key envelopes, so a backup keeps opening with the
+  password/phrase that was valid **when it was taken**, even after the live vault changes
+  password or rotates its recovery kit (old backups are not re-encrypted).
+- The payload is sealed under the source VMK, which never changes on password change — an
+  "extra password" backup of the same vault remains importable without the backup password
+  on that vault (local VMK shortcut), which is intended for re-import/undo flows.
+- Backups carry no plaintext titles, bodies, tags, folder names or vault id; a loss of the
+  backup file leaks nothing beyond its existence. Losing every credential for the source
+  vault makes the backup unrecoverable (zero-knowledge, by design).

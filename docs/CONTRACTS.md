@@ -51,7 +51,7 @@ Bip39Recovery.generatePhrase(): List<String>          // 12 unique words
 Bip39Recovery.validatePhrase(phrase): Boolean
 Bip39Recovery.phraseToEntropy(phrase): ByteArray?
 KeyEnvelope(type, iterations, salt, wrappedVmk).toBytes() / KeyEnvelope.fromBytes(bytes)
-BiometricKeyManager(context): canUseBiometrics / isEnrolled / enroll(vmk) / prepareDecrypt() / completeDecrypt / disable
+BiometricKeyManager(context): canUseBiometrics / isEnrolled / prepareEnroll() / completeEnroll(enroll, vmk) / prepareDecrypt() / completeDecrypt / disable
 ```
 
 AAD domain separation (`CryptoAad`):
@@ -68,8 +68,10 @@ AAD domain separation (`CryptoAad`):
 2. **Unlock**: derive KEK, unwrap VMK, keep VMK **in memory only**, load + decrypt item index.
 3. **Change password**: unwrap VMK with old env, wrap with new env, replace row. Notes untouched.
 4. **Recovery reset**: derive recovery KEK, unwrap VMK, wrap under new password env, rotate recovery env + phrase.
-5. **Biometric**: `BiometricKeyManager.enroll(vmk)` while unlocked; UI drives the prompt with the
-   returned cipher. Re-enrolment invalidation → wipe stale wrap, fall back to password.
+5. **Biometric**: enable is two-phase while unlocked — `prepareEnroll()` → BiometricPrompt
+   (CryptoObject) → `completeEnroll(enroll, vmk)`; per-use-auth Keystore keys cannot encrypt without
+   a prompt. Unlock is `prepareDecrypt()` → prompt → `completeDecrypt()`. Re-enrolment invalidation
+   → wipe stale wrap, fall back to password.
 
 ## Data contract (data-layer implements `data.NoteRepository`)
 

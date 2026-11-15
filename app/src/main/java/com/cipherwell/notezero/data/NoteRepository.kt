@@ -1,6 +1,7 @@
 package com.cipherwell.notezero.data
 
 import com.cipherwell.notezero.crypto.BiometricDecrypt
+import com.cipherwell.notezero.crypto.BiometricEnroll
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
@@ -70,8 +71,15 @@ interface NoteRepository {
 
     suspend fun unlock(password: CharArray): UnlockResult
 
-    /** Requires a successful [unlock] before enabling; stores a Keystore-wrapped copy of the VMK. */
-    suspend fun enableBiometricUnlock(): Boolean
+    /**
+     * Enabling biometric unlock is two-phase (Keystore keys with per-use auth cannot
+     * encrypt without a prompt): first [prepareBiometricEnroll], drive a BiometricPrompt
+     * with the returned cipher, then call [completeBiometricEnroll]. Requires an unlocked
+     * vault; returns null/false otherwise.
+     */
+    fun prepareBiometricEnroll(): BiometricEnroll?
+
+    suspend fun completeBiometricEnroll(enroll: BiometricEnroll): Boolean
 
     suspend fun disableBiometricUnlock()
 

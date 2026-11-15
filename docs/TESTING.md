@@ -39,6 +39,19 @@ CI runs `assembleDebug`, `testDebugUnitTest`, and `check-offline.sh --gradle` on
   behind confirmation, clipboard marked sensitive, password fields masked, no plaintext in
   logs, auto-lock triggers on background/timeout.
 
+## Measured baseline (2026-11-15, Phase 1)
+
+| Suite | Command | Result |
+|---|---|---|
+| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **290 tests / 0 failures / 0 errors / 0 skipped** (27 classes) |
+| Instrumented (emulator) | `adb shell am instrument -w com.cipherwell.notezero.test/androidx.test.runner.AndroidJUnitRunner` | **OK (10 tests)** incl. `VaultFlowE2ETest` |
+| Offline guarantee | `./scripts/check-offline.sh --gradle` | exit 0 |
+| Release signing | `apksigner verify --print-certs app-release.apk` | NoteZero upload key SHA-256 `FA:CA:DD:67:…:92:78` |
+
+Per-area counts: crypto 61, data 49, model 43, security 5, ui shell 62, ui notes/editor 70.
+Device E2E also scans the raw SQLite files for plaintext and captures the screenshots in
+`docs/screenshots/`. Full evidence: `docs/VERIFICATION-2026-11-15.md`.
+
 ## Conventions
 
 - Tests must assert behaviour, not existence (`assertTrue(true)` is a review reject).

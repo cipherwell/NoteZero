@@ -2,6 +2,7 @@ package com.cipherwell.notezero
 
 import android.app.Application
 import android.content.Context
+import com.cipherwell.notezero.data.EncryptedNoteRepository
 import com.cipherwell.notezero.data.NoteRepository
 
 /**
@@ -21,7 +22,5 @@ class NoteZeroApp : Application() {
  * and the UI can reason about construction without an Android service locator.
  */
 internal object RepositoryProvider {
-    fun create(context: Context): NoteRepository = TODO(
-        "Lead: replace with EncryptedNoteRepository(context) once data-layer lands",
-    )
+    fun create(context: Context): NoteRepository = EncryptedNoteRepository(context)
 }

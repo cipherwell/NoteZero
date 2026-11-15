@@ -28,8 +28,10 @@ umask 077
 mkdir -p "$KEY_DIR"
 chmod 700 "$KEY_DIR"
 
+# PKCS12 keystores use ONE password for store and key (keypass is ignored), so a
+# different key password would make release signing fail at package time.
 STORE_PASS="$(openssl rand -hex 24)"
-KEY_PASS="$(openssl rand -hex 24)"
+KEY_PASS="$STORE_PASS"
 
 keytool -genkeypair \
   -keystore "$KEYSTORE" \

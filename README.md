@@ -10,14 +10,45 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 [VaultZero](https://github.com/cipherwell/Vault-Zero) with an independent package
 (`com.cipherwell.notezero`), independent signing key and independent threat model.
 
-> Status: **Phase 1 in progress** — security core + notes MVP. The project scaffold,
-> crypto contracts and decision record land first; features are listed in [SPEC.md](SPEC.md).
+> Status: **Phase 1 complete (bootstrap + security core + notes MVP)** — 2026-11-15.
+> Builds green, 290 unit tests + 10 device tests, signed release verified. What ships now,
+> what is deliberately next: see [docs/VERIFICATION-2026-11-15.md](docs/VERIFICATION-2026-11-15.md).
+> Delivery phases are in [SPEC.md](SPEC.md).
+
+
+## What exists today
+
+| Setup (first run) | Unlock | Notes MVP |
+|---|---|---|
+| ![Setup](docs/screenshots/00-setup.png) | ![Unlock](docs/screenshots/00-unlock.png) | ![Notes](docs/screenshots/01-notes-list.png) |
+| **Markdown editor** | **Block preview (checklists tap to toggle)** | **Second note persisted** |
+| ![Editor](docs/screenshots/02-editor-edit.png) | ![Preview](docs/screenshots/03-editor-preview.png) | ![Notes 2](docs/screenshots/04-notes-list-two-notes.png) |
+
+Screenshots are real emulator captures from the instrumented E2E run (debug build with
+`-PallowScreenshots=true`; normal builds set FLAG_SECURE, which makes `screencap` return a
+0-byte file — verified).
+
+## Verified end to end (2026-11-15)
+
+- 290 unit tests / 0 failures; 10 instrumented tests on a real emulator.
+- Real Android crypto: setup → BIP-39 phrase → lock/unlock; **password change leaves note
+  ciphertext byte-identical**; recovery reset invalidates the old password; a raw SQLite scan
+  of the database files (main + WAL + SHM) finds no plaintext title/body/phrase.
+- FLAG_SECURE default-on proof; release APK permission dump: only `USE_BIOMETRIC` (+
+  androidx.core's signature-level receiver guard) — no network, camera, location or storage.
+- Signed release verified with the independent NoteZero upload key; unsigned-release fallback
+  for F-Droid also verified.
+- Full evidence trail incl. commands and hashes:
+  [docs/VERIFICATION-2026-11-15.md](docs/VERIFICATION-2026-11-15.md).
 
 ## Security properties (by construction)
 
 - **No network permissions.** `INTERNET` and `ACCESS_NETWORK_STATE` are stripped from the
-  merged manifest with `tools:node="remove"`, no network library is a dependency, and
+  merged manifest with `tools:node="remove"` (plus the deprecated `USE_FINGERPRINT` the
+  biometric library drags in), no network library is a dependency, and
   `scripts/check-offline.sh` + `OfflineGuaranteeTest` fail the build if that changes.
+  The only app permission left is `USE_BIOMETRIC` plus `androidx.core`'s signature-level
+  dynamic-receiver guard.
 - **Random 256-bit vault master key (VMK).** Notes are AES-256-GCM encrypted under the
   VMK; the VMK is only ever wrapped by your password/recovery phrase, never derived from
   them. Changing the master password re-wraps the VMK and does **not** re-encrypt notes.
@@ -45,7 +76,7 @@ Requires JDK 17 and Android SDK 36 (`compileSdk 36`, `minSdk 24`).
 export JAVA_HOME=/usr/lib/jvm/java-17-openjdk   # JDK 17 is mandatory, 21+ not supported by AGP 9.1
 ./scripts/gen-debug-keystore.sh                 # local debug key (gitignored)
 ./gradlew :app:assembleDebug
-./gradlew :app:testDebugUnitTest
+./gradlew :app:testDebugUnitTest                # 290 tests, 0 failures (2026-11-15)
 ./scripts/check-offline.sh                      # offline guarantee check
 ```
 
@@ -65,7 +96,9 @@ Full instructions (including signed release builds and this machine's exact setu
 | [docs/DATA-MODEL.md](docs/DATA-MODEL.md) | Item/folder envelopes, redaction model |
 | [docs/BACKUP-FORMAT.md](docs/BACKUP-FORMAT.md) | Encrypted backup envelope format |
 | [docs/BUILDING.md](docs/BUILDING.md) | Toolchain, debug/release, signing, reproducibility |
-| [docs/TESTING.md](docs/TESTING.md) | Test strategy and commands |
+| [docs/TESTING.md](docs/TESTING.md) | Test strategy and commands, measured baseline |
+| [docs/VERIFICATION-2026-11-15.md](docs/VERIFICATION-2026-11-15.md) | Phase-1 evidence: builds, 290 unit tests, device E2E, signing, FLAG_SECURE |
+| [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | Dependency policy/inventory (offline-safe only) |
 | [docs/RELEASING.md](docs/RELEASING.md) | Release checklist, F-Droid eligibility |
 
 ## License
