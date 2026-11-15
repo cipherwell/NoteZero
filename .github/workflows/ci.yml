@@ -30,6 +30,10 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # No legacy `tools` package: it was removed from the SDK repository and
+          # makes the action fail. Platform/build-tools come from the next step.
+          packages: 'platform-tools'
 
       - name: Install SDK packages
         run: |
