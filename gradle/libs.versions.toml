@@ -2,7 +2,7 @@
 # Every runtime dependency must be offline-safe: no network client, no telemetry SDK.
 # New dependencies require a security review note in docs/DEPENDENCIES.md (see that file).
 [versions]
-agp = "9.1.1"
+agp = "9.5.1"
 kotlin = "2.2.10"
 googleDevtoolsKsp = "2.3.5"
 coreKtx = "1.18.0"
