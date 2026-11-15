@@ -1,0 +1,42 @@
+# F-Droid build recipe scaffold — NoteZero
+#
+# Status: placeholder until the public repository reaches the 3-month eligibility window
+# (SPEC: "F-Droid eligibility (3-month rule applies from public repo creation)").
+# The release variant is intentionally UNSIGNED when the NoteZero signing env vars are
+# absent, which is what F-Droid's build server expects; F-Droid signs with its own key.
+#
+# Before submission:
+#  - fill in CurrentVersion/CurrentVersionCode for the released tag
+#  - replace the Builds entry with a version at the release tag commit
+#  - add any `prebuild`/`scandelete` steps if the build layout changes
+#  - run `fdroid lint com.cipherwell.notezero` and `fdroid build -v -l com.cipherwell.notezero`
+Categories:
+  - Security
+  - Note
+License: MIT
+AuthorName: Cipherwell
+AuthorEmail: 25090180+cipherwell@users.noreply.github.com
+WebSite: https://github.com/cipherwell/NoteZero
+SourceCode: https://github.com/cipherwell/NoteZero
+IssueTracker: https://github.com/cipherwell/NoteZero/issues
+Changelog: https://github.com/cipherwell/NoteZero/blob/main/CHANGELOG.md
+
+AutoName: NoteZero
+RepoType: git
+Repo: https://github.com/cipherwell/NoteZero.git
+
+Builds:
+  - versionName: 0.1.0
+    versionCode: 1
+    commit: v0.1.0
+    subdir: app
+    gradle:
+      - yes
+    ndk: absent
+    prebuild: echo "NoteZero — no prebuild steps (AGP 9.1.1, JDK 17, SDK 36)"
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+UpdateCheckData: app/build.gradle.kts|versionCode = (\d+)|.|versionName = "([^"]+)"
+CurrentVersion: 0.1.0
+CurrentVersionCode: 1

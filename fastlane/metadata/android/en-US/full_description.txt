@@ -1,0 +1,13 @@
+NoteZero is an offline-first, end-to-end encrypted notes app with a serious local code editor.
+
+Your data never leaves the device: NoteZero requests no network permission at all, has no accounts, no cloud sync and no telemetry. Notes are encrypted with AES-256-GCM under a random 256-bit vault key that is only ever unlocked by your master password, a 12-word recovery phrase or your device biometrics.
+
+Features (building to v1.0):
+- Notes with Markdown editing and rich block preview: headings, lists, checklists, code blocks, quotes, tables
+- Folders, tags, pins, favourites, search, trash and undo
+- A code editor with syntax highlighting for common languages (later phase)
+- Encrypted backups exported to a location you choose
+- Auto-lock, screen protection, sensitive clipboard handling
+- Biometric unlock backed by the Android Keystore
+
+NoteZero is MIT-licensed and reproducibly buildable. Same security bar as the author's VaultZero, but an independent app with its own package and signing key.

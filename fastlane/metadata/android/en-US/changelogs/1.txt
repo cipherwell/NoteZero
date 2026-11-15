@@ -1,0 +1,1 @@
+First bootstrap build (Phase 1): security core and notes MVP skeleton.
