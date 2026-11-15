@@ -76,7 +76,7 @@ u8   payloadVersion = 2
 u32  itemCount            (must equal the header's authenticated itemCount)
 u32  folderCount          (must equal the header's authenticated folderCount)
 u32  attachmentCount      (must equal the header's authenticated attachmentCount)
-repeat itemCount:   u32 encodedLen + ItemCodec payload (payload v2, docs/DATA-MODEL.md §2)
+repeat itemCount:   u32 encodedLen + ItemCodec payload (self-versioned; currently v3, docs/DATA-MODEL.md §2)
 repeat folderCount: u32 encodedLen + FolderCodec payload (docs/DATA-MODEL.md §3)
 repeat attachmentCount:
     u16 noteIdLen       (1..128) + noteId UTF-8

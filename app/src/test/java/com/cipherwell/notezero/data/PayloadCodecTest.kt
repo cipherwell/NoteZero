@@ -123,7 +123,7 @@ class PayloadCodecTest {
         assertNull(ItemCodec.decode(valid + byteArrayOf(0)))
 
         val wrongVersion = valid.copyOf()
-        wrongVersion[4] = 3.toByte()
+        wrongVersion[4] = (ItemCodec.ENVELOPE_VERSION + 1).toByte()
         assertNull(ItemCodec.decode(wrongVersion))
 
         val wrongMagic = valid.copyOf()
@@ -213,7 +213,7 @@ class PayloadCodecTest {
     }
 
     @Test
-    fun `item codec encodes version 2 and still decodes legacy version 1 with no attachments`() {
+    fun `item codec writes the current version and still decodes legacy version 1 with no attachments`() {
         val encoded = ItemCodec.encode(note(title = "legacy", attachments = emptyList()))
         assertEquals(ItemCodec.ENVELOPE_VERSION, encoded[4].toInt())
 

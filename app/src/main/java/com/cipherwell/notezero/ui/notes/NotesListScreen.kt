@@ -61,6 +61,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cipherwell.notezero.data.NoteRepository
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
+import com.cipherwell.notezero.ui.locks.LockBiometricPrompt
+import com.cipherwell.notezero.ui.locks.LockReauthController
+import com.cipherwell.notezero.ui.locks.LockTargetKind
+import com.cipherwell.notezero.ui.locks.LockedTarget
+import com.cipherwell.notezero.ui.locks.ReauthDialog
+import com.cipherwell.notezero.ui.locks.rememberLockReauthController
 import com.cipherwell.notezero.ui.notes.components.FolderRow
 import com.cipherwell.notezero.ui.notes.components.MoveToFolderDialog
 import com.cipherwell.notezero.ui.notes.components.NoteRow
@@ -87,10 +93,15 @@ fun NotesListScreen(
     repository: NoteRepository,
     onOpenSettings: () -> Unit,
     onOpenCode: () -> Unit = {},
+    /** Injectable only for tests; production uses the device presence prompt. */
+    biometricPrompt: LockBiometricPrompt? = null,
 ) {
     val viewModel: NotesViewModel = viewModel(factory = NotesViewModelFactory(repository))
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var editorItemId by rememberSaveable { mutableStateOf<String?>(null) }
+    // One re-auth flow for the whole list: masked rows and folder entries share it, and
+    // it never stores content, only the pending target id until the repository verifies.
+    val reauth = rememberLockReauthController(repository, biometricPrompt)
 
     val openItemId = editorItemId
     if (openItemId != null) {
@@ -98,6 +109,7 @@ fun NotesListScreen(
             repository = repository,
             itemId = openItemId,
             onClose = { editorItemId = null },
+            biometricPrompt = biometricPrompt,
         )
         return
     }
@@ -105,6 +117,7 @@ fun NotesListScreen(
     NotesListContent(
         state = state,
         viewModel = viewModel,
+        reauth = reauth,
         onOpenCode = onOpenCode,
         onOpenEditor = { editorItemId = it },
         onOpenSettings = onOpenSettings,
@@ -116,6 +129,7 @@ fun NotesListScreen(
 private fun NotesListContent(
     state: NotesUiState,
     viewModel: NotesViewModel,
+    reauth: LockReauthController,
     onOpenEditor: (String) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenCode: () -> Unit,
@@ -145,12 +159,33 @@ private fun NotesListContent(
         items(rows, key = { "$keyPrefix${it.item.id}" }) { row ->
             NoteRow(
                 row = row,
-                onClick = { onOpenEditor(row.item.id) },
+                onClick = {
+                    if (row.masked) {
+                        // Tapping a mask must never open the editor: re-authenticate
+                        // first, then open the revealed note.
+                        reauth.request(LockedTarget(row.item.id, LockTargetKind.NOTE)) {
+                            onOpenEditor(row.item.id)
+                        }
+                    } else {
+                        onOpenEditor(row.item.id)
+                    }
+                },
                 onTogglePin = { viewModel.togglePinned(row.item) },
                 onToggleFavorite = { viewModel.toggleFavorite(row.item) },
                 onRename = { renameTarget = row.item },
                 onMove = { moveTarget = row.item },
                 onTrash = { viewModel.moveToTrash(row.item) },
+                onLockToggle = {
+                    when {
+                        !row.item.locked -> viewModel.setItemLocked(row.item, true)
+                        // Removing a lock is a content operation on hidden data: require
+                        // re-auth, then clear the flag.
+                        row.masked -> reauth.request(LockedTarget(row.item.id, LockTargetKind.NOTE)) {
+                            viewModel.setItemLocked(row.item, false)
+                        }
+                        else -> viewModel.setItemLocked(row.item, false)
+                    }
+                },
             )
         }
     }
@@ -330,9 +365,28 @@ private fun NotesListContent(
                 items(state.folders, key = { "folder_${it.folder.id}" }) { row ->
                     FolderRow(
                         row = row,
-                        onClick = { viewModel.openFolder(row.folder.id) },
+                        onClick = {
+                            if (row.masked) {
+                                reauth.request(LockedTarget(row.folder.id, LockTargetKind.FOLDER)) {
+                                    viewModel.openFolder(row.folder.id)
+                                }
+                            } else {
+                                viewModel.openFolder(row.folder.id)
+                            }
+                        },
                         onRename = { renameFolderTarget = row.folder },
                         onDelete = { deleteFolderTarget = row.folder },
+                        onLockToggle = {
+                            when {
+                                !row.folder.locked -> viewModel.setFolderLocked(row.folder, true)
+                                row.masked -> reauth.request(
+                                    LockedTarget(row.folder.id, LockTargetKind.FOLDER),
+                                ) {
+                                    viewModel.setFolderLocked(row.folder, false)
+                                }
+                                else -> viewModel.setFolderLocked(row.folder, false)
+                            }
+                        },
                     )
                 }
                 if (state.folderItems.isNotEmpty()) {
@@ -534,6 +588,9 @@ private fun NotesListContent(
             },
         )
     }
+
+    // Master-password fallback for locked notes/folders (biometric prompt is tried first).
+    ReauthDialog(reauth)
 }
 
 @Composable

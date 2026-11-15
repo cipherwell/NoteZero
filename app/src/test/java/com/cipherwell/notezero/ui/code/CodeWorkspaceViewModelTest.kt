@@ -357,4 +357,85 @@ class CodeWorkspaceViewModelTest {
         assertTrue(state.searchResults.isEmpty())
         assertEquals("target", state.searchQuery)
     }
+    // ---- Locked content must never reach the code workspace --------------------------
+
+    @Test
+    fun `locked code file is hidden until its id is verified`() = runTest(dispatcher) {
+        repository.seedCodeFile(id = "secret", title = "secret.kt", body = "TOKEN_XYZ")
+        repository.seedCodeFile(id = "plain", title = "plain.kt", body = "hello")
+        repository.setItems(
+            repository.items.value.map { if (it.id == "secret") it.copy(locked = true) else it },
+        )
+        val model = viewModel()
+        advanceUntilIdle()
+
+        var state = model.uiState.value
+        assertEquals(1, state.fileCount)
+        assertEquals(1, state.lockedHiddenCount)
+        assertTrue(
+            "locked file title must not appear in the tree",
+            state.rows.none { it is CodeTreeNode.FileNode && it.item.id == "secret" },
+        )
+
+        // Workspace search must not expose locked file content or name.
+        model.toggleSearch()
+        model.setSearchQuery("TOKEN_XYZ")
+        advanceUntilIdle()
+        assertTrue("locked content must not be searchable", model.uiState.value.searchResults.isEmpty())
+        model.setSearchQuery("secret.kt")
+        advanceUntilIdle()
+        assertTrue("locked file name must not be searchable", model.uiState.value.searchResults.isEmpty())
+
+        // After re-auth the workspace reveals it.
+        repository.setVerifiedLockedIds(setOf("secret"))
+        advanceUntilIdle()
+        state = model.uiState.value
+        assertEquals(2, state.fileCount)
+        assertEquals(0, state.lockedHiddenCount)
+        assertTrue(state.rows.any { it is CodeTreeNode.FileNode && it.item.id == "secret" })
+    }
+
+    @Test
+    fun `locked folder hides its code descendants until verified`() = runTest(dispatcher) {
+        repository.seedFolder(id = "parent", name = "Locked")
+        repository.seedFolder(id = "child", name = "Nested", parentId = "parent")
+        repository.seedCodeFile(id = "direct", title = "direct.kt", folderId = "parent")
+        repository.seedCodeFile(id = "nested", title = "nested.kt", folderId = "child")
+        repository.setFolders(
+            repository.folders.value.map { if (it.id == "parent") it.copy(locked = true) else it },
+        )
+        val model = viewModel()
+        advanceUntilIdle()
+
+        var state = model.uiState.value
+        assertEquals(0, state.fileCount)
+        assertEquals(0, state.folderCount)
+        // 1 locked folder + 1 descendant folder + 2 code files = 4 hidden entries.
+        assertEquals(4, state.lockedHiddenCount)
+
+        repository.setVerifiedLockedIds(setOf("parent"))
+        advanceUntilIdle()
+        state = model.uiState.value
+        assertEquals(2, state.fileCount)
+        assertEquals(2, state.folderCount)
+        assertEquals(0, state.lockedHiddenCount)
+    }
+
+    @Test
+    fun `lock verification flow updates the workspace reactively`() = runTest(dispatcher) {
+        repository.seedCodeFile(id = "f1", title = "One.kt", body = "alpha")
+        repository.setItems(repository.items.value.map { it.copy(locked = true) })
+        val model = viewModel()
+        advanceUntilIdle()
+        assertEquals(0, model.uiState.value.fileCount)
+
+        repository.setVerifiedLockedIds(setOf("f1"))
+        advanceUntilIdle()
+        assertEquals(1, model.uiState.value.fileCount)
+
+        repository.setVerifiedLockedIds(emptySet())
+        advanceUntilIdle()
+        assertEquals(0, model.uiState.value.fileCount)
+        assertEquals(1, model.uiState.value.lockedHiddenCount)
+    }
 }

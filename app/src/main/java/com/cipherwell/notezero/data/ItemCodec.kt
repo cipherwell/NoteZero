@@ -18,7 +18,7 @@ import com.cipherwell.notezero.model.ItemKind
  * Encoding (all integers big-endian):
  * ```
  * magic        4 bytes  "NZIT"
- * envelope     1 byte   1 or 2 (2 is written; 1 is still decoded for existing vaults)
+ * envelope     1 byte   1, 2 or 3 (3 is written; 1 and 2 are still decoded)
  * kind         1 byte   ItemKind ordinal
  * flags        1 byte   bit0 folderId present, bit1 pinned, bit2 favourite, bit3 trashed
  * createdAt    8 bytes  i64 epoch millis
@@ -38,10 +38,16 @@ import com.cipherwell.notezero.model.ItemKind
  *   size       8 bytes  i64 (0..AttachmentLimits.MAX_ATTACHMENT_BYTES)
  *   createdAt  8 bytes  i64 epoch millis (>= 0)
  *   sha256    32 bytes  raw SHA-256 (lowercase hex in the model)
+ * -- envelope version 3 appends the lock flag: --
+ * locked       1 byte   0 = unlocked, 1 = locked (anything else is corrupt)
  * ```
- * A version-1 payload has no attachment bytes after the folder id; it decodes to an item
- * with an empty attachment list (no re-encryption/migration is needed: the next save
- * writes version 2).
+ * Version compatibility (no re-encryption/migration; the next save writes the newest
+ * version): a version-1 payload has no attachment list and no lock byte and decodes to
+ * `attachments = emptyList()`, `locked = false`; a version-2 payload keeps its attachment
+ * list and decodes to `locked = false` (pre-lock vaults were never locked); a version-3
+ * payload carries the lock flag. The lock flag is content — it lives inside the GCM
+ * envelope, never in a plaintext Room column, and locking/unlocking does not change the
+ * VMK or the AAD.
  *
  * Decoding fails closed: [decode] returns null on unknown magic/version/flags, truncation,
  * oversized fields, bad attachment metadata or trailing bytes. It never throws and never
@@ -50,7 +56,7 @@ import com.cipherwell.notezero.model.ItemKind
 object ItemCodec {
 
     /** Version written by this implementation. */
-    const val ENVELOPE_VERSION: Int = 2
+    const val ENVELOPE_VERSION: Int = 3
 
     /** Oldest payload version still accepted (pre-attachments vaults). */
     const val MIN_DECODE_VERSION: Int = 1
@@ -144,6 +150,8 @@ object ItemCodec {
                 u64(attachment.createdAt)
                 bytes(sha256)
             }
+            // Envelope version 3 appends the lock flag (content: sealed by the GCM tag).
+            u8(if (item.locked) 1 else 0)
         }.toByteArray()
     }
 
@@ -204,6 +212,15 @@ object ItemCodec {
             } else {
                 emptyList()
             }
+            val locked = if (envelopeVersion >= 3) {
+                when (reader.u8()) {
+                    0 -> false
+                    1 -> true
+                    else -> return null
+                }
+            } else {
+                false
+            }
             reader.requireFullyConsumed()
             Item(
                 id = id,
@@ -219,6 +236,7 @@ object ItemCodec {
                 updatedAt = updatedAt,
                 version = version,
                 attachments = attachments,
+                locked = locked,
             )
         } catch (t: Throwable) {
             null

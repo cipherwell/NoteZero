@@ -54,6 +54,12 @@ import com.cipherwell.notezero.model.MarkdownBlockCodec
 import com.cipherwell.notezero.ui.attachments.AttachmentController
 import com.cipherwell.notezero.ui.attachments.AttachmentStrip
 import com.cipherwell.notezero.ui.attachments.AttachmentViewerScreen
+import com.cipherwell.notezero.ui.locks.LockBiometricPrompt
+import com.cipherwell.notezero.ui.locks.LockTargetKind
+import com.cipherwell.notezero.ui.locks.LockedNoteGate
+import com.cipherwell.notezero.ui.locks.LockedTarget
+import com.cipherwell.notezero.ui.locks.ReauthDialog
+import com.cipherwell.notezero.ui.locks.rememberLockReauthController
 import com.cipherwell.notezero.ui.theme.NoteZeroSpacing
 import com.cipherwell.notezero.ui.theme.NoteZeroType
 import kotlinx.coroutines.launch
@@ -69,6 +75,11 @@ import kotlinx.coroutines.launch
  * screen creates and closes its own.
  *
  * All decrypted content stays in [EditorViewModel] memory; this composable never logs it.
+ *
+ * Locked-content gate (decision #15): if the note is locked and this session has not
+ * re-authenticated for it, the editor renders [LockedNoteGate] **before** creating the
+ * [EditorViewModel] — the note's title/body are never loaded into editor state while it is
+ * masked, and re-arming the lock from anywhere re-renders the gate immediately.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,7 +88,23 @@ fun NoteEditorScreen(
     itemId: String,
     onClose: () -> Unit,
     attachmentController: AttachmentController? = null,
+    /** Injectable only for tests; production uses the device presence prompt. */
+    biometricPrompt: LockBiometricPrompt? = null,
 ) {
+    val items by repository.items.collectAsStateWithLifecycle()
+    val verifiedLockedIds by repository.verifiedLockedIds.collectAsStateWithLifecycle()
+    val reauth = rememberLockReauthController(repository, biometricPrompt)
+    val lockedGate = items.firstOrNull { it.id == itemId }?.locked == true &&
+        itemId !in verifiedLockedIds
+    if (lockedGate) {
+        LockedNoteGate(
+            onReveal = { reauth.request(LockedTarget(itemId, LockTargetKind.NOTE)) },
+            onClose = onClose,
+        )
+        ReauthDialog(reauth)
+        return
+    }
+
     val viewModel: EditorViewModel = viewModel(
         key = "editor_$itemId",
         factory = EditorViewModelFactory(repository, itemId),
@@ -91,8 +118,9 @@ fun NoteEditorScreen(
         onDispose { ownedAttachmentController.close() }
     }
 
-    val items by repository.items.collectAsStateWithLifecycle()
     val attachments: List<AttachmentRef> = remember(items, itemId) {
+        // A locked+unverified note never reaches this branch (gated above), so this list
+        // only ever contains attachment names the session is allowed to see.
         items.firstOrNull { it.id == itemId }?.attachments.orEmpty()
     }
     var viewingAttachment by remember { mutableStateOf<AttachmentRef?>(null) }

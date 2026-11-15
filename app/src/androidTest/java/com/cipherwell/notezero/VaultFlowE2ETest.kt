@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -12,7 +13,10 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ActivityScenario
@@ -254,6 +258,36 @@ class VaultFlowE2ETest {
             saveScreenshot("10-code-editor-search-result")
             compose.onNodeWithTag("code_back").performClick()
             compose.waitForTag("code_workspace", 20_000)
+            // Back in the workspace: the search surface is still open (search wins the back
+            // action), so close it before leaving the workspace.
+            compose.onNodeWithTag("code_search_toggle").performClick()
+            compose.waitForIdle()
+
+            // ---- 6e. Locked note: mask -> re-auth (password fallback) -> reveal ---------
+            compose.onNodeWithTag("code_back").performClick()
+            compose.waitForTag("notes_list", 20_000)
+            // Lock the note itself (the code file is also an item row and may be first by
+            // recency), by long-pressing the row that contains the note title.
+            compose.onNode(
+                hasTestTag("note_row") and hasText(EDITOR_NOTE_TITLE, substring = true),
+            ).performTouchInput { longClick() }
+            compose.waitForTag("note_lock_action", 10_000)
+            compose.onNodeWithTag("note_lock_action").performClick()
+            compose.waitForTag("locked_note_row", 10_000)
+            saveScreenshot("11-locked-note-masked")
+            compose.onNodeWithTag("locked_note_row").performClick()
+            compose.waitForTag("reauth_dialog", 15_000)
+            saveNodeScreenshot("12-reauth-dialog", "reauth_dialog")
+            compose.onNodeWithTag("reauth_password").performClick()
+            compose.onNodeWithTag("reauth_password").performTextInput(String(firstPassword))
+            compose.onNodeWithTag("reauth_confirm").performClick()
+            compose.waitUntil(15_000) {
+                compose.onAllNodesWithTag("locked_note_row").fetchSemanticsNodes().isEmpty()
+            }
+            compose.waitUntil(15_000) {
+                compose.onAllNodesWithText(EDITOR_NOTE_TITLE, substring = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            saveScreenshot("13-locked-note-revealed")
         } finally {
             scenario.close()
         }
@@ -263,6 +297,12 @@ class VaultFlowE2ETest {
         val editorItem = repository.items.value.firstOrNull { it.title == EDITOR_NOTE_TITLE }
         assertTrue("note created in the editor must persist", editorItem != null)
         assertTrue(editorItem!!.body.contains("tap me"))
+        val lockedItem = repository.items.value.firstOrNull { it.title == EDITOR_NOTE_TITLE }
+        assertTrue("locked note must still carry the encrypted lock flag", lockedItem != null && lockedItem.locked)
+        assertTrue(
+            "lock verification must not survive the session/background lock",
+            repository.verifiedLockedIds.value.isEmpty(),
+        )
         val codeItem = repository.items.value.firstOrNull { it.title == CODE_FILE_NAME }
         assertTrue("code file created in the workspace must persist", codeItem != null)
         assertEquals(ItemKind.CODE_FILE, codeItem!!.kind)
@@ -289,8 +329,37 @@ class VaultFlowE2ETest {
             .performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
     }
 
+    /**
+     * Captures every Compose root window (the activity window, plus any dialog/menu window) and
+     * composites them onto one screen-sized bitmap at their window offsets. Compose dialogs and
+     * dropdowns are separate windows, so `onRoot()` alone fails or misses the dialog.
+     */
     private fun saveScreenshot(name: String) {
-        val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
+        compose.waitForIdle()
+        val roots = compose.onAllNodes(isRoot()).fetchSemanticsNodes()
+        if (roots.isEmpty()) return
+        val width = roots.maxOf { it.boundsInWindow.right.toInt() }.coerceAtLeast(1)
+        val height = roots.maxOf { it.boundsInWindow.bottom.toInt() }.coerceAtLeast(1)
+        val full = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(full)
+        roots.indices.forEach { index ->
+            val bounds = roots[index].boundsInWindow
+            val layer = compose.onAllNodes(isRoot())[index].captureToImage().asAndroidBitmap()
+            canvas.drawBitmap(layer, bounds.left, bounds.top, null)
+        }
+        val dir = File(context.getExternalFilesDir(null), "screenshots").apply { mkdirs() }
+        File(dir, "$name.png").outputStream().use { out ->
+            full.compress(Bitmap.CompressFormat.PNG, 100, out)
+        }
+    }
+
+    /**
+     * Captures one semantics node (e.g. an AlertDialog card that lives in its own window where
+     * a full-window composite grab may miss it).
+     */
+    private fun saveNodeScreenshot(name: String, tag: String) {
+        compose.waitForIdle()
+        val bitmap = compose.onNodeWithTag(tag).captureToImage().asAndroidBitmap()
         val dir = File(context.getExternalFilesDir(null), "screenshots").apply { mkdirs() }
         File(dir, "$name.png").outputStream().use { out ->
             bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)

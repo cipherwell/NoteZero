@@ -7,8 +7,8 @@ backup wire format has its own document, [BACKUP-FORMAT.md](BACKUP-FORMAT.md); e
 attachment storage has [ATTACHMENTS.md](ATTACHMENTS.md).
 
 The design rule is simple: **the database stores structure, never content.** Anything a
-user typed (title, body, tags, folder name, parent, pin/favourite/trash flags) is sealed
-inside a per-record AES-256-GCM envelope. The only plaintext fields are random ids, an item
+user typed (title, body, tags, folder name, parent, pin/favourite/trash/lock flags) is
+sealed inside a per-record AES-256-GCM envelope. The only plaintext fields are random ids, an item
 kind enum name, timestamps and the vault's wrapped-key blobs.
 
 ## 1. Room schema (v1)
@@ -41,6 +41,11 @@ Folder names and the parent/tree references are content and are therefore encryp
 tree is reconstructed in memory after unlock. Reparenting (see §6) re-encrypts the affected
 folder envelopes.
 
+The **lock flags** (`Item.locked` / `Folder.locked`) are content as well: they live at the
+end of the existing item/folder envelopes (§2, §3) and there is deliberately **no**
+`locked` column, so a copy of the DB file does not even reveal which records are locked.
+Locking is a visibility gate, not a second encryption layer — see §7.
+
 ### `vault_meta` (singleton, `singleton = 1`)
 
 | Column | SQLite type | Meaning |
@@ -71,15 +76,16 @@ replayed as a recovery wrap (or vice versa) even with the same KEK.
 Versioned big-endian binary payload stored **inside** the item ciphertext. Decoding is
 strict: unknown magic/version/flags, truncation, oversized fields or trailing bytes return
 `null` and the row is treated as corrupt. Limits are enforced on both encode and decode.
-**Version 2** appends the attachment metadata list; **version 1** payloads (pre-attachments
-vaults) still decode to an item with an empty attachment list — no migration or
-re-encryption is needed, the next save writes v2. Full description:
-[ATTACHMENTS.md](ATTACHMENTS.md) §3.
+**Version 2** appends the attachment metadata list, **version 3** appends the lock flag;
+**version 1** payloads (pre-attachments vaults) still decode to an item with an empty
+attachment list and `locked = false`, and **version 2** payloads (pre-lock vaults) decode
+with `locked = false` — no migration or re-encryption is needed, the next save writes v3.
+Attachment metadata is described in [ATTACHMENTS.md](ATTACHMENTS.md) §3.
 
 ```
 offset size field
 0      4    magic "NZIT"
-4      1    envelope version = 1 or 2 (2 is written)
+4      1    envelope version = 1, 2 or 3 (3 is written)
 5      1    kind: ItemKind ordinal (0 = NOTE, 1 = CODE_FILE)
 6      1    flags: bit0 folderId present, bit1 pinned, bit2 favourite, bit3 trashed
             (all other bits must be 0)
@@ -103,19 +109,26 @@ offset size field
                             8 sizeBytes (i64, 0..10 MiB),
                             8 createdAt (i64),
                             32 raw SHA-256 (hex lowercase in the model)
+        -- version 3 only, appended after the attachment list: --
+        1   locked    (0 = unlocked, 1 = locked; any other value is corrupt)
 ```
 
 Payload version table:
 
 | version | written by | attachments | readable |
 |---|---|---|---|
-| 1 | Phase 1–3 builds | empty | yes |
-| 2 | this build | `Item.attachments` | yes |
+| 1 | Phase 1–3 builds | empty | yes (`locked = false`) |
+| 2 | Phase 4 builds | `Item.attachments` | yes (`locked = false`) |
+| 3 | this build | `Item.attachments` | yes (`locked` flag) |
 
 `Item.attachments` is repository-owned metadata: `saveItem` preserves the stored list and
 only `importAttachment`/`deleteAttachment` change it (so a stale editor autosave can never
 add or drop a ref). Attachment **bytes** are not in the payload — they are the encrypted
 `NZAT` blob files described above; only names/MIME/size/SHA-256 live in the envelope.
+
+`Item.locked` is repository-owned the same way (see §7): `saveItem` preserves the stored
+flag and only `setItemLocked` changes it, so an editor autosave with a stale unlocked copy
+cannot silently reveal a locked note.
 
 Why `id` and `kind` appear both in the row and the payload: the AAD binds the *row's*
 plaintext columns to the ciphertext, and the payload repeats them so the repository can
@@ -133,7 +146,7 @@ Same strictness as ItemCodec.
 ```
 offset size field
 0      4    magic "NZFD"
-4      1    envelope version = 1
+4      1    envelope version = 1 or 2 (2 is written)
 5      1    flags: bit0 parentId present (other bits 0)
 6      8    createdAt  (i64 epoch millis)
 14     4    sortOrder  (i32, siblings ordering hint)
@@ -142,7 +155,16 @@ offset size field
         4   nameLen    (u32, <= 8 KiB)
         n   name       (UTF-8)
         2   parentIdLen (u16, <= 128) — only when flags.bit0 is set
+        -- version 2 only, appended after the parent id: --
+        1   locked     (0 = unlocked, 1 = locked; any other value is corrupt)
 ```
+
+Folder payload version table:
+
+| version | written by | lock flag | readable |
+|---|---|---|---|
+| 1 | Phases 1–4 builds | none (decodes to `locked = false`) | yes |
+| 2 | this build | `Folder.locked` | yes |
 
 ## 4. AAD map (what the ciphertext is bound to)
 
@@ -160,7 +182,8 @@ offset size field
 
 State is `VaultStatus.SETUP_REQUIRED → UNLOCKED ⇄ LOCKED`. The VMK is a 32-byte
 `ByteArray` field, memory-only; it is zeroized (`NoteCrypto.wipe`, hard `fill(0)` fallback)
-on `lock()`/`close()`.
+on `lock()`/`close()`. The same calls also clear the session-scoped lock verifications
+and the re-authentication rate limiter (§7).
 
 ### setup
 
@@ -236,6 +259,7 @@ delete-forever/empty-trash removes them, and an unlock-time sweep removes unrefe
 | `trashItem` / `restoreItem` | flag bit toggled | via `saveItem` semantics (version/timestamp bump). |
 | `deleteItemForever` / `emptyTrash` | row(s) deleted | index entries removed. |
 | `setPinned` / `setFavorite` / `moveItem` | flag/folder in payload | `moveItem` rejects an unknown folder id; pin/favourite no-op when unchanged. |
+| `setItemLocked` / `setFolderLocked` | lock byte in the payload (v3 / v2) | Repository-owned flag (a stale `saveItem` cannot change it). Same VMK/AAD, no other row touched; no-op when unchanged; drops that id from `verifiedLockedIds`. |
 | `createFolder` | new row | `sortOrder = max(sibling sortOrder + 1)`; parent must exist. |
 | `renameFolder` | name in payload | blank name rejected; no-op if unchanged. |
 | `deleteFolder` | row deleted | **children are never deleted implicitly**: child folders are re-encrypted with `parentId` = deleted folder's parent, items are re-saved with `folderId` = that parent (root when the deleted folder was a root). |
@@ -243,7 +267,54 @@ delete-forever/empty-trash removes them, and an unlock-time sweep removes unrefe
 `Item.updatedAt`/`Item.createdAt` are authoritative inside the authenticated payload and are
 cross-checked against the structural columns on load; a mismatch is treated as corruption.
 
-## 7. Index loading and corruption policy
+## 7. Locked notes & folders (visibility gate, decision #15)
+
+`Item.locked` / `Folder.locked` are the SPEC "lock note / lock folder" feature. They are a
+**visibility gate, not a second encryption layer**: the content is already sealed under the
+vault VMK with a per-record AAD, so locking only rewrites the record's own envelope with the
+lock byte appended (`ItemCodec` v3 / `FolderCodec` v2). The VMK, the wrapped-key envelopes and
+every other row are untouched — context-menu lock/unlock is a single row write, not a key
+operation.
+
+### Repository API
+
+| Member | Semantics |
+|---|---|
+| `setItemLocked(id, locked)` | Persists the flag inside the item envelope. Returns false when the vault is locked or the id is unknown; true when saved or already in the requested state. Same VMK, same `CryptoAad.item(id, kind)` — no re-keying. |
+| `setFolderLocked(id, locked)` | Same for the folder envelope (`FolderCodec` v2, AAD pseudo-kind `FOLDER`). Descendants are not rewritten; hiding them is a UI concern. |
+| `verifyMasterPassword(password)` | Re-authentication for locked content. Unwraps the stored **password** envelope with the supplied password and compares the VMK to the live one in constant time; the session (status, VMK, index) is unchanged either way. The `CharArray` is wiped on every path. Wrong/blank ⇒ false. Rate limited via the injected clock: failures 1–4 delay the next attempt by 1 s, 2 s, 3 s, 4 s; the 5th consecutive failure opens a 30 s cooldown during which the KDF is not even attempted; success resets the ladder. Limiter state is memory-only and reset when a session starts/ends. Envelope corruption is indistinguishable from a wrong password. |
+| `verifiedLockedIds: StateFlow<Set<String>>` | Notes **and** folders whose locked content may be revealed in this session. Memory-only, never persisted. |
+| `markLockVerified(id)` | Adds an id after a successful biometric/password re-auth. Ignored while the vault is locked (a verification can never survive into the next session). |
+| `clearLockVerifications()` | Re-masks everything ("re-arm locked notes now"). |
+
+### Clearing rules (exact)
+
+`verifiedLockedIds` starts empty and is cleared by:
+
+- `lock()` (manual lock, idle auto-lock, screen-off/background lock, biometric-invalidation lock);
+- `close()`;
+- `onAppBackgrounded()` **when it locks immediately** — a background lock that actually applies;
+- `endExternalActivity()` when it settles a deferred background by locking;
+- `setupVault()` / `unlock()` (every new session starts unverified).
+
+It is deliberately **not** cleared when `beginExternalActivity()` is active: that background
+was caused by the system SAF picker (decision #13), the vault stays unlocked, and the user did
+not leave the app. It is also not cleared by `onAppForegrounded()` (the session continues) or
+by a failed `verifyMasterPassword`. Deleting an item/folder or flipping its lock state drops
+that id as well (hygiene; a re-locked record must be re-verified).
+
+### Search, counts and rendering
+
+The repository still exposes locked records in `items`/`folders` (the `locked` flag is there so
+the UI can draw the mask). It does not hide them, because hiding has to be consistent across
+the list, search, counts, previews and deep links, and that decision belongs next to the render
+state. **Contract for the UI:** a locked record whose id is absent from `verifiedLockedIds`
+must never contribute its title, body, tags, folder path or preview to search results, folder
+lists, counts (including `ItemQueries.tagCounts`/word counts) or the editor; it is rendered as
+a mask ("Locked note", lock icon) and `ItemQueries.filter`/`matchesQuery` must be fed the
+already-masked list (or the masked `Item` copy), never the raw decrypted record.
+
+## 8. Index loading and corruption policy
 
 On unlock, every row is decrypted and decoded. A row is **corrupt** (skipped, counted, never
 surfaced, never crashes the vault) when any of the following holds:
@@ -259,7 +330,7 @@ If the vault-meta envelopes themselves are unreadable the unlock returns `CORRUP
 the vault stays locked (the DB file remains untouched, so a future version can attempt
 repair).
 
-## 8. Backup import/export effects on the model
+## 9. Backup import/export effects on the model
 
 Backup envelopes reuse `ItemCodec`/`FolderCodec` inside a doubly-sealed container (see
 [BACKUP-FORMAT.md](BACKUP-FORMAT.md)). Import re-encrypts every accepted record under the
@@ -278,7 +349,12 @@ from locally created ones. `BackupImportReport` counts:
 The whole file is authenticated before any write, and all writes happen in one Room
 transaction — an import is all-or-nothing for the accepted set.
 
-## 9. Related pure-model helpers (not persisted)
+Backups embed the current item/folder payloads, so the lock flags travel **inside** the
+authenticated records: a restored locked note/folder stays locked, and a restore never
+creates a verification (`verifiedLockedIds` is memory-only and per-session). A v1/v2
+backup from an older build decodes with `locked = false`.
+
+## 10. Related pure-model helpers (not persisted)
 
 `model/ItemQueries.kt` provides the read-side logic shared by the UI: title/preview
 derivation (Markdown-marker stripping), word counts, case-insensitive search over the

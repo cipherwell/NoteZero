@@ -35,12 +35,22 @@
 
 ## Reproducibility
 
-- CI builds releases with the same JDK 17, Gradle 9.3.1 and AGP 9.1.1 pinned in the repo.
-- `dependenciesInfo` metadata is disabled so the AGP dependency blob does not vary.
-- R8 config is static; no build-time generated version strings.
-- Phase 5 target: document flag-for-flag reproduction (`--no-daemon`, `SOURCE_DATE_EPOCH`,
-  `-Pandroid.experimental.enableSourceSetPathsMap=false`) and publish verification docs for
-  F-Droid's reproducible-builds infrastructure.
+**Verified 2026-11-15:** two fresh-copy release builds with `--no-daemon --no-build-cache` and
+`SOURCE_DATE_EPOCH=1763054400` produced **byte-identical signed APKs**. Full methodology,
+pinned toolchain and limitations (AAB not yet claimed): `docs/REPRODUCIBLE-BUILDS.md`.
+
+Verification command (run before tagging a release; record the resulting hashes in
+CHANGELOG/VERIFICATION):
+
+```bash
+set -a; . ~/.cipherwell-release/notezero.env; set +a
+export JAVA_HOME=/usr/lib/jvm/java-17-openjdk
+./scripts/verify-reproducible.sh /tmp/notezero-repro
+```
+
+Also: `dependenciesInfo` metadata is disabled so the AGP dependency blob cannot vary, R8 config
+is static, and no build-time clock/version strings are generated. Earlier differing hashes were
+caused by incremental in-place builds, not by the release pipeline.
 
 ## F-Droid
 

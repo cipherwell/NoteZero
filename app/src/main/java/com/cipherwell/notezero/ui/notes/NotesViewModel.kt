@@ -34,13 +34,15 @@ class NotesViewModel(
         repository.items,
         repository.folders,
         repository.status,
+        repository.verifiedLockedIds,
         controls,
-    ) { items, folders, status, currentControls ->
+    ) { items, folders, status, verifiedLockedIds, currentControls ->
         NotesIndex.build(
             items = items,
             folders = folders,
             controls = currentControls,
             isUnlocked = status == VaultStatus.UNLOCKED,
+            verifiedLockedIds = verifiedLockedIds,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -139,6 +141,9 @@ class NotesViewModel(
     fun moveItem(item: Item, folderId: String?) = mutate { repository.moveItem(item.id, folderId) }
 
     fun renameItem(item: Item, newTitle: String) {
+        // A masked row never reaches this (its menu has no rename), but guard anyway:
+        // saving a masked copy would overwrite the real title with "Locked note".
+        if (!isRevealed(item)) return
         val title = newTitle.trim()
         if (title.isEmpty() || title == item.title) return
         mutate { repository.saveItem(item.copy(title = title)) }
@@ -158,6 +163,30 @@ class NotesViewModel(
     }
 
     fun deleteFolder(folder: Folder) = mutate { repository.deleteFolder(folder.id) }
+
+    // ---- Locked notes & folders (visibility gate; decision #15) --------------
+
+    /** True when this session has re-authenticated for [item] (or it is not locked). */
+    fun isRevealed(item: Item): Boolean =
+        !item.locked || item.id in repository.verifiedLockedIds.value
+
+    /**
+     * Persists the per-note lock flag. Locking drops any verification for the note in the
+     * repository, so the row re-masks immediately; removing a lock while unverified must
+     * be re-authenticated by the caller first (the repository deliberately does not gate
+     * this, see decision #15).
+     */
+    fun setItemLocked(item: Item, locked: Boolean) = mutate {
+        repository.setItemLocked(item.id, locked)
+    }
+
+    /** Persists the per-folder lock flag; descendants follow the folder's visibility. */
+    fun setFolderLocked(folder: Folder, locked: Boolean) = mutate {
+        repository.setFolderLocked(folder.id, locked)
+    }
+
+    /** Re-arms every locked note/folder ("Re-arm locked notes now" / settings action). */
+    fun rearmLocks() = mutate { repository.clearLockVerifications() }
 
     // ---- Internals -----------------------------------------------------------
 

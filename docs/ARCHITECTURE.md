@@ -98,6 +98,12 @@ needs Android (Context, Room, DataStore, Keystore).
    quota while streaming and are atomic (temp+rename, ref only after the blob). Trash keeps
    blobs, delete-forever/empty-trash removes them, and an unlock-time sweep removes only
    unreferenced blobs after a fully clean index load. See [ATTACHMENTS.md](ATTACHMENTS.md).
+9. **Locked content is masked at the source but not hidden by the repository.** The lock
+   flags live inside the authenticated item/folder envelopes (no plaintext column), the
+   `verifiedLockedIds` set is memory-only and session-scoped, and re-authentication never
+   changes the VMK or the ciphertext AAD. The repository keeps exposing the decrypted
+   record (with `locked = true`) so the UI can render a consistent mask; search/counts
+   are fed the masked list. See §5 and [DATA-MODEL.md](DATA-MODEL.md) §7.
 
 ## 3. Runtime data flow
 
@@ -137,7 +143,7 @@ state transitions and `docs/CONTRACTS.md` "Vault lifecycle".
 |---|---|
 | `setupVault(password)` | `randomVmk()` (32 B) → password `KeyEnvelope` (PBKDF2 600k) + recovery `KeyEnvelope` (BIP-39 12 unique words) → insert `vault_meta` → unlock. Returns the phrase **once**; the phrase is never persisted. |
 | `unlock(password)` | unwrap VMK from the password envelope → load/decrypt index → `UNLOCKED`; wrong password → `WRONG_PASSWORD` (no state change); envelope unreadable/out-of-bounds KDF → `CORRUPT_VAULT`. |
-| `lock()` | cancel auto-lock timer, zeroize VMK, clear index flows, `vaultInfo = null`, `LOCKED`. |
+| `lock()` | cancel auto-lock timer, clear lock verifications + re-auth rate limiter, zeroize VMK, clear index flows, `vaultInfo = null`, `LOCKED`. |
 | `changePassword(current, next)` | verify current by unwrapping the password envelope, re-wrap the **same VMK** under a fresh salt; item/folder ciphertext is untouched (byte-identical, asserted). |
 | `resetWithRecoveryPhrase(phrase, newPassword)` | validate + unwrap VMK with the recovery envelope, install a new password envelope and re-wrap the recovery envelope under a fresh salt, then unlock. The phrase itself is **kept valid** — see "Deliberate deviations" below. |
 | `rotateRecoveryPhrase(currentPassword)` | verify password, generate a **new** phrase, replace only the recovery envelope, return the new phrase once (for the settings screen to display). |
@@ -171,6 +177,15 @@ immediately corrects marker/DB disagreement (e.g. DB restored from an old backup
   (`ui/backup/BackupFlowViewModel`) and resumes the transfer via
   `BackupFlowController.onVaultUnlocked()` after the user unlocks, so the chosen file is
   never silently dropped. The deferral itself writes no plaintext and holds no secret.
+- **Locked notes/folders re-arm with the session.** `verifiedLockedIds` (memory-only) is
+  cleared by `lock()`, `close()`, every background lock that actually applies (including
+  screen-off → `onAppBackgrounded`) and every new session (`setupVault`/`unlock`), but not
+  while `beginExternalActivity()` defers the SAF-picker background and not on a plain
+  foreground return. `markLockVerified(id)` is ignored while the vault is locked, so a
+  verification can never be carried into the next session. `verifyMasterPassword`
+  re-authenticates against the stored password envelope without touching the session and
+  is rate limited on the injected clock (1–4 s growing delay, then a 30 s cooldown);
+  the input `CharArray` is wiped on every path. See [DATA-MODEL.md](DATA-MODEL.md) §7.
 - `onAppForegrounded()` re-arms the idle timer when still unlocked.
 - `autoLockMinutes` (0 disables) is persisted in DataStore, clamped to `0..240`, default
   `5`. The timer polls every 10 s against the injected clock; the deterministic decision
@@ -240,6 +255,8 @@ pick the file again. See [BACKUP-FORMAT.md](BACKUP-FORMAT.md) §8.
 | Attachment blob format | `data/AttachmentBlobTest` — `NZAT` layout, AAD binding, tamper/truncation, bounded stream reader, SHA-256 vectors | plain JUnit (pure JVM) |
 | Attachment storage | `data/EncryptedNoteRepositoryAttachmentsTest` — round trip, at-rest plaintext scan, size/count/quota, AAD swaps, tamper+SHA/size mismatch, trash-vs-delete lifecycle, orphan sweep (+corrupt-row guard), locked fail-closed, export, backup v2 same/cross-vault, v1 fixture, missing-blob skip | Robolectric + in-memory Room, real crypto |
 | Repository end-to-end | `data/EncryptedNoteRepositoryTest` — setup/unlock/lock, recovery, AAD swaps, CRUD/folders, auto-lock, redaction, backup import/export | Robolectric + in-memory/on-disk Room, real crypto |
+| Lock payload versions | `data/LockedPayloadCodecTest` — v1/v2 item and v1 folder fixtures decode unlocked, v3/v2 lock byte round-trip, non-boolean byte/truncation/trailing-byte rejection | plain JUnit (pure JVM) |
+| Locked notes & folders | `data/LockedItemsRepositoryTest` — flag persistence across lock/unlock with rewritten envelope + valid AAD, envelope-only storage (column scan + decrypted v3 payload), `saveItem` cannot change the lock, rate limiter with the injected clock (growing delay, 5 → 30 s cooldown), verification clearing (lock/close/background, NOT picker deferral, end-while-backgrounded), memory-only across repository instances, delete hygiene, backup preserves flags | Robolectric + in-memory Room, real crypto |
 
 The repository test injects a `NoteZeroDatabase`, a `VaultPreferences` built on an isolated
 DataStore file, a fake clock and `allowAutoLock`, and uses the contract-minimum KDF
@@ -283,7 +300,15 @@ iterations (`10_000`) so the suite stays fast; production defaults remain 600 00
   `CryptoAad.item(id, kind)` domain string; this keeps a single AAD construction helper and
   gives folder rows id-bound encryption without a crypto-contract change.
 - **Vault count semantics:** `VaultInfo.itemCount`/`folderCount` count all rows including
-  trashed items; the UI's trash screen derives its own view from the flows.
+  trashed and locked items; the UI's screens derive their own (masked) views from the
+  flows. A locked record's existence is therefore not secret (it renders as a masked
+  row); its title/body/tags/preview are, and the UI must filter it out of search and
+  per-screen counts (DATA-MODEL §7).
+- **Locking is a visibility gate, not a second encryption layer** (decision #15): the
+  content stays sealed under the VMK with the same AAD, the flag is content inside the
+  envelope, and the verification set is memory-only. This is deliberate: the threat is
+  shoulder-surfing / handing the unlocked device to someone, not an attacker holding the
+  VMK or the DB file.
 - **Recovery phrases cannot be zeroized in Kotlin.** Passwords arrive as `CharArray` and are
   wiped; the 12-word phrase arrives as `List<String>` (immutable, JVM-interned strings in
   some cases), so the repository cannot wipe it — the recovery UI owns that lifetime and

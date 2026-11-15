@@ -14,6 +14,7 @@ import com.cipherwell.notezero.model.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import java.io.InputStream
 import java.io.OutputStream
 
@@ -55,6 +56,15 @@ class FakeNoteRepository : NoteRepository {
 
     val savedItems: MutableList<Item> = mutableListOf()
 
+    /** Test-only master password used by [verifyMasterPassword]; null = no vault password. */
+    var masterPassword: String? = null
+
+    var verifyMasterPasswordCalls: Int = 0
+        private set
+
+    private val _verifiedLockedIds = MutableStateFlow<Set<String>>(emptySet())
+    override val verifiedLockedIds: StateFlow<Set<String>> = _verifiedLockedIds.asStateFlow()
+
     private var idCounter = 0
 
     // ---- Test helpers --------------------------------------------------------
@@ -80,6 +90,9 @@ class FakeNoteRepository : NoteRepository {
         return clock
     }
 
+    /** Test helper: reveal a locked id without driving a prompt (as the repository does). */
+    fun revealForTest(id: String) = markLockVerified(id)
+
     // ---- Vault lifecycle (no crypto in tests) --------------------------------
 
     override suspend fun setupVault(password: CharArray): List<String> = List(12) { "word$it" }
@@ -104,6 +117,7 @@ class FakeNoteRepository : NoteRepository {
         _status.value = VaultStatus.LOCKED
         _items.value = emptyList()
         _folders.value = emptyList()
+        clearLockVerifications()
     }
 
     override suspend fun changePassword(current: CharArray, next: CharArray): Boolean = true
@@ -153,6 +167,9 @@ class FakeNoteRepository : NoteRepository {
         saveCount += 1
         val existing = itemById(item.id)
         val saved = item.copy(
+            // Mirrors the real repository: only setItemLocked changes the flag, so a stale
+            // editor autosave can never unlock a locked note.
+            locked = existing?.locked ?: item.locked,
             updatedAt = nextClock(),
             version = maxOf(item.version, existing?.version ?: 0L) + 1,
         )
@@ -217,6 +234,47 @@ class FakeNoteRepository : NoteRepository {
         _items.value = _items.value.map {
             if (it.folderId == id) it.copy(folderId = target.parentId, updatedAt = nextClock()) else it
         }
+    }
+
+    // ---- Locked notes & folders (visibility gate; decision #15) --------------
+
+    override suspend fun setItemLocked(id: String, locked: Boolean): Boolean {
+        if (_status.value != VaultStatus.UNLOCKED) return false
+        if (itemById(id) == null) return false
+        mutate(id) {
+            it.copy(locked = locked, updatedAt = nextClock(), version = it.version + 1)
+        }
+        _verifiedLockedIds.update { it - id }
+        return true
+    }
+
+    override suspend fun setFolderLocked(id: String, locked: Boolean): Boolean {
+        if (_status.value != VaultStatus.UNLOCKED) return false
+        if (folderById(id) == null) return false
+        _folders.value = _folders.value.map {
+            if (it.id == id) it.copy(locked = locked) else it
+        }
+        _verifiedLockedIds.update { it - id }
+        return true
+    }
+
+    override suspend fun verifyMasterPassword(password: CharArray): Boolean {
+        verifyMasterPasswordCalls += 1
+        val stored = masterPassword
+        val matches = stored != null && String(password) == stored
+        // Mirrors the real repository: the caller's array is wiped on every path.
+        password.fill('\u0000')
+        return matches
+    }
+
+    override fun markLockVerified(id: String) {
+        if (id.isBlank()) return
+        if (_status.value != VaultStatus.UNLOCKED) return
+        _verifiedLockedIds.update { it + id }
+    }
+
+    override fun clearLockVerifications() {
+        _verifiedLockedIds.value = emptySet()
     }
 
     // ---- Encrypted backup ----------------------------------------------------

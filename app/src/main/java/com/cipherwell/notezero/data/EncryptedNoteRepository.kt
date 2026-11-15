@@ -29,6 +29,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -53,6 +54,10 @@ import javax.crypto.SecretKey
  *    authentication and is skipped.
  *  - Corrupt/tampered rows are skipped and counted ([corruptRowCount]); they never crash
  *    the vault and are never surfaced as plaintext.
+ *  - Locked notes/folders are a **visibility gate**, not a second encryption layer: the
+ *    `locked` flag is content inside the envelope (ItemCodec v3 / FolderCodec v2) and the
+ *    session-scoped [verifiedLockedIds] set is memory-only, cleared on lock/background/
+ *    close. Locking never touches the VMK or the AAD.
  *  - No log line in this file contains titles, bodies, tags, passwords or keys.
  *  - Every suspend entry point dispatches to [ioDispatcher] internally (main-safe).
  *
@@ -147,6 +152,20 @@ class EncryptedNoteRepository(
     /** True when [onAppBackgrounded] happened while an external activity was active. */
     private var backgroundLockDeferred: Boolean = false
 
+    /**
+     * Guards the lock-re-authentication rate limiter ([verificationFailures],
+     * [verificationBlockedUntil]). Small and independent of [mutex]: the slow PBKDF2 step of
+     * [verifyMasterPassword] must not hold the repository mutex, and the limiter is state
+     * about attempts, not about vault content.
+     */
+    private val verificationLock = Any()
+
+    /** Consecutive failed [verifyMasterPassword] attempts in this session (memory only). */
+    private var verificationFailures: Int = 0
+
+    /** Clock deadline before which [verifyMasterPassword] refuses to run the KDF. */
+    private var verificationBlockedUntil: Long = 0L
+
     @Volatile
     private var lastInteractionAt: Long = 0L
 
@@ -169,6 +188,14 @@ class EncryptedNoteRepository(
 
     private val _themeMode = MutableStateFlow(ThemeMode.SYSTEM)
     override val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
+
+    /**
+     * Session-scoped lock verifications (notes + folders). Memory only: never written to
+     * Room, DataStore or a file, so a restart always re-masks. Cleared by [lock], [close],
+     * a background lock that actually applies, and a session (re)start.
+     */
+    private val _verifiedLockedIds = MutableStateFlow<Set<String>>(emptySet())
+    override val verifiedLockedIds: StateFlow<Set<String>> = _verifiedLockedIds.asStateFlow()
 
     /** Number of rows skipped as corrupt/tampered during the last index load (diagnostics only). */
     internal val corruptRowCount: Int get() = corruptRows
@@ -244,6 +271,8 @@ class EncryptedNoteRepository(
                         throw e
                     }
                     markVaultPresent()
+                    clearLockVerificationsInternal()
+                    resetVerificationRateLimit()
                     _status.value = VaultStatus.UNLOCKED
                     armAutoLock()
                     phrase
@@ -265,6 +294,8 @@ class EncryptedNoteRepository(
                     wipeVmkLocked()
                     itemsById.clear()
                     foldersById.clear()
+                    clearLockVerificationsInternal()
+                    resetVerificationRateLimit()
                     publishIndexLocked()
                     _vaultInfo.value = null
                     _status.value = if (presenceFile.exists()) VaultStatus.LOCKED else VaultStatus.SETUP_REQUIRED
@@ -311,6 +342,10 @@ class EncryptedNoteRepository(
                     markVaultPresent()
                     return@withLock UnlockResult.CORRUPT_VAULT
                 }
+                // Clear before publishing UNLOCKED: markLockVerified() is a no-op while the
+                // vault is locked, so no verification can survive into the new session.
+                clearLockVerificationsInternal()
+                resetVerificationRateLimit()
                 _status.value = VaultStatus.UNLOCKED
                 armAutoLock()
                 UnlockResult.SUCCESS
@@ -324,7 +359,12 @@ class EncryptedNoteRepository(
         mutex.withLock {
             autoLockJob?.cancel()
             autoLockJob = null
+            // Wipe first, then clear: markLockVerified() requires a live VMK, so a mark that
+            // interleaves with this lock is either removed by the clear or rejected outright.
+            // A fresh unlock starts from a clean rate-limit state (the password was just proven).
             wipeVmkLocked()
+            clearLockVerificationsInternal()
+            resetVerificationRateLimit()
             itemsById.clear()
             foldersById.clear()
             corruptRows = 0
@@ -652,6 +692,10 @@ class EncryptedNoteRepository(
             }
         }
         if (deferred) return
+        // The background lock applies now: re-mask locked content immediately (before the
+        // async lock() completes) so the UI never shows a verified row for a vault that is
+        // on its way to LOCKED. A deferred (picker) background deliberately does NOT clear.
+        clearLockVerificationsInternal()
         requestLockNow()
     }
 
@@ -681,7 +725,10 @@ class EncryptedNoteRepository(
         }
         // Result arrived before the app came back to the foreground (timeout/process
         // weirdness): the background lock that was deferred must happen now.
-        if (lockNow && _status.value == VaultStatus.UNLOCKED) requestLockNow()
+        if (lockNow && _status.value == VaultStatus.UNLOCKED) {
+            clearLockVerificationsInternal()
+            requestLockNow()
+        }
     }
 
     /** Test/diagnostic hooks: no secret material, exposed as internal for the regression tests. */
@@ -729,6 +776,146 @@ class EncryptedNoteRepository(
         lock()
         return true
     }
+
+    // ---- locked notes & folders (visibility gate; decision #15) ---------------
+
+    override suspend fun setItemLocked(id: String, locked: Boolean): Boolean =
+        withContext(ioDispatcher) {
+            mutex.withLock {
+                val key = vmk ?: return@withLock false
+                val item = itemsById[id] ?: return@withLock false
+                if (item.locked == locked) return@withLock true
+                // Only the payload flag changes; same VMK, same AAD, no key/ciphertext rotation.
+                saveItemLocked(item.copy(locked = locked), key, preserveLock = false)
+                afterItemMutationLocked()
+                // A lock-state change re-arms this id: newly locked content must be masked, and
+                // an unlocked note no longer needs (nor keeps) a verification.
+                _verifiedLockedIds.update { it - id }
+                true
+            }
+        }
+
+    override suspend fun setFolderLocked(id: String, locked: Boolean): Boolean =
+        withContext(ioDispatcher) {
+            mutex.withLock {
+                val key = vmk ?: return@withLock false
+                val folder = foldersById[id] ?: return@withLock false
+                if (folder.locked == locked) return@withLock true
+                val updated = folder.copy(locked = locked)
+                persistFolderLocked(updated, key)
+                foldersById[id] = updated
+                publishIndexLocked()
+                // Descendants are untouched (hiding them is a UI concern) but the folder id
+                // itself loses any verification.
+                _verifiedLockedIds.update { it - id }
+                true
+            }
+        }
+
+    /**
+     * Verifies the master password against the stored password envelope without changing the
+     * session. The expensive KDF runs outside [mutex]; only the constant-time comparison with
+     * the live VMK takes the repository mutex, so a concurrent [lock] cannot halfway wipe the
+     * key under the comparison (a locked vault then yields false without counting a failure).
+     */
+    override suspend fun verifyMasterPassword(password: CharArray): Boolean =
+        withContext(ioDispatcher) {
+            try {
+                if (_status.value != VaultStatus.UNLOCKED) return@withContext false
+                // Blank input is not an attempt: false, no state change, array still wiped.
+                if (isBlankPassword(password)) return@withContext false
+                if (!verificationAttemptAllowedNow()) return@withContext false
+                val meta = try {
+                    vaultMetaDao.get()
+                } catch (e: Exception) {
+                    null
+                } ?: return@withContext recordFailedVerification()
+                val envelope = KeyEnvelope.fromBytes(meta.passwordEnvelope)
+                    ?: return@withContext recordFailedVerification()
+                if (envelope.type != EnvelopeType.PASSWORD) return@withContext recordFailedVerification()
+                if (!isIterationCountAcceptable(envelope.iterations)) {
+                    return@withContext recordFailedVerification()
+                }
+                val candidate = try {
+                    NoteCrypto.unwrapVmk(
+                        envelope.wrappedVmk,
+                        NoteCrypto.deriveKek(password, envelope.salt, envelope.iterations),
+                        CryptoAad.VMK_WRAP.toByteArray(Charsets.UTF_8),
+                    )
+                } catch (e: Exception) {
+                    null
+                }
+                if (candidate == null || candidate.size != NoteCrypto.VMK_LENGTH_BYTES) {
+                    if (candidate != null) NoteCrypto.wipe(candidate)
+                    return@withContext recordFailedVerification()
+                }
+                val matches: Boolean? = try {
+                    mutex.withLock {
+                        val live = vmk ?: return@withLock null
+                        NoteCrypto.constantTimeEquals(candidate, live)
+                    }
+                } finally {
+                    NoteCrypto.wipe(candidate)
+                }
+                // null = the vault locked concurrently: not a credential verdict, no failure.
+                if (matches == null) return@withContext false
+                if (!matches) return@withContext recordFailedVerification()
+                synchronized(verificationLock) {
+                    verificationFailures = 0
+                    verificationBlockedUntil = 0L
+                }
+                true
+            } finally {
+                wipePassword(password)
+            }
+        }
+
+    override fun markLockVerified(id: String) {
+        if (id.isBlank()) return
+        // Never create a verification outside a live unlocked session: it would survive into
+        // the next unlock and reveal locked content without re-authentication. The VMK check
+        // closes the window in which a concurrent lock() has wiped the key (or close() has
+        // shut the session down) but has not published LOCKED yet.
+        synchronized(verificationLock) {
+            if (_status.value != VaultStatus.UNLOCKED || vmk == null) return
+            _verifiedLockedIds.update { it + id }
+        }
+    }
+
+    override fun clearLockVerifications() {
+        clearLockVerificationsInternal()
+    }
+
+    private fun clearLockVerificationsInternal() {
+        synchronized(verificationLock) {
+            _verifiedLockedIds.update { if (it.isEmpty()) it else emptySet() }
+        }
+    }
+
+    private fun resetVerificationRateLimit() {
+        synchronized(verificationLock) {
+            verificationFailures = 0
+            verificationBlockedUntil = 0L
+        }
+    }
+
+    /** False while the growing delay / cooldown from a previous failure is still running. */
+    private fun verificationAttemptAllowedNow(): Boolean =
+        synchronized(verificationLock) { clock() >= verificationBlockedUntil }
+
+    /** Arms the next delay and returns false, so callers can `return recordFailedVerification()`. */
+    private fun recordFailedVerification(): Boolean {
+        synchronized(verificationLock) {
+            verificationFailures += 1
+            verificationBlockedUntil =
+                clock() + LockVerificationPolicy.delayAfterFailure(verificationFailures)
+        }
+        return false
+    }
+
+    /** Empty / whitespace-only / NUL-filled input: rejected without counting as an attempt. */
+    private fun isBlankPassword(password: CharArray): Boolean =
+        password.isEmpty() || password.all { it.isWhitespace() || it == '\u0000' }
 
     // ---- items ---------------------------------------------------------------
 
@@ -789,6 +976,7 @@ class EncryptedNoteRepository(
             requireUnlocked()
             val removed = itemsById.remove(id) ?: return@withLock
             itemDao.deleteById(id)
+            _verifiedLockedIds.update { it - id }
             afterItemMutationLocked()
             // The row is gone: its attachment refs can never be surfaced again, so the blobs
             // are deleted now (best effort; leftovers are removed by the next orphan sweep).
@@ -803,6 +991,7 @@ class EncryptedNoteRepository(
             if (trashed.isEmpty()) return@withLock
             itemDao.deleteByIds(trashed.map { it.id })
             trashed.forEach { itemsById.remove(it.id) }
+            _verifiedLockedIds.update { it - trashed.map { item -> item.id } }
             afterItemMutationLocked()
             trashed.flatMap { it.attachments }.forEach { deleteBlobLocked(it.id) }
         }
@@ -891,6 +1080,7 @@ class EncryptedNoteRepository(
             val newParentId = folder.parentId?.takeIf { foldersById.containsKey(it) }
             folderDao.deleteById(id)
             foldersById.remove(id)
+            _verifiedLockedIds.update { it - id }
             // Children are never deleted implicitly: child folders and items move up to the
             // deleted folder's parent (root when it had none).
             for (child in foldersById.values.toList().filter { it.parentId == id }) {
@@ -1118,6 +1308,8 @@ class EncryptedNoteRepository(
             corruptRows = 0
             attachmentFailures = 0
         }
+        clearLockVerificationsInternal()
+        resetVerificationRateLimit()
         if (ownsDatabase) runCatching { database.close() }
     }
 
@@ -1278,11 +1470,16 @@ class EncryptedNoteRepository(
      * public [saveItem]): the stored refs win over whatever a (possibly stale) editor copy
      * carries, so autosave can never add or drop an attachment. The attachment import /
      * delete paths pass false and are the only code allowed to mutate the list.
+     *
+     * The same rule protects [Item.locked] ([preserveLock] = true): an editor autosave with a
+     * stale `locked=false` copy cannot silently unlock a note. Only [setItemLocked] passes
+     * false, so the lock flag can only be changed through the explicit lock API.
      */
     private suspend fun saveItemLocked(
         item: Item,
         vmkBytes: ByteArray,
         preserveAttachments: Boolean = true,
+        preserveLock: Boolean = true,
     ): Item {
         val existing = itemsById[item.id]
         val now = clock()
@@ -1290,6 +1487,7 @@ class EncryptedNoteRepository(
         val createdAt = if (item.createdAt > 0L) item.createdAt else existing?.createdAt ?: now
         val updatedAt = maxOf(now, (existing?.updatedAt ?: item.updatedAt) + 1L)
         val version = maxOf(existing?.version ?: -1L, item.version) + 1L
+        val locked = if (preserveLock) existing?.locked ?: item.locked else item.locked
         val attachments = when {
             !preserveAttachments -> item.attachments
             existing != null -> existing.attachments
@@ -1305,6 +1503,7 @@ class EncryptedNoteRepository(
             updatedAt = updatedAt,
             version = version,
             attachments = attachments,
+            locked = locked,
         )
         persistItemLocked(saved, vmkBytes)
         itemsById[saved.id] = saved

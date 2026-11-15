@@ -4,25 +4,37 @@ import com.cipherwell.notezero.model.Folder
 
 /**
  * Versioned binary payload stored **inside** the AES-256-GCM folder envelope. Folder
- * names and the tree structure (parent reference) are content, so they never appear in
- * plaintext Room columns; only the folder id/created_at are structural row columns.
+ * names, the tree structure (parent reference) and the lock flag are content, so they never
+ * appear in plaintext Room columns; only the folder id/created_at are structural row columns.
  *
  * Encoding (all integers big-endian):
  * ```
  * magic        4 bytes  "NZFD"
- * envelope     1 byte   1
+ * envelope     1 byte   1 or 2 (2 is written; 1 is still decoded)
  * flags        1 byte   bit0 parentId present (reserved bits must be 0)
  * createdAt    8 bytes  i64 epoch millis
  * sortOrder    4 bytes  i32
  * idLen        2 bytes  u16, then id UTF-8 (1..128)
  * nameLen      4 bytes  u32 bounded by MAX_NAME_BYTES
  * parentIdLen  2 bytes  u16 when flag bit0 set, then parent id UTF-8
+ * -- envelope version 2 appends the lock flag: --
+ * locked       1 byte   0 = unlocked, 1 = locked (anything else is corrupt)
  * ```
+ * A version-1 payload (pre-lock vaults) has no lock byte and decodes to `locked = false`;
+ * no re-encryption/migration is needed because the next save writes version 2. The flag is
+ * content — sealed by the GCM tag, never a plaintext column — and locking a folder does not
+ * change its ciphertext AAD or the vault key.
+ *
  * [decode] fails closed (null) on corruption/tampering and never throws.
  */
 object FolderCodec {
 
-    const val ENVELOPE_VERSION: Int = 1
+    /** Version written by this implementation. */
+    const val ENVELOPE_VERSION: Int = 2
+
+    /** Oldest payload version still accepted (pre-lock vaults). */
+    const val MIN_DECODE_VERSION: Int = 1
+
     const val MAX_PAYLOAD_BYTES: Int = MAX_DECODED_PAYLOAD_BYTES
     const val MAX_ID_BYTES: Int = 128
     const val MAX_NAME_BYTES: Int = 8 * 1024
@@ -50,6 +62,8 @@ object FolderCodec {
             u32(name.size.toLong())
             bytes(name)
             if (parentId != null) lenPrefixedU16(parentId, MAX_ID_BYTES)
+            // Envelope version 2 appends the lock flag (content: sealed by the GCM tag).
+            u8(if (folder.locked) 1 else 0)
         }.toByteArray()
     }
 
@@ -58,7 +72,8 @@ object FolderCodec {
         return try {
             val reader = BinaryReader(payload, MAX_PAYLOAD_BYTES)
             if (reader.u32() != MAGIC) return null
-            if (reader.u8() != ENVELOPE_VERSION) return null
+            val envelopeVersion = reader.u8()
+            if (envelopeVersion !in MIN_DECODE_VERSION..ENVELOPE_VERSION) return null
             val flags = reader.u8()
             if (flags and KNOWN_FLAGS.inv() and 0xFF != 0) return null
             val createdAt = reader.u64()
@@ -71,6 +86,15 @@ object FolderCodec {
             } else {
                 null
             }
+            val locked = if (envelopeVersion >= 2) {
+                when (reader.u8()) {
+                    0 -> false
+                    1 -> true
+                    else -> return null
+                }
+            } else {
+                false
+            }
             reader.requireFullyConsumed()
             Folder(
                 id = id,
@@ -78,6 +102,7 @@ object FolderCodec {
                 parentId = parentId,
                 sortOrder = sortOrder,
                 createdAt = createdAt,
+                locked = locked,
             )
         } catch (t: Throwable) {
             null

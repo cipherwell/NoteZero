@@ -54,7 +54,7 @@ offset size field
 
 Blob size bound: `MAX_BLOB_BYTES = 5 + 12 + 10 MiB + 16` = 10,485,793 bytes.
 
-## 3. Item payload v2 (attachment metadata)
+## 3. Item payload v2 (now v3 after the lock byte; payloads are self-versioned) (attachment metadata)
 
 `ItemCodec` payload **version 2** appends, after the folder-id field:
 

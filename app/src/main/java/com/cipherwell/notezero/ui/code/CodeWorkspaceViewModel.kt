@@ -10,6 +10,7 @@ import com.cipherwell.notezero.data.VaultStatus
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -29,6 +30,8 @@ data class CodeWorkspaceUiState(
     val searchQuery: String = "",
     val searchCaseSensitive: Boolean = false,
     val searchResults: List<CodeSearchMatch> = emptyList(),
+    /** Code files/folders hidden because they are locked and not verified this session. */
+    val lockedHiddenCount: Int = 0,
 ) {
     val isEmpty: Boolean get() = fileCount == 0 && folderCount == 0
 
@@ -64,15 +67,59 @@ class CodeWorkspaceViewModel(
 
     private val searchState = MutableStateFlow(SearchState())
 
-    val uiState: StateFlow<CodeWorkspaceUiState> = combine(
+    /**
+     * Locked content never reaches the code workspace: locked+unverified code files and every
+     * descendant of a locked+unverified folder are removed *before* the tree, counts and
+     * workspace search are computed. This mirrors the notes-list masking (the data layer keeps
+     * decrypted items in memory; the UI is responsible for hiding them).
+     */
+    private data class VisibleContent(
+        val items: List<Item> = emptyList(),
+        val folders: List<Folder> = emptyList(),
+        val hiddenCount: Int = 0,
+        val isUnlocked: Boolean = false,
+    )
+
+    private val visibleContent: Flow<VisibleContent> = combine(
         repository.items,
         repository.folders,
         repository.status,
+        repository.verifiedLockedIds,
+    ) { items, folders, status, verified ->
+        if (status != VaultStatus.UNLOCKED) {
+            VisibleContent()
+        } else {
+            val hiddenFolders = mutableSetOf<String>()
+            var changed = true
+            while (changed) {
+                changed = false
+                folders.forEach { folder ->
+                    val hidden = (folder.locked && folder.id !in verified) ||
+                        (folder.parentId != null && folder.parentId in hiddenFolders)
+                    if (hidden && hiddenFolders.add(folder.id)) changed = true
+                }
+            }
+            val hiddenFileCount = items.count { item ->
+                item.kind == ItemKind.CODE_FILE &&
+                    ((item.locked && item.id !in verified) || item.folderId in hiddenFolders)
+            }
+            VisibleContent(
+                items = items.filterNot { item ->
+                    (item.locked && item.id !in verified) || item.folderId in hiddenFolders
+                },
+                folders = folders.filterNot { it.id in hiddenFolders },
+                hiddenCount = hiddenFileCount + hiddenFolders.size,
+                isUnlocked = true,
+            )
+        }
+    }
+
+    val uiState: StateFlow<CodeWorkspaceUiState> = combine(
+        visibleContent,
         expandedFolderIds,
         searchState,
-    ) { items, folders, status, expanded, search ->
-        val unlocked = status == VaultStatus.UNLOCKED
-        if (!unlocked) {
+    ) { content, expanded, search ->
+        if (!content.isUnlocked) {
             CodeWorkspaceUiState(
                 isUnlocked = false,
                 searchVisible = search.visible,
@@ -82,20 +129,19 @@ class CodeWorkspaceViewModel(
         } else {
             CodeWorkspaceUiState(
                 isUnlocked = true,
-                rows = CodeTree.build(items, folders, expanded, isUnlocked = true),
-                moveTargets = CodeTree.flattenFolders(folders),
-                fileCount = CodeTree.codeFiles(items).size,
-                folderCount = folders.size,
+                rows = CodeTree.build(content.items, content.folders, expanded, isUnlocked = true),
+                moveTargets = CodeTree.flattenFolders(content.folders),
+                fileCount = CodeTree.codeFiles(content.items).size,
+                folderCount = content.folders.size,
                 searchVisible = search.visible,
                 searchQuery = search.query,
                 searchCaseSensitive = search.caseSensitive,
                 searchResults = if (search.query.isBlank()) {
                     emptyList()
                 } else {
-                    // Pure literal search over the decrypted in-memory index; bounded by
-                    // CodeSearch.DEFAULT_LIMIT and never throwing.
-                    CodeSearch.search(items, search.query, search.caseSensitive)
+                    CodeSearch.search(content.items, search.query, search.caseSensitive)
                 },
+                lockedHiddenCount = content.hiddenCount,
             )
         }
     }.stateIn(

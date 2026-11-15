@@ -45,6 +45,7 @@ import com.cipherwell.notezero.ui.components.common.NzBackButton
 import com.cipherwell.notezero.ui.components.common.NzBannerTone
 import com.cipherwell.notezero.ui.components.common.NzBottomSpacer
 import com.cipherwell.notezero.ui.components.common.NzCard
+import com.cipherwell.notezero.ui.locks.LockSettingsSection
 import com.cipherwell.notezero.ui.components.common.NzFormSpacer
 import com.cipherwell.notezero.ui.components.common.NzInfoBanner
 import com.cipherwell.notezero.ui.components.common.NzLoadingOverlay
@@ -208,6 +209,12 @@ fun SettingsScreen(
                         .testTag("settings_lock_now"),
                     enabled = !settings.isWorking,
                 )
+            }
+
+            // ---- Locked content --------------------------------------------
+            if (resolvedBackupRepository != null) {
+                NzFormSpacer(NoteZeroSpacing.l)
+                LockSettingsSection(repository = resolvedBackupRepository)
             }
 
             // ---- Data & backup ----------------------------------------------

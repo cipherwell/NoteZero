@@ -210,3 +210,65 @@ captures from the screenshot-enabled debug build; hashes in git.
 - Chunked/streamed backup format v3 to lift the 64 MiB backup cap for large attachment vaults.
 - Byte-for-byte reproducible release builds; string extraction; F-Droid submission after the
   3-month window (2027-02-15).
+
+---
+
+## 9. Increment 4 (same day): locked notes/folders + reproducible release builds
+
+### Build, tests & signing
+
+| Command | Result |
+|---|---|
+| `./gradlew :app:testDebugUnitTest` | **BUILD SUCCESSFUL — 740 tests, 0 failures, 0 errors, 0 skipped (59 classes)** |
+| `./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -PallowScreenshots=true` | **BUILD SUCCESSFUL** |
+| `adb shell am instrument -w com.cipherwell.notezero.test/…AndroidJUnitRunner` | **OK (10 tests)** incl. locked-note E2E flow |
+| `./scripts/verify-reproducible.sh` (2 clean builds, `--no-daemon --no-build-cache`) | **RESULT: REPRODUCIBLE** — both signed APKs byte-identical |
+| published release APK | `sha256 18254b31924321142b292999cf44fd9ef07e9efe04d6aad366b5196b57845eaa` |
+| release AAB (not yet claimed reproducible) | `sha256 d26bf2167fadb943e64aa995a0ae6a746df085bafd71d0f31773854b43dc6cf5` |
+| `apksigner verify --print-certs` | `CN=Cipherwell, O=Cipherwell, OU=NoteZero`, SHA-256 `FA:CA:DD:67:…:92:78` |
+| normal debug build + `adb exec-out screencap -p` | **0-byte capture** → FLAG_SECURE active |
+| `aapt2 dump permissions` on the release APK | `USE_BIOMETRIC` only (+ androidx.core signature-level receiver guard) |
+| `./scripts/check-offline.sh --gradle` | exit 0 |
+
+### Reproducibility evidence
+
+```
+-- building build-a in /tmp/notezero-repro-final/a
+18254b31924321142b292999cf44fd9ef07e9efe04d6aad366b5196b57845eaa  build-a.apk
+-- building build-b in /tmp/notezero-repro-final/b
+18254b31924321142b292999cf44fd9ef07e9efe04d6aad366b5196b57845eaa  build-b.apk
+RESULT: REPRODUCIBLE — both builds are byte-identical
+```
+
+Pinned environment: JDK 17.0.20.1, Gradle 9.3.1, AGP 9.1.1, Kotlin 2.2.10, SDK android-36,
+build-tools 36.0.0, `SOURCE_DATE_EPOCH=1763054400`, NoteZero upload key, no build cache, two
+different absolute paths. Full method/limits: `docs/REPRODUCIBLE-BUILDS.md`.
+
+### Locked-content coverage (unit + device)
+
+- ItemCodec v1/v2 fixtures decode (`locked=false`, attachments preserved), v3 round-trips the
+  lock flag; FolderCodec v1/v2 same; the flag appears **only** inside the envelope
+  (PRAGMA/decrypted-payload checks + plaintext-row scan).
+- Repository: setItemLocked/setFolderLocked persist and survive lock→unlock; `saveItem` cannot
+  change the stored flag; `verifyMasterPassword` correct/wrong/blank, growing delay 1–4 s and
+  30 s cooldown after 5 failures (injected clock, no real sleeps); verification clears on
+  lock/close/real background stop/screen-off/session start, is **not** cleared by the SAF-picker
+  deferral, and `markLockVerified` requires a live VMK.
+- UI: masked rows hide title/body/tags/paths/attachments, search and aggregates exclude them,
+  folders hide names + descendants, editor gate refuses masked content, re-mask on clearance,
+  settings re-arm; code workspace hides locked files/descendants and reports the hidden count.
+- Device E2E: lock note from row menu → masked "Locked note" row (screenshot 11) → tap →
+  re-auth dialog (screenshot 12, node capture of the AlertDialog window) → master password →
+  note revealed and opened in the editor (screenshot 13) → after session end the lock flag is
+  still set and `verifiedLockedIds` is empty.
+
+### Screenshots
+
+14 PNGs in `docs/screenshots/` (00-setup … 13-locked-note-revealed), all real emulator
+captures from the screenshot-enabled debug build; hashes in git.
+
+### Still open (Phase 5)
+
+- AAB byte-equality and cross-toolchain reproducibility (same script can be extended).
+- String extraction to `res/values/strings.xml` for translation; store assets/metadata polish.
+- Audit/pentest pass and F-Droid submission after the 3-month window (2027-02-15).

@@ -3,6 +3,67 @@
 All notable changes to NoteZero are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [Unreleased] — Locked notes/folders + reproducible release builds (2026-11-15, increment 4)
+
+### Added
+
+**Locked notes & folders (last missing SPEC security/UX feature)**
+- `Item.locked` / `Folder.locked` are content: they live **inside** the AES-GCM envelope
+  (`ItemCodec` payload v3, `FolderCodec` v2; v1/v2 still decode with defaults, no migration).
+  `saveItem` preserves the stored lock flag, so a stale editor autosave can never unlock.
+- Masking: locked+unverified notes render a content-free "Locked note" row (no title, preview,
+  tags, folder path or attachment names); search, tag chips and content aggregates exclude
+  them. Locked folders hide their name and descendants until verified.
+- Re-auth: device biometric presence prompt (platform `BiometricPrompt` without a
+  CryptoObject — a visibility gate; content stays VMK-encrypted) with master-password
+  fallback. `verifyMasterPassword()` compares the unwrapped VMK in constant time with rate
+  limiting (1–4 s growing delay, 30 s cooldown after 5 failures) and wipes the input array.
+- Verification is memory-only: cleared on lock, real background stop/screen-off, manual lock
+  and session end — but **not** when an SAF picker defers the background lock. Backup/restore
+  preserves lock flags and never verification.
+- Code workspace defense in depth: locked+unverified code files and all descendants of a
+  locked+unverified folder are filtered out before tree/counts/search, with a
+  "N locked item(s) hidden — verify in Notes" hint (DECISIONS #16).
+- Settings: "Locked notes & folders" section with "Re-arm locked notes now"
+  (`settings_relock`); note/folder row menus gain Lock/Remove lock.
+- Docs: DECISIONS #15 (lock semantics, threat model) and #16 (code-workspace hiding),
+  DATA-MODEL version tables, ARCHITECTURE session re-arm, THREAT-MODEL handoff/forensic rows,
+  CONTRACTS-PHASE5.
+
+**Reproducible release builds (Phase 5)**
+- `scripts/verify-reproducible.sh`: two clean builds from two **different absolute paths**,
+  pinned `SOURCE_DATE_EPOCH`, `--no-daemon --no-build-cache`, then byte comparison of the
+  signed APKs (plus per-entry diff report on mismatch).
+- **Measured: byte-identical APKs** (`sha256 18254b31…5eaa`), including the APK Signing Block;
+  methodology, pinned toolchain and limits (AAB equality not claimed) in
+  `docs/REPRODUCIBLE-BUILDS.md`; RELEASING links the verification command.
+
+### Verified (measured)
+
+- **740 unit tests / 0 failures** (59 classes): data 123 (incl. 24 lock tests), code engine 139,
+  ui code 103 (incl. locked-content hiding), ui notes 57, ui editor 45, ui locks 18,
+  crypto 61, model 43, backup/settings 37, attachments 47, security 5, other UI 62.
+- **10 instrumented tests OK** on the emulator; `VaultFlowE2ETest` now also covers: lock a note
+  from its row menu → masked "Locked note" row → tap → re-auth dialog → master password →
+  revealed note opens in the editor; the encrypted lock flag survives the session and
+  verification does not.
+- **Reproducible APK**: two independent clean builds byte-identical
+  (`18254b31…5eaa`); signed with the NoteZero upload key (`FA:CA:DD:67:…:92:78`).
+  AAB (not yet claimed reproducible): `d26bf216…6cf5`.
+- FLAG_SECURE re-verified (`screencap` 0 bytes on the normal build); release permissions still
+  `USE_BIOMETRIC` only; `check-offline.sh` green; 0 TODO/Log/hex-outside-tokens/network imports.
+- 14 real-emulator screenshots committed (00-setup … 13-locked-note-revealed).
+
+### Notes / known limits
+
+- Lock is a **visibility gate**, not a second encryption layer: locked content is still under
+  the vault VMK; the threat addressed is shoulder-surfing/handoff, not a fully compromised
+  unlocked device (documented in THREAT-MODEL residual risks).
+- Locked code files can only arise via restore/backup; the code workspace hides them and points
+  to Notes for re-auth (no second re-auth surface).
+- AAB byte equality and cross-toolchain reproducibility remain open Phase-5 items; string
+  extraction and store assets are still pending. F-Droid window opens 2027-02-15.
+
 ## [Unreleased] — Phase 4 attachments + Phase 3 polish (2026-11-15, increment 3)
 
 ### Added

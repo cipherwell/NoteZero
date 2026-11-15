@@ -155,6 +155,15 @@ private fun CodeTreeContent(
                             style = NoteZeroType.Caption,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        if (state.lockedHiddenCount > 0) {
+                            Text(
+                                text = "${state.lockedHiddenCount} locked item(s) hidden — " +
+                                    "verify in Notes",
+                                style = NoteZeroType.Caption,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.testTag(CodeTags.LOCKED_HIDDEN),
+                            )
+                        }
                     }
                 },
                 actions = {

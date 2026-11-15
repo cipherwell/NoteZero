@@ -2,6 +2,7 @@ package com.cipherwell.notezero.ui.notes
 
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
+import com.cipherwell.notezero.ui.locks.LockVisibility
 
 /** Top-level destination inside the notes surface. Settings is rendered by ui-shell. */
 enum class NotesSection {
@@ -26,7 +27,14 @@ data class NotesControls(
 /** A decrypted note plus its resolved folder path, ready to render. */
 data class NoteRowModel(
     val item: Item,
+    /** Null for masked rows: a locked note must not leak its folder path. */
     val folderPath: String?,
+    /**
+     * True when the note is locked and this session has not re-authenticated for it. The
+     * [item] is then a content-free mask (see [LockVisibility.maskItem]) and the row must
+     * not be opened in the editor.
+     */
+    val masked: Boolean = false,
 )
 
 /** A folder as rendered in the Folders tab. */
@@ -35,6 +43,8 @@ data class FolderRowModel(
     val depth: Int,
     val itemCount: Int,
     val childFolderCount: Int,
+    /** True when the folder is locked+unverified: name/counts are masked, children hidden. */
+    val masked: Boolean = false,
 )
 
 /** Everything the notes list needs for one frame. Immutable, built by [NotesIndex]. */
@@ -83,6 +93,7 @@ object NotesIndex {
         folders: List<Folder>,
         controls: NotesControls,
         isUnlocked: Boolean,
+        verifiedLockedIds: Set<String> = emptySet(),
     ): NotesUiState {
         if (!isUnlocked) {
             return NotesUiState(
@@ -95,56 +106,96 @@ object NotesIndex {
             )
         }
 
-        val folderById = folders.associateBy { it.id }
-        val live = items.filterNot { it.trashed }
-        val trashed = items.filter { it.trashed }.sortedWith(NEWEST_FIRST)
+        // Locked folders hide themselves and every descendant; locked notes are masked
+        // in place. Both decisions come from the repository's memory-only session set.
+        val hiddenFolderIds = LockVisibility.hiddenFolderIds(folders, verifiedLockedIds)
+        val maskedFolderIds = folders
+            .filter { LockVisibility.isFolderMasked(it, verifiedLockedIds) }
+            .mapTo(mutableSetOf()) { it.id }
+        // A locked folder itself stays visible as a mask row (it is the re-auth entry
+        // point); only its descendants are hidden. A hidden non-root is never listed.
+        val visibleFolders = folders.filterNot {
+            it.id in hiddenFolderIds && it.id !in maskedFolderIds
+        }
+        val folderById = visibleFolders.associateBy { it.id }
+        val contentItems = items.filterNot { item ->
+            item.folderId?.let { it in hiddenFolderIds } == true
+        }
+        val live = contentItems.filterNot { it.trashed }
+        val trashed = contentItems.filter { it.trashed }.sortedWith(NEWEST_FIRST)
         val tagKey = controls.activeTag?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
 
-        val tagFiltered = if (tagKey == null) {
-            live
-        } else {
-            live.filter { item -> item.tags.any { it.trim().lowercase() == tagKey } }
-        }
-        val visible = if (controls.favoritesOnly) tagFiltered.filter { it.favorite } else tagFiltered
+        // Rows are built from masked copies only: no preview/body/tag/path of a locked,
+        // unverified note ever reaches the UI state. Content-derived work (search, tags)
+        // uses [revealedLive], which excludes masked notes entirely.
+        val displayedLive = live.map { LockVisibility.maskItem(it, verifiedLockedIds) }
+        val revealedLive = live.filterNot { LockVisibility.isItemMasked(it, verifiedLockedIds) }
 
-        val pinned = rows(visible.filter { it.pinned }.sortedWith(NEWEST_FIRST), folderById)
+        val tagFilteredDisplayed = if (tagKey == null) {
+            displayedLive
+        } else {
+            // Masked rows carry no tags, so their real tags can never match a filter.
+            displayedLive.filter { item -> item.tags.any { it.trim().lowercase() == tagKey } }
+        }
+        val visible = if (controls.favoritesOnly) {
+            tagFilteredDisplayed.filter { it.favorite }
+        } else {
+            tagFilteredDisplayed
+        }
+
+        val pinned = rows(visible.filter { it.pinned }.sortedWith(NEWEST_FIRST), folderById, verifiedLockedIds)
         val favorites = rows(
             visible.filter { it.favorite && !it.pinned }.sortedWith(NEWEST_FIRST),
             folderById,
+            verifiedLockedIds,
         )
         val recent = rows(
             visible.filter { !it.pinned && !it.favorite }.sortedWith(NEWEST_FIRST),
             folderById,
+            verifiedLockedIds,
         )
 
         val query = controls.query.trim()
+        val searchPool = if (tagKey == null) {
+            revealedLive
+        } else {
+            revealedLive.filter { item -> item.tags.any { it.trim().lowercase() == tagKey } }
+        }.let { if (controls.favoritesOnly) it.filter { item -> item.favorite } else it }
         val searchResults = if (query.isEmpty()) {
             emptyList()
         } else {
+            // Masked notes are not searchable at all (their placeholder title is not
+            // indexed either): search must never confirm what a locked note contains.
             rows(
-                tagFiltered
+                searchPool
                     .filter { item -> matchesQuery(item, folderPathLabel(folderById, item.folderId), query) }
                     .sortedWith(NEWEST_FIRST),
                 folderById,
+                verifiedLockedIds,
             )
         }
 
-        val childFolders = folders
-            .filter { it.parentId == controls.currentFolderId }
+        // Re-masking while inside a locked folder falls back to the root listing.
+        val currentFolderId = controls.currentFolderId?.takeUnless { it in hiddenFolderIds }
+        val childFolders = visibleFolders
+            .filter { it.parentId == currentFolderId }
             .sortedWith(compareBy({ it.sortOrder }, { it.name.lowercase() }))
             .map { folder ->
+                val masked = LockVisibility.isFolderMasked(folder, verifiedLockedIds)
                 FolderRowModel(
-                    folder = folder,
+                    folder = LockVisibility.maskFolder(folder, verifiedLockedIds),
                     depth = 0,
-                    itemCount = live.count { it.folderId == folder.id },
-                    childFolderCount = folders.count { it.parentId == folder.id },
+                    itemCount = if (masked) 0 else live.count { it.folderId == folder.id },
+                    childFolderCount = if (masked) 0 else visibleFolders.count { it.parentId == folder.id },
+                    masked = masked,
                 )
             }
 
         val folderItems = rows(
-            live.filter { it.folderId == controls.currentFolderId }
+            live.filter { it.folderId == currentFolderId }
                 .sortedWith(compareByDescending<Item> { it.pinned }.then(NEWEST_FIRST)),
             folderById,
+            verifiedLockedIds,
         )
 
         return NotesUiState(
@@ -152,17 +203,19 @@ object NotesIndex {
             query = controls.query,
             activeTag = controls.activeTag,
             favoritesOnly = controls.favoritesOnly,
-            currentFolderId = controls.currentFolderId,
+            currentFolderId = currentFolderId,
             pinned = pinned,
             favorites = favorites,
             recent = recent,
             searchResults = searchResults,
-            trash = rows(trashed, folderById),
-            tags = collectTags(live),
+            trash = rows(trashed, folderById, verifiedLockedIds),
+            tags = collectTags(revealedLive),
             folders = childFolders,
             folderItems = folderItems,
-            breadcrumb = folderPath(folders, controls.currentFolderId),
-            allFolders = flattenFolders(folders),
+            breadcrumb = folderPath(visibleFolders, currentFolderId),
+            // Locked+unverified folders are not valid move targets (and their names are
+            // masked), so the picker only lists revealed folders.
+            allFolders = flattenFolders(visibleFolders.filterNot { it.id in maskedFolderIds }),
             isUnlocked = true,
             totalNotes = live.size,
             trashCount = trashed.size,
@@ -262,7 +315,13 @@ object NotesIndex {
     private fun rows(
         items: List<Item>,
         folderById: Map<String, Folder>,
+        verifiedLockedIds: Set<String>,
     ): List<NoteRowModel> = items.map { item ->
-        NoteRowModel(item = item, folderPath = folderPathLabel(folderById, item.folderId))
+        val masked = LockVisibility.isItemMasked(item, verifiedLockedIds)
+        NoteRowModel(
+            item = if (masked) LockVisibility.maskItem(item, verifiedLockedIds) else item,
+            folderPath = if (masked) null else folderPathLabel(folderById, item.folderId),
+            masked = masked,
+        )
     }
 }

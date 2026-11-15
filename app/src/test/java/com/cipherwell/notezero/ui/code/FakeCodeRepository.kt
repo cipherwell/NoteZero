@@ -44,6 +44,9 @@ class FakeCodeRepository : NoteRepository {
     private val _themeMode = MutableStateFlow(ThemeMode.SYSTEM)
     override val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
 
+    private val _verifiedLockedIds = MutableStateFlow<Set<String>>(emptySet())
+    override val verifiedLockedIds: StateFlow<Set<String>> = _verifiedLockedIds.asStateFlow()
+
     // ---- Test knobs ---------------------------------------------------------
 
     /** Monotonic fake clock for createdAt/updatedAt. */
@@ -69,6 +72,11 @@ class FakeCodeRepository : NoteRepository {
         _folders.value = folders
     }
 
+    /** Simulates a successful re-auth for locked content ids (notes/folders). */
+    fun setVerifiedLockedIds(ids: Set<String>) {
+        _verifiedLockedIds.value = ids
+    }
+
     fun setStatus(status: VaultStatus) {
         _status.value = status
         if (status != VaultStatus.UNLOCKED) {
@@ -89,6 +97,7 @@ class FakeCodeRepository : NoteRepository {
         folderId: String? = null,
         trashed: Boolean = false,
         version: Long = 1L,
+        locked: Boolean = false,
     ): Item {
         val item = Item(
             id = id,
@@ -100,6 +109,7 @@ class FakeCodeRepository : NoteRepository {
             createdAt = clock,
             updatedAt = clock,
             version = version,
+            locked = locked,
         )
         _items.value = _items.value + item
         return item
@@ -130,6 +140,7 @@ class FakeCodeRepository : NoteRepository {
         name: String = "Projects",
         parentId: String? = null,
         sortOrder: Int = 0,
+        locked: Boolean = false,
     ): Folder {
         val folder = Folder(
             id = id,
@@ -137,6 +148,7 @@ class FakeCodeRepository : NoteRepository {
             parentId = parentId,
             sortOrder = sortOrder,
             createdAt = clock,
+            locked = locked,
         )
         _folders.value = _folders.value + folder
         return folder

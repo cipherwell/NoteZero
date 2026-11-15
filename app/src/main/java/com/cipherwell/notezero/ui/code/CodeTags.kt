@@ -17,6 +17,8 @@ object CodeTags {
     const val FILE_ROW = "code_file_row"
     const val FOLDER_ROW = "code_folder_row"
     const val EMPTY_STATE = "code_empty_state"
+    /** Shown when locked+unverified code files/folders are hidden from the workspace. */
+    const val LOCKED_HIDDEN = "code_locked_hidden"
     const val FILE_MORE = "code_file_more"
     const val FOLDER_MORE = "code_folder_more"
 

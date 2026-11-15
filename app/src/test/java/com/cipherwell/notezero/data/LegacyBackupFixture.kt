@@ -72,7 +72,7 @@ internal object LegacyBackupFixture {
                 lenPrefixedU32(legacyV1ItemPayload(item), ItemCodec.MAX_PAYLOAD_BYTES)
             }
             for (folder in folders) {
-                lenPrefixedU32(FolderCodec.encode(folder), FolderCodec.MAX_PAYLOAD_BYTES)
+                lenPrefixedU32(legacyV1FolderPayload(folder), FolderCodec.MAX_PAYLOAD_BYTES)
             }
         }.toByteArray()
 
@@ -93,14 +93,23 @@ internal object LegacyBackupFixture {
     }
 
     /**
-     * Rebuilds the ItemCodec version-1 payload from a v2 encoding: drop the appended u16
-     * attachment count (always 0 for fixture items) and set the envelope version byte to 1.
+     * Rebuilds the ItemCodec version-1 payload from a current encoding: drop the appended
+     * attachment count (u16, always 0 for fixture items) **and** the v3 lock byte, then set
+     * the envelope version byte to 1.
      */
     private fun legacyV1ItemPayload(item: Item): ByteArray {
         val encoded = ItemCodec.encode(item)
-        val withoutAttachmentList = encoded.copyOf(encoded.size - 2)
-        withoutAttachmentList[4] = 1
-        return withoutAttachmentList
+        val withoutV2AndV3Suffix = encoded.copyOf(encoded.size - 3)
+        withoutV2AndV3Suffix[4] = 1
+        return withoutV2AndV3Suffix
+    }
+
+    /** Rebuilds the FolderCodec version-1 payload from a current encoding (drop the v2 lock byte). */
+    private fun legacyV1FolderPayload(folder: Folder): ByteArray {
+        val encoded = FolderCodec.encode(folder)
+        val withoutLockByte = encoded.copyOf(encoded.size - 1)
+        withoutLockByte[4] = 1
+        return withoutLockByte
     }
 
     /** Writes [bytes] to an [OutputStream] with the same semantics as a SAF stream. */

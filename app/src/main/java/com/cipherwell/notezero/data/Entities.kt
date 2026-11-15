@@ -8,10 +8,12 @@ import androidx.room.PrimaryKey
  * Room row for one vault item. This is the entire plaintext-on-disk surface of an item:
  * a random id, its kind, the two structural timestamps and the AES-256-GCM envelope.
  *
- * The title, body, tags, folder reference and pinned/favourite/trash flags all live
- * inside [ciphertext] (see [ItemCodec]); there is intentionally no searchable plaintext
- * column. A row cannot be decrypted without the VMK, and its AAD is bound to id + kind
- * (`CryptoAad.item`) so swapping ciphertext between rows fails authentication.
+ * The title, body, tags, folder reference, pinned/favourite/trash flags and the lock flag
+ * all live inside [ciphertext] (see [ItemCodec]); there is intentionally no searchable
+ * plaintext column and no plaintext `locked` column either, so a copy of the DB cannot
+ * even tell which notes are locked. A row cannot be decrypted without the VMK, and its
+ * AAD is bound to id + kind (`CryptoAad.item`) so swapping ciphertext between rows fails
+ * authentication.
  *
  * [toString] is redacted so a stray log/exception dump can never print envelope bytes.
  */
@@ -54,7 +56,7 @@ data class ItemEntity(
 
 /**
  * Room row for one folder. Only the folder id/created_at are structural; the name, parent
- * reference and sort order live inside [ciphertext] (see [FolderCodec]).
+ * reference, sort order and lock flag live inside [ciphertext] (see [FolderCodec]).
  */
 @Entity(tableName = "folders")
 data class FolderEntity(

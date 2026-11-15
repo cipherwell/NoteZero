@@ -7,9 +7,13 @@ import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
 import com.cipherwell.notezero.model.ThemeMode
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.InputStream
 import java.io.OutputStream
+
+/** Shared empty verification set: the fail-secure default of [NoteRepository.verifiedLockedIds]. */
+private val NO_LOCK_VERIFICATIONS: StateFlow<Set<String>> = MutableStateFlow(emptySet())
 
 /** High-level vault lifecycle state. The UI routes on this. */
 enum class VaultStatus {
@@ -228,6 +232,85 @@ interface NoteRepository {
     /** Deletes a folder; its children move to the folder's parent (never deleted implicitly). */
     suspend fun deleteFolder(id: String)
 
+    // ---- Locked notes & folders (visibility gate; decision #15) --------------
+
+    /**
+     * Locks/unlocks one note and persists the flag **inside** the item envelope
+     * (`ItemCodec` payload v3). Locking never changes the VMK and never changes the item
+     * ciphertext AAD: the content stays sealed exactly as before, this flag only tells the
+     * UI to mask it until the session re-authenticates for [id].
+     *
+     * The repository owns the flag like attachment metadata: `saveItem` preserves the
+     * stored value, so an editor autosave with a stale copy can never unlock a locked note.
+     * Changing the flag drops any verification for [id] (locking re-masks; unlocking makes
+     * the verification moot).
+     *
+     * Returns false when the vault is locked or [id] is unknown; true when the flag is
+     * saved or already in the requested state. Callers are expected to have re-authenticated
+     * before unlocking (the repository does not gate removal on verification).
+     *
+     * Default is fail-secure (`false`) for test doubles / alternative implementations.
+     */
+    suspend fun setItemLocked(id: String, locked: Boolean): Boolean = false
+
+    /**
+     * Locks/unlocks one folder and persists the flag inside the folder envelope
+     * (`FolderCodec` payload v2). Descendants are not modified: hiding them is the UI's
+     * job while the folder (or an ancestor) is locked and unverified. Same ownership and
+     * fail-secure rules as [setItemLocked].
+     */
+    suspend fun setFolderLocked(id: String, locked: Boolean): Boolean = false
+
+    /**
+     * Re-authentication for locked content: verifies [password] against the stored master
+     * (password) `KeyEnvelope` **without changing the session** — the vault stays unlocked,
+     * the VMK is untouched. The unwrapped VMK is compared to the live one in constant time.
+     *
+     * Rate limiting (injected clock, deterministic): after a wrong non-blank password the
+     * next attempt is delayed by a growing delay (1 s, 2 s, 3 s, 4 s for failures 1–4);
+     * the 5th consecutive failure opens a 30 s cooldown. While an attempt is blocked the
+     * method returns false immediately, before the KDF runs, and changes no state. A
+     * successful verification resets the counter. The state is memory-only and is reset
+     * when a session starts/ends.
+     *
+     * Wrong and blank passwords both return false with no state change (the char array is
+     * wiped in every case, including exceptions) and neither reveals whether the vault is
+     * corrupt. The result must never be logged.
+     *
+     * Default is fail-secure (`false`) for test doubles / alternative implementations.
+     */
+    suspend fun verifyMasterPassword(password: CharArray): Boolean = false
+
+    /**
+     * Ids (notes AND folders) whose locked content is revealed for this session. Memory-only,
+     * never persisted. Cleared by [lock], [close] and by a background lock that actually
+     * applies — but **not** while an external activity (the SAF picker, see
+     * [beginExternalActivity]) defers that background lock.
+     */
+    val verifiedLockedIds: StateFlow<Set<String>>
+        get() = NO_LOCK_VERIFICATIONS
+
+    /**
+     * Call after a successful biometric/master-password re-authentication for [id]. Ignored
+     * while the vault is locked (a verification can never be created outside an unlocked
+     * session) and ignored for blank ids.
+     *
+     * Default is a no-op for test doubles / alternative implementations.
+     */
+    fun markLockVerified(id: String) {
+        // Fail-secure default: no verification state to record.
+    }
+
+    /**
+     * Clears all lock verifications, re-masking every locked note/folder. The UI calls this
+     * for "re-arm locked notes now"; the repository already calls it on lock/background.
+     *
+     * Default is a no-op for test doubles / alternative implementations.
+     */
+    fun clearLockVerifications() {
+        // Fail-secure default: nothing is verified.
+    }
+
     // ---- Encrypted backup (SAF; UI resolves Uri -> streams) -----------------
 
     /**
@@ -296,3 +379,30 @@ interface NoteRepository {
     suspend fun deleteAttachment(noteId: String, attachmentId: String): Boolean = false
 }
 
+
+/**
+ * Rate-limit policy for [NoteRepository.verifyMasterPassword], kept here (not in the UI)
+ * so the numbers are part of the data-layer contract and testable with the injected clock.
+ *
+ * Failures 1–4 delay the next attempt by 1 s, 2 s, 3 s and 4 s (strictly growing); the 5th
+ * consecutive failure opens a [COOLDOWN_MS] cooldown. Nothing sleeps inside the repository:
+ * an attempt before `now + delay` is rejected immediately.
+ */
+internal object LockVerificationPolicy {
+    /** Consecutive failures that trigger the long cooldown. */
+    const val MAX_CONSECUTIVE_FAILURES: Int = 5
+
+    /** Delay after the first failure; multiplied by the failure count (growing delay). */
+    const val BASE_DELAY_MS: Long = 1_000L
+
+    /** Blocking window after [MAX_CONSECUTIVE_FAILURES] consecutive failures. */
+    const val COOLDOWN_MS: Long = 30_000L
+
+    /** Milliseconds the next verification attempt must wait after [consecutiveFailures]. */
+    fun delayAfterFailure(consecutiveFailures: Int): Long =
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            COOLDOWN_MS
+        } else {
+            BASE_DELAY_MS * consecutiveFailures.coerceAtLeast(1)
+        }
+}

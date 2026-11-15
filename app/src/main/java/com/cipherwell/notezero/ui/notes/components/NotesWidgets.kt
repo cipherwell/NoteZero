@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -234,6 +235,7 @@ fun NoteRow(
     onRename: () -> Unit,
     onMove: () -> Unit,
     onTrash: () -> Unit,
+    onLockToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val item = row.item
@@ -241,7 +243,9 @@ fun NoteRow(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .testTag("note_row")
+            // Distinct tag for the masked state so tests/E2E can assert a locked note is
+            // rendered without its content (the tag is not a second visual element).
+            .testTag(if (row.masked) "locked_note_row" else "note_row")
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = { menuOpen = true },
@@ -285,8 +289,19 @@ fun NoteRow(
                             modifier = Modifier.size(14.dp),
                         )
                     }
+                    if (item.locked) {
+                        Spacer(Modifier.width(NoteZeroSpacing.xs))
+                        Icon(
+                            imageVector = Icons.Filled.Lock,
+                            contentDescription = if (row.masked) "Locked" else "Locked note",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
                 }
-                val preview = NoteFormatting.preview(item.body)
+                // A masked row carries an empty preview by construction; keep the guard so
+                // no future mask regression can render body text.
+                val preview = if (row.masked) "" else NoteFormatting.preview(item.body)
                 if (preview.isNotEmpty()) {
                     Text(
                         text = preview,
@@ -327,12 +342,14 @@ fun NoteRow(
                 NoteContextMenu(
                     expanded = menuOpen,
                     item = item,
+                    masked = row.masked,
                     onDismiss = { menuOpen = false },
                     onTogglePin = { menuOpen = false; onTogglePin() },
                     onToggleFavorite = { menuOpen = false; onToggleFavorite() },
                     onRename = { menuOpen = false; onRename() },
                     onMove = { menuOpen = false; onMove() },
                     onTrash = { menuOpen = false; onTrash() },
+                    onLockToggle = { menuOpen = false; onLockToggle() },
                 )
             }
         }
@@ -343,41 +360,61 @@ fun NoteRow(
 private fun NoteContextMenu(
     expanded: Boolean,
     item: Item,
+    masked: Boolean,
     onDismiss: () -> Unit,
     onTogglePin: () -> Unit,
     onToggleFavorite: () -> Unit,
     onRename: () -> Unit,
     onMove: () -> Unit,
     onTrash: () -> Unit,
+    onLockToggle: () -> Unit,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        // Content actions are unavailable while masked: renaming a mask would write the
+        // placeholder over the real title, and move/trash would act on hidden content the
+        // user cannot identify. Revealing or removing the lock needs re-auth first.
+        if (!masked) {
+            DropdownMenuItem(
+                text = { Text(if (item.pinned) "Unpin note" else "Pin note", style = NoteZeroType.Callout) },
+                onClick = onTogglePin,
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(if (item.favorite) "Remove favourite" else "Add favourite", style = NoteZeroType.Callout)
+                },
+                onClick = onToggleFavorite,
+            )
+            DropdownMenuItem(
+                text = { Text("Rename", style = NoteZeroType.Callout) },
+                onClick = onRename,
+            )
+            DropdownMenuItem(
+                text = { Text("Move to folder", style = NoteZeroType.Callout) },
+                onClick = onMove,
+            )
+        }
         DropdownMenuItem(
-            text = { Text(if (item.pinned) "Unpin note" else "Pin note", style = NoteZeroType.Callout) },
-            onClick = onTogglePin,
+            text = { Text(if (item.locked) "Remove lock" else "Lock note", style = NoteZeroType.Callout) },
+            onClick = onLockToggle,
+            modifier = Modifier.testTag("note_lock_action"),
         )
-        DropdownMenuItem(
-            text = {
-                Text(if (item.favorite) "Remove favourite" else "Add favourite", style = NoteZeroType.Callout)
-            },
-            onClick = onToggleFavorite,
-        )
-        DropdownMenuItem(
-            text = { Text("Rename", style = NoteZeroType.Callout) },
-            onClick = onRename,
-        )
-        DropdownMenuItem(
-            text = { Text("Move to folder", style = NoteZeroType.Callout) },
-            onClick = onMove,
-        )
-        HorizontalDivider()
-        DropdownMenuItem(
-            text = { Text("Move to trash", style = NoteZeroType.Callout, color = MaterialTheme.colorScheme.error) },
-            onClick = onTrash,
-        )
+        if (!masked) {
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Move to trash", style = NoteZeroType.Callout, color = MaterialTheme.colorScheme.error) },
+                onClick = onTrash,
+            )
+        }
     }
 }
 
-/** Folder row in the Folders tab. Tapping opens the folder; long-press renames/deletes. */
+/**
+ * Folder row in the Folders tab. Tapping opens the folder; long-press renames/deletes.
+ *
+ * A locked folder that this session has not verified is rendered as a mask
+ * (`locked_folder_row`): its name and counts are hidden and its children are not listed
+ * until the user re-authenticates. Removing the lock while masked also requires re-auth.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FolderRow(
@@ -385,13 +422,14 @@ fun FolderRow(
     onClick: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
+    onLockToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .testTag("folder_row")
+            .testTag(if (row.masked) "locked_folder_row" else "folder_row")
             .combinedClickable(onClick = onClick, onLongClick = { menuOpen = true }),
         shape = NoteZeroShapes.row,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -417,21 +455,37 @@ fun FolderRow(
             }
             Spacer(Modifier.width(NoteZeroSpacing.m))
             Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = row.folder.name,
+                        style = NoteZeroType.Callout,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (row.folder.locked) {
+                        Spacer(Modifier.width(NoteZeroSpacing.xs))
+                        Icon(
+                            imageVector = Icons.Filled.Lock,
+                            contentDescription = if (row.masked) "Locked" else "Locked folder",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                }
                 Text(
-                    text = row.folder.name,
-                    style = NoteZeroType.Callout,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = buildString {
-                        append(row.itemCount)
-                        append(if (row.itemCount == 1) " note" else " notes")
-                        if (row.childFolderCount > 0) {
-                            append(" · ")
-                            append(row.childFolderCount)
-                            append(if (row.childFolderCount == 1) " folder" else " folders")
+                    text = if (row.masked) {
+                        "Locked · verify to view"
+                    } else {
+                        buildString {
+                            append(row.itemCount)
+                            append(if (row.itemCount == 1) " note" else " notes")
+                            if (row.childFolderCount > 0) {
+                                append(" · ")
+                                append(row.childFolderCount)
+                                append(if (row.childFolderCount == 1) " folder" else " folders")
+                            }
                         }
                     },
                     style = NoteZeroType.Caption,
@@ -450,20 +504,34 @@ fun FolderRow(
                     )
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Rename folder", style = NoteZeroType.Callout) },
-                        onClick = { menuOpen = false; onRename() },
-                    )
+                    if (!row.masked) {
+                        DropdownMenuItem(
+                            text = { Text("Rename folder", style = NoteZeroType.Callout) },
+                            onClick = { menuOpen = false; onRename() },
+                        )
+                    }
                     DropdownMenuItem(
                         text = {
                             Text(
-                                "Delete folder",
+                                if (row.folder.locked) "Remove lock" else "Lock folder",
                                 style = NoteZeroType.Callout,
-                                color = MaterialTheme.colorScheme.error,
                             )
                         },
-                        onClick = { menuOpen = false; onDelete() },
+                        onClick = { menuOpen = false; onLockToggle() },
+                        modifier = Modifier.testTag("folder_lock_action"),
                     )
+                    if (!row.masked) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    "Delete folder",
+                                    style = NoteZeroType.Callout,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            },
+                            onClick = { menuOpen = false; onDelete() },
+                        )
+                    }
                 }
             }
             Icon(
@@ -498,13 +566,25 @@ fun TrashRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = NoteFormatting.displayTitle(row.item.title),
-                    style = NoteZeroType.Callout,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = NoteFormatting.displayTitle(row.item.title),
+                        style = NoteZeroType.Callout,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (row.masked) {
+                        Spacer(Modifier.width(NoteZeroSpacing.xs))
+                        Icon(
+                            imageVector = Icons.Filled.Lock,
+                            contentDescription = "Locked",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                }
                 Text(
                     text = NoteFormatting.relativeTime(row.item.updatedAt, System.currentTimeMillis()),
                     style = NoteZeroType.Caption,

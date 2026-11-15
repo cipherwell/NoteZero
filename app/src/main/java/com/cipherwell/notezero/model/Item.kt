@@ -44,6 +44,14 @@ data class AttachmentRef(
  * [attachments] is repository-owned metadata: it is added by `importAttachment` and
  * removed by `deleteAttachment`; `saveItem` preserves the stored list, so an editor
  * autosave with a stale copy can never add or drop an attachment ref.
+ *
+ * [locked] is the per-note lock flag (decision #15, SPEC "lock note"). It is **content**:
+ * it lives inside the AES-GCM item envelope (`ItemCodec` payload v3) and never in a
+ * plaintext Room column. Locking is a *visibility gate*, not a second encryption layer:
+ * the ciphertext stays sealed under the same VMK and the same AAD, so locking/unlocking
+ * never re-encrypts or rotates anything. The repository owns the flag exactly like
+ * [attachments]: only `setItemLocked` changes it, `saveItem` preserves the stored value.
+ * The UI masks the content while the id is absent from `verifiedLockedIds`.
  */
 data class Item(
     val id: String,
@@ -60,17 +68,27 @@ data class Item(
     /** Incremented on every successful save; used for autosave conflict detection. */
     val version: Long = 0L,
     val attachments: List<AttachmentRef> = emptyList(),
+    /** Locked note: text/tags/preview stay hidden until the session re-authenticates. */
+    val locked: Boolean = false,
 ) {
     val isBlank: Boolean get() = title.isBlank() && body.isBlank()
 }
 
-/** A decrypted folder in the single hierarchical tree shared by notes and code files. */
+/**
+ * A decrypted folder in the single hierarchical tree shared by notes and code files.
+ *
+ * [locked] is the per-folder lock flag, stored inside the encrypted folder envelope
+ * (`FolderCodec` payload v2) — never in a plaintext column. A locked folder is hidden
+ * (with its descendants) until the session re-verifies; like the note flag it is a
+ * visibility gate over content that stays VMK-encrypted.
+ */
 data class Folder(
     val id: String,
     val name: String,
     val parentId: String? = null,
     val sortOrder: Int = 0,
     val createdAt: Long = 0L,
+    val locked: Boolean = false,
 )
 
 /** User-selectable theme mode; persisted in vault preferences (non-secret). */

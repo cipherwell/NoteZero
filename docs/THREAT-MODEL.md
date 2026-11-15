@@ -25,6 +25,7 @@ the SPEC's security bar ("same bar as VaultZero", zero-knowledge, offline-only).
 | A8 | Decrypted in-memory index/VMK while unlocked | Critical | While unlocked |
 | A9 | Metadata: vault existence, approximate item count, timestamps of access | Low–medium | Vault lifetime |
 | A10 | Integrity of all of the above (no silent tampering) | High | Vault lifetime |
+| A11 | Locked-content visibility (which records are locked; the plaintext of a locked record once re-authenticated) | Medium — a handoff/shoulder-surfing barrier, not a crypto boundary | While unlocked; verification is per-session |
 
 Non-assets (explicitly not protected): public app code, the BIP-39 wordlist itself, the
 app's package name, store listing.
@@ -57,6 +58,7 @@ app's package name, store listing.
 | Read the SQLite file / app-private files | Only AES-256-GCM ciphertext is at rest; titles/tags/folders are inside the envelope; searchable plaintext columns do not exist (`CryptoAad.item`, data-layer redaction) | Item count/timestamps visible (A9) |
 | Enable USB debugging and `adb pull` app data on a debug build | Debug builds are for development only; release build is signed and not debuggable | Debug device with unlocked bootloader: see 3.2 |
 | Shoulder-surf the unlock screen | `FLAG_SECURE` (MainActivity, Lead-owned) blocks screenshots/recents preview; UI masks secrets | Visual observation of physical screen is out of scope |
+| Read a specific note while the device is handed over unlocked, or shoulder-surf a list/editor | Per-note/folder **lock** flag (decision #15): locked records render as a mask until the session re-authenticates (`verifyMasterPassword` or a presence-only biometric prompt); `verifiedLockedIds` is memory-only and re-masked on every background/screen-off/manual lock. The flag itself is content inside the AEAD envelope | This is a visibility gate, not a second encryption layer: a locked record's plaintext is still in RAM/decryptable while the vault is unlocked, and an attacker who obtains the VMK or DB file is unaffected (see A8 / 3.2). A user who leaves the vault unlocked and hands the device over without a lock cannot be protected |
 | Brute-force the password offline from the copied envelope | PBKDF2-HMAC-SHA256, 600k iterations, 128-bit salt per envelope (`KeyEnvelope.iterations`, `NoteCrypto.deriveKek`); VMK is random 256-bit so no shortcut | Password entropy is the limiting factor; PBKDF2 is GPU-friendly — Argon2id upgrade reserved (`docs/CRYPTO-SPEC.md` §2.2) |
 | Brute-force the recovery phrase | 128-bit entropy (12 BIP-39 words) — infeasible to brute force | Phrase theft via physical/paper compromise is out of scope |
 
@@ -77,6 +79,7 @@ app's package name, store listing.
 | Extract `vault_meta` + Room DB from a full device/cloud backup | All values are ciphertext or wrapped keys; the Keystore key is device-bound and never exported (`BiometricKeyManager` stores only the wrapped copy) | Envelope iteration count/type/salt are visible metadata; this is necessary for KDF agility |
 | Restore app data onto another device and unlock | Password/recovery envelope is device-independent by design (the user must be able to restore); biometric wrap is useless on the new device because the Keystore key is gone — `prepareDecrypt` wipes the orphaned blob and forces the password path (`BiometricKeyManager.prepareDecrypt`) | The restored device can brute-force with the password (same as 3.1) |
 | Forge/replay a backup file | Backup header/envelope authenticated with `CryptoAad.BACKUP`; tampered restore fails (`docs/BACKUP-FORMAT.md`, data-layer) | Restoring a *valid old* backup is a rollback the user initiated |
+| Determine which notes/folders are locked from the DB or a backup | The lock flag is content: a trailing byte inside the item/folder AES-GCM envelope (`ItemCodec` v3 / `FolderCodec` v2), with no plaintext `locked` column and no separate lock table; a v1/v2 backup decodes as unlocked | An attacker with the VMK can read everything (lock is not encryption); without it they cannot tell locked from unlocked records, only row counts/timestamps (A9) |
 
 ### 3.4 Malicious or corrupted data at rest (SQLite tampering, file corruption)
 
@@ -103,7 +106,7 @@ app's package name, store listing.
 
 | Attack | Mitigation | Residual |
 |---|---|---|
-| Screenshot / recents thumbnail of notes or recovery phrase | `FLAG_SECURE` on the activity (MainActivity, build-config gated off only for automated screenshots in debug); recovery screen shows the phrase once and is covered | External camera out of scope |
+| Screenshot / recents thumbnail of notes or recovery phrase | `FLAG_SECURE` on the activity (MainActivity, build-config gated off only for automated screenshots in debug); recovery screen shows the phrase once and is covered; locked+unverified rows render a mask, never the title/body/preview | External camera out of scope |
 | Clipboard sniffing (Android 10+ denies background clipboard access; older versions allow) | Sensitive clipboard handling with auto-clear timer and `ClipDescription.EXTRA_IS_SENSITIVE` where available (UI-layer, Lead/ui-shell) | Rooted/older devices: accepted, documented |
 | Screen recording/accessibility service | FLAG_SECURE blocks recording; accessibility services are an OS trust decision | Malicious accessibility service = 3.2 |
 
@@ -155,6 +158,9 @@ added before shipping, including encrypted blobs and size limits); code editor L
 | Re-enrolment kills the wrap | `setInvalidatedByBiometricEnrollment(true)` + `disable()` on invalidation | `BiometricKeyManagerTest` / manual device test |
 | No network path | manifest/removal/CI script, no network imports | `OfflineGuaranteeTest` (Lead) |
 | KDF work factor floor on read | `KeyEnvelope.fromBytes` bounds | `KeyEnvelopeTest` |
+| Lock state is content, invisible at rest | `ItemCodec` v3 / `FolderCodec` v2 trailing lock byte inside the AEAD envelope; no lock column | `LockedItemsRepositoryTest.lockFlagLivesOnlyInsideTheAuthenticatedEnvelope`, `LockedPayloadCodecTest` |
+| Lock verifications never outlive the session | memory-only `verifiedLockedIds`; cleared by `lock()`/`close()`/background lock/session start; `markLockVerified` ignored while locked | `LockedItemsRepositoryTest.verificationsClearOnLockUnlockAndCloseAndAreNeverPersisted`, `backgroundLockClearsVerificationsButPickerDeferralDoesNot` |
+| Lock re-auth cannot be brute-forced cheaply | rate limiter on the injected clock (growing 1–4 s delay, 30 s cooldown after 5), constant-time VMK comparison, wiped `CharArray` | `LockedItemsRepositoryTest.verifyMasterPassword*` |
 
 ---
 
@@ -177,6 +183,12 @@ added before shipping, including encrypted blobs and size limits); code editor L
 6. **Rollback of whole app-data backups** — a restored old backup is indistinguishable from
    a legitimate restore; users must recognise that restoring an old backup rolls back
    content (documented in the backup UX, data-layer).
+7. **Locked notes are a visibility gate, not encryption (A11)** — while the vault is
+   unlocked, a locked note's plaintext exists in RAM and is decryptable with the VMK, so
+   the lock only defeats shoulder-surfing/handoff scenarios. It is re-armed on every
+   background/screen-off/lock and verification is never persisted; the residual risk is
+   an already-compromised unlocked process or an attacker holding the VMK/DB file, both
+   covered by the accepted VMK-in-RAM risk (1).
 
 ---
 
