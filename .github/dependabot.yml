@@ -1,0 +1,22 @@
+version: 2
+# Keep the toolchain current, but never auto-add a network dependency: dependency
+# updates are reviewed against docs/DEPENDENCIES.md before merge.
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      androidx:
+        patterns: ["androidx.*"]
+      compose:
+        patterns: ["androidx.compose.*"]
+    ignore:
+      # Biometric 1.2.x alpha line is deliberately pinned; see docs/DEPENDENCIES.md.
+      - dependency-name: androidx.biometric:biometric
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2

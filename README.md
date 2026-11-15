@@ -1,5 +1,7 @@
 # NoteZero
 
+![CI](https://github.com/cipherwell/NoteZero/actions/workflows/ci.yml/badge.svg)
+
 **Offline-first, end-to-end encrypted notes and code editor for Android.**
 No account. No cloud. No network permission. Your notes never leave the device except
 through an encrypted backup file you export yourself.
