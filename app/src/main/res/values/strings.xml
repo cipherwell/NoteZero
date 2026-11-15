@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NoteZero</string>
+
+    <!-- Setup / unlock / recovery -->
+    <string name="setup_title">Create your vault</string>
+    <string name="setup_subtitle">Everything is encrypted on this device. No account, no cloud.</string>
+    <string name="unlock_title">Unlock NoteZero</string>
+    <string name="unlock_biometric">Unlock with biometrics</string>
+    <string name="recovery_title">Recovery phrase</string>
+
+    <!-- Notes -->
+    <string name="notes_title">Notes</string>
+    <string name="new_note">New note</string>
+    <string name="search_notes">Search notes</string>
+    <string name="trash">Trash</string>
+    <string name="settings">Settings</string>
+</resources>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  NoteZero declares no INTERNET permission, so no socket can be opened at all.
+  This file is belt-and-braces: if a dependency ever smuggled in a network
+  permission through manifest merging, cleartext traffic would still be refused
+  by the platform.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

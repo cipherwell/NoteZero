@@ -1,0 +1,33 @@
+# NoteZero — build outputs, IDE state, and every key material file stay out of git.
+*.iml
+.gradle
+.kotlin
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/app/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+.env
+# Signing material is never committed. See docs/BUILDING.md.
+debug.keystore
+*.jks
+*.keystore
+*.p12
+keystore.properties
+/signing.env
+*.apk
+*.aab
+*.ap_
+/releases
+/aistudio
+/build-outputs
+/public
