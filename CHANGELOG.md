@@ -68,7 +68,9 @@ All notable changes to NoteZero are documented here. Format follows
 ### Verified (measured, not claimed)
 
 - `:app:assembleDebug` / `:app:assembleRelease` / `:app:bundleRelease` green (signed release
-  APK sha256 `ed520573…e381`, AAB `a1a7741d…868d`); unsigned-release fallback verified.
+  APK sha256 `a23f8972…28d9`, AAB `1488edd3…27a5`); unsigned-release fallback verified.
+  Caveat: two local builds of the same commit produced different packaging hashes, so
+  byte-for-byte reproducibility is **not** claimed yet (Phase 5 work, docs/RELEASING.md).
 - **290 unit tests / 0 failures** (27 classes) incl. RFC 7914 PBKDF2, NIST AES-GCM KATs,
   official BIP-39 vectors, AAD-swap rejection, ciphertext-unchanged password change.
 - **10 instrumented tests OK** on a real emulator incl. an end-to-end vault lifecycle + UI

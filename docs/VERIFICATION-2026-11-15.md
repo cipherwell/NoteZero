@@ -12,8 +12,12 @@ google_apis, x86_64, KVM, API 34) with a real visible window.
 
 | Command | Result |
 |---|---|
+> **Reproducibility status:** two release builds of the same commit produced different
+> packaging hashes (`ed520573…` vs `a23f8972…`). Signing is correct in both; byte-for-byte
+> reproducibility is a Phase-5 task (docs/RELEASING.md), not claimed here.
+
 | `./gradlew :app:assembleDebug` | **BUILD SUCCESSFUL**, `app-debug.apk` (`sha256 480893eadc36bdc689d6c411ea868683a229a8fc4bf89e1eb07d82f141258e46`) |
-| `./gradlew :app:assembleRelease :app:bundleRelease` (signing env sourced) | **BUILD SUCCESSFUL**, `app-release.apk` (`ed520573f43652b082f029bfb2d3eee6fc570d0add88375eaf8106bb6722e381`), `app-release.aab` (`a1a7741d24f1cd923f761d1fdebbc9b9eba325ff80c810b56fd1b678b00e868d`) |
+| `./gradlew :app:assembleRelease :app:bundleRelease` (signing env sourced) | **BUILD SUCCESSFUL**, `app-release.apk` (`a23f8972044e51da7fae762267008f1d5c3f924ecbe24f98cab2a9c0c3e328d9`), `app-release.aab` (`1488edd372d634e64a94fdd5ea8c708afa0b0770a0f6a57f02c8670b5d327ba5`) |
 | `./gradlew :app:assembleRelease` with signing env **unset** | **BUILD SUCCESSFUL**, emits `app-release-unsigned.apk` — `apksigner verify` says `DOES NOT VERIFY` (no debug-key fallback; F-Droid builder signs it) |
 
 ## 2. Unit tests — 290 tests, 0 failures, 0 errors, 0 skipped (27 classes)
