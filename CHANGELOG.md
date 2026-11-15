@@ -3,6 +3,67 @@
 All notable changes to NoteZero are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [Unreleased] — Phase 5: audit remediation, strings, reproducible APK+AAB (2026-11-15, increment 5)
+
+### Added
+
+**Security audit & remediation**
+- Independent adversarial audit `docs/AUDIT-2026-11-15-phase5.md`: **0 HIGH / 0 CRITICAL**,
+  2 MEDIUM, 8 LOW, 8 INFO, 12 doc/code mismatches; crypto core, AAD map, envelope parser,
+  backup authentication, lock masking and the offline/permission surface held up.
+- All findings remediated (remediation log in the report): decrypted editor state is wiped on
+  lock/verification re-arm (notes + code, incl. undo/redo/conflict/find state); recovery-reset
+  copy/docs now say the phrase is unchanged (rotation stays an explicit settings action);
+  credentials no longer live in saved instance state; **security build flags are debug-variant
+  only — release builds hardcode FLAG_SECURE and auto-lock on**; rotated recovery phrases are
+  dropped on lock; code-editor plaintext export is status-gated; code editor gained a
+  locked-content gate; biometric/recovery-reset session boundaries clear lock verifications;
+  backup OOM is a clean failure; the auto-lock race surfaces as a stale-session state instead
+  of crashing.
+- Documented deliberate non-fix: KDF re-wrap-on-unlock was claimed but never implemented —
+  the claim was removed (DECISIONS #17); a vault keeps its creation iteration count until an
+  explicit password change re-wraps the envelope.
+- Dependency/licence inventory updated (Apache-2.0, protobuf-lite BSD-3 transitive, packaged
+  native libs, test-only JUnit EPL-1.0 not shipped).
+
+**Translation-ready UI**
+- All user-visible strings extracted to Android resources: **336 strings + 6 plurals**
+  (screen-prefixed names, 33 content descriptions), Composables use
+  `stringResource`/`pluralStringResource`. Pure-JVM helpers and glyphs stay inline with
+  documented reasons in `docs/STRINGS.md`. Visible English is unchanged except the corrected
+  recovery-reset copy.
+
+**Reproducibility finalised**
+- Signed **APK and AAB are both byte-identical** across two independent clean builds from
+  different paths (`--no-daemon --no-build-cache`, `SOURCE_DATE_EPOCH=1763054400`):
+  APK `c48de399…68da`, AAB `00a66b1e…f22a`; published artifacts are exactly those builds.
+- `scripts/verify-reproducible.sh` gained `--artifact aab` and `--unsigned` modes; CI now runs
+  the unsigned reproducibility check on every push, so nondeterministic builds fail the
+  pipeline without signing secrets.
+
+**Store readiness**
+- `fastlane/metadata/android/en-US/`: title, short/full description, changelog, 8 phone
+  screenshots; new `PRIVACY.md`; updated F-Droid recipe (pinned toolchain, reproducibility
+  notes, privacy-policy link). README/SECURITY link the audit, strings doc and privacy policy.
+
+### Verified (measured)
+
+- **764 unit tests / 0 failures** (60 classes; +24 audit regression tests) and **10
+  instrumented tests OK** on the emulator, including the full E2E flow.
+- Reproducible signed APK **and** AAB (hashes in `releases/SHA256SUMS` and
+  `docs/VERIFICATION-2026-11-15.md` §10); certificate unchanged
+  (`FA:CA:DD:67:…:92:78`).
+- FLAG_SECURE active on the normal build (`screencap` 0-byte); a release build passed
+  `-PallowScreenshots=true -PdevDisableAutoLock=true` still generates `false` flags.
+- Release permissions unchanged (`USE_BIOMETRIC` only + androidx.core signature guard);
+  offline guard green; 0 TODO/Log/hex-outside-tokens/network imports; 14 emulator screenshots.
+
+### Still open
+
+- F-Droid submission after the 3-month window (2027-02-15); tag the release.
+- UI translations (infrastructure ready), cross-toolchain reproducibility with F-Droid's
+  build image, and the remaining INFO/low-impact audit notes.
+
 ## [Unreleased] — Locked notes/folders + reproducible release builds (2026-11-15, increment 4)
 
 ### Added

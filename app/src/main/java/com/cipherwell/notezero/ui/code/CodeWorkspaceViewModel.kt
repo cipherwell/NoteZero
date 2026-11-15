@@ -10,10 +10,12 @@ import com.cipherwell.notezero.data.VaultStatus
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -268,10 +270,39 @@ class CodeWorkspaceViewModel(
 
     private fun isUnlocked(): Boolean = repository.status.value == VaultStatus.UNLOCKED
 
+    private val _sessionStale = MutableStateFlow(false)
+
+    /**
+     * True when a file/folder mutation lost the auto-lock race: the pre-check passed but the
+     * repository had already wiped the VMK, so it threw `IllegalStateException` instead of
+     * mutating. Non-secret refresh state (no names, no content); reset on the next unlocked
+     * session. Audit finding F10.
+     */
+    val sessionStale: StateFlow<Boolean> = _sessionStale.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            repository.status.collect { status ->
+                if (status == VaultStatus.UNLOCKED) _sessionStale.value = false
+            }
+        }
+    }
+
+    /**
+     * Runs [block] only while unlocked; a lock that wins between the check and the repository
+     * mutex is reported as [sessionStale] instead of crashing the app (audit F10).
+     */
     private fun mutate(block: suspend () -> Unit) {
         if (!isUnlocked()) return
         viewModelScope.launch {
-            if (isUnlocked()) block()
+            if (!isUnlocked()) return@launch
+            try {
+                block()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: IllegalStateException) {
+                _sessionStale.value = true
+            }
         }
     }
 }

@@ -27,14 +27,19 @@ ls app/build/outputs/apk/debug/app-debug.apk
 The debug build is signed by the project-local debug key (`androiddebugkey`, password
 `android`). Never distribute a debug build.
 
-### Screenshot opt-in (automation only)
+### Screenshot opt-in (debug builds only, automation only)
 
-FLAG_SECURE is on for every normal build, so `adb screencap` shows a black frame. For
+FLAG_SECURE is on for every normal build, so `adb screencap` returns a **0-byte** file. For
 automated UI verification only:
 
 ```bash
 ./gradlew :app:assembleDebug -PallowScreenshots=true
 ```
+
+The `-PallowScreenshots` and `-PdevDisableAutoLock` flags are **debug-variant only**: they are
+declared under `buildTypes.debug` and release builds hardcode both values to `false`, so no
+release build can be produced with FLAG_SECURE or the background/idle auto-lock disabled
+(verified by the audit remediation).
 
 ## Release build
 

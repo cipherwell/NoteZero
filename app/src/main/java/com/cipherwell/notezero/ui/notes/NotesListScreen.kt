@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.notes
 
+import com.cipherwell.notezero.R
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -50,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -144,6 +146,7 @@ private fun NotesListContent(
     val scope = rememberCoroutineScope()
 
     val isTrash = state.section == NotesSection.TRASH
+    val codeWorkspaceLabel = stringResource(R.string.cd_notes_code_workspace)
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
 
     BackHandler(enabled = isTrash) { viewModel.leaveTrash() }
@@ -201,14 +204,14 @@ private fun NotesListContent(
                             onClick = { viewModel.leaveTrash() },
                             modifier = Modifier.testTag("notes_back"),
                         ) {
-                            Icon(Icons.Filled.ArrowBack, contentDescription = "Back to notes")
+                            Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back_to_notes))
                         }
                     } else if (state.section == NotesSection.FOLDERS && state.currentFolderId != null) {
                         IconButton(
                             onClick = { viewModel.closeFolder() },
                             modifier = Modifier.testTag("notes_back"),
                         ) {
-                            Icon(Icons.Filled.ArrowBack, contentDescription = "Back to parent folder")
+                            Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back_to_parent_folder))
                         }
                     }
                 },
@@ -217,13 +220,13 @@ private fun NotesListContent(
                         TextButton(
                             onClick = { confirmEmptyTrash = true },
                             modifier = Modifier.testTag("trash_empty_button"),
-                        ) { Text("Empty") }
+                        ) { Text(stringResource(R.string.notes_empty_trash)) }
                     } else {
                         IconButton(
                             onClick = onOpenCode,
                             modifier = Modifier
                                 .testTag("nav_code")
-                                .semantics { contentDescription = "Code workspace" },
+                                .semantics { contentDescription = codeWorkspaceLabel },
                         ) {
                             Text(
                                 text = "</>",
@@ -238,7 +241,7 @@ private fun NotesListContent(
                             onClick = { viewModel.showTrash() },
                             modifier = Modifier.testTag("trash_button"),
                         ) {
-                            Icon(Icons.Filled.Delete, contentDescription = "Trash")
+                            Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.cd_notes_trash))
                         }
                     }
                 },
@@ -261,7 +264,7 @@ private fun NotesListContent(
                     },
                     modifier = Modifier.testTag("new_note_button"),
                     icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                    text = { Text("New Note", style = NoteZeroType.Callout) },
+                    text = { Text(stringResource(R.string.notes_new_note), style = NoteZeroType.Callout) },
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                 )
@@ -313,21 +316,21 @@ private fun NotesListContent(
                 if (state.hasNoNotes) {
                     item(key = "empty") {
                         NotesEmptyState(
-                            title = "No notes yet",
-                            subtitle = "Tap New Note to capture your first thought. Everything is encrypted on this device.",
+                            title = stringResource(R.string.notes_empty_title),
+                            subtitle = stringResource(R.string.notes_empty_subtitle),
                         )
                     }
                 }
                 if (state.pinned.isNotEmpty()) {
-                    item(key = "header_pinned") { SectionHeader("Pinned", state.pinned.size) }
+                    item(key = "header_pinned") { SectionHeader(stringResource(R.string.notes_section_pinned), state.pinned.size) }
                     noteRows(state.pinned, "pinned_")
                 }
                 if (state.favorites.isNotEmpty()) {
-                    item(key = "header_favorites") { SectionHeader("Favourites", state.favorites.size) }
+                    item(key = "header_favorites") { SectionHeader(stringResource(R.string.notes_section_favourites), state.favorites.size) }
                     noteRows(state.favorites, "favorite_")
                 }
                 if (state.recent.isNotEmpty()) {
-                    item(key = "header_recent") { SectionHeader("Recent", state.recent.size) }
+                    item(key = "header_recent") { SectionHeader(stringResource(R.string.notes_section_recent), state.recent.size) }
                     noteRows(state.recent, "recent_")
                 }
             }
@@ -357,8 +360,8 @@ private fun NotesListContent(
                 if (state.folders.isEmpty() && state.folderItems.isEmpty()) {
                     item(key = "folders_empty") {
                         NotesEmptyState(
-                            title = "This folder is empty",
-                            subtitle = "Create a subfolder, or open a note from the Notes tab and move it here.",
+                            title = stringResource(R.string.notes_folders_empty_title),
+                            subtitle = stringResource(R.string.notes_folders_empty_subtitle),
                         )
                     }
                 }
@@ -391,7 +394,7 @@ private fun NotesListContent(
                 }
                 if (state.folderItems.isNotEmpty()) {
                     item(key = "folder_items_header") {
-                        SectionHeader("Notes in this folder", state.folderItems.size)
+                        SectionHeader(stringResource(R.string.notes_folder_items_header), state.folderItems.size)
                     }
                     noteRows(state.folderItems, "folder_")
                 }
@@ -410,7 +413,7 @@ private fun NotesListContent(
                         .fillMaxWidth()
                         .padding(horizontal = NoteZeroSpacing.l, vertical = NoteZeroSpacing.s)
                         .testTag("search_field"),
-                    placeholder = { Text("Search title, body, tags, folders", style = NoteZeroType.Callout) },
+                    placeholder = { Text(stringResource(R.string.notes_search_placeholder), style = NoteZeroType.Callout) },
                     leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                     trailingIcon = {
                         if (state.query.isNotEmpty()) {
@@ -418,7 +421,7 @@ private fun NotesListContent(
                                 onClick = viewModel::clearQuery,
                                 modifier = Modifier.testTag("search_clear"),
                             ) {
-                                Icon(Icons.Filled.Clear, contentDescription = "Clear search")
+                                Icon(Icons.Filled.Clear, contentDescription = stringResource(R.string.cd_notes_clear_search))
                             }
                         }
                     },
@@ -441,13 +444,13 @@ private fun NotesListContent(
                 }
                 when {
                     state.query.isBlank() -> NotesEmptyState(
-                        title = "Search your vault",
-                        subtitle = "Find notes by title, body, tag or folder. Searches stay in memory — nothing leaves the device.",
+                        title = stringResource(R.string.notes_search_empty_title),
+                        subtitle = stringResource(R.string.notes_search_empty_subtitle),
                     )
 
                     state.searchResults.isEmpty() -> NotesEmptyState(
-                        title = "No matches",
-                        subtitle = "No note matches \"${state.query.trim()}\".",
+                        title = stringResource(R.string.notes_search_no_matches),
+                        subtitle = stringResource(R.string.notes_search_no_matches_subtitle, state.query.trim()),
                     )
 
                     else -> LazyColumn(
@@ -461,7 +464,7 @@ private fun NotesListContent(
                         ),
                     ) {
                         item(key = "results_header") {
-                            SectionHeader("Results", state.searchResults.size)
+                            SectionHeader(stringResource(R.string.notes_section_results), state.searchResults.size)
                         }
                         noteRows(state.searchResults, "search_")
                     }
@@ -483,12 +486,12 @@ private fun NotesListContent(
                 if (state.trash.isEmpty()) {
                     item(key = "trash_empty") {
                         NotesEmptyState(
-                            title = "Trash is empty",
-                            subtitle = "Notes you delete appear here until the trash is emptied.",
+                            title = stringResource(R.string.notes_trash_empty_title),
+                            subtitle = stringResource(R.string.notes_trash_empty_subtitle),
                         )
                     }
                 } else {
-                    item(key = "trash_header") { SectionHeader("Trash", state.trash.size) }
+                    item(key = "trash_header") { SectionHeader(stringResource(R.string.trash), state.trash.size) }
                     items(state.trash, key = { "trash_${it.item.id}" }) { row ->
                         TrashRow(
                             row = row,
@@ -505,10 +508,10 @@ private fun NotesListContent(
 
     renameTarget?.let { item ->
         TextInputDialog(
-            title = "Rename note",
-            label = "Title",
+            title = stringResource(R.string.notes_rename_note),
+            label = stringResource(R.string.notes_title_label),
             initialValue = item.title,
-            confirmLabel = "Rename",
+            confirmLabel = stringResource(R.string.common_rename),
             dialogTestTag = "rename_note_dialog",
             onDismiss = { renameTarget = null },
             onConfirm = { value ->
@@ -531,10 +534,10 @@ private fun NotesListContent(
 
     renameFolderTarget?.let { folder ->
         TextInputDialog(
-            title = "Rename folder",
-            label = "Folder name",
+            title = stringResource(R.string.notes_rename_folder),
+            label = stringResource(R.string.common_folder_name),
             initialValue = folder.name,
-            confirmLabel = "Rename",
+            confirmLabel = stringResource(R.string.common_rename),
             dialogTestTag = "rename_folder_dialog",
             onDismiss = { renameFolderTarget = null },
             onConfirm = { value ->
@@ -546,9 +549,9 @@ private fun NotesListContent(
 
     deleteFolderTarget?.let { folder ->
         NotesConfirmDialog(
-            title = "Delete folder?",
-            message = "Notes and subfolders inside move to the parent folder. Nothing is permanently deleted.",
-            confirmLabel = "Delete folder",
+            title = stringResource(R.string.notes_delete_folder_title),
+            message = stringResource(R.string.notes_delete_folder_message),
+            confirmLabel = stringResource(R.string.notes_delete_folder),
             destructive = true,
             dialogTestTag = "delete_folder_dialog",
             onDismiss = { deleteFolderTarget = null },
@@ -561,10 +564,10 @@ private fun NotesListContent(
 
     if (showNewFolderDialog) {
         TextInputDialog(
-            title = "New folder",
-            label = "Folder name",
+            title = stringResource(R.string.notes_new_folder),
+            label = stringResource(R.string.common_folder_name),
             initialValue = "",
-            confirmLabel = "Create",
+            confirmLabel = stringResource(R.string.common_create),
             dialogTestTag = "new_folder_dialog",
             onDismiss = { showNewFolderDialog = false },
             onConfirm = { name ->
@@ -576,9 +579,9 @@ private fun NotesListContent(
 
     if (confirmEmptyTrash) {
         NotesConfirmDialog(
-            title = "Empty trash?",
-            message = "Every note in the trash will be permanently deleted. This cannot be undone.",
-            confirmLabel = "Empty trash",
+            title = stringResource(R.string.notes_empty_trash_title),
+            message = stringResource(R.string.notes_empty_trash_message),
+            confirmLabel = stringResource(R.string.notes_empty_trash_confirm),
             destructive = true,
             dialogTestTag = "empty_trash_dialog",
             onDismiss = { confirmEmptyTrash = false },
@@ -609,7 +612,7 @@ private fun FiltersRow(
                 selected = state.favoritesOnly,
                 onClick = onToggleFavorites,
                 modifier = Modifier.testTag("favorites_filter"),
-                label = { Text("Favourites", style = NoteZeroType.Caption) },
+                label = { Text(stringResource(R.string.notes_section_favourites), style = NoteZeroType.Caption) },
             )
         }
         items(state.tags, key = { "filter_tag_$it" }) { tag ->
@@ -640,7 +643,14 @@ private fun FolderBreadcrumb(
                 onClick = { onOpenFolder(null) },
                 modifier = Modifier.testTag("folder_root"),
             ) {
-                Text(if (breadcrumb.isEmpty()) "All folders" else "Folders", style = NoteZeroType.Callout)
+                Text(
+                    if (breadcrumb.isEmpty()) {
+                        stringResource(R.string.notes_all_folders)
+                    } else {
+                        stringResource(R.string.notes_nav_folders)
+                    },
+                    style = NoteZeroType.Callout,
+                )
             }
             breadcrumb.forEachIndexed { index, folder ->
                 Text(
@@ -673,15 +683,16 @@ private fun FolderBreadcrumb(
             ) {
                 Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(NoteZeroSpacing.xxs))
-                Text("New folder", style = NoteZeroType.Callout)
+                Text(stringResource(R.string.notes_new_folder), style = NoteZeroType.Callout)
             }
         }
     }
 }
 
+@Composable
 private fun titleFor(state: NotesUiState): String = when (state.section) {
-    NotesSection.NOTES -> "Notes"
-    NotesSection.FOLDERS -> state.breadcrumb.lastOrNull()?.name ?: "Folders"
-    NotesSection.SEARCH -> "Search"
-    NotesSection.TRASH -> "Trash"
+    NotesSection.NOTES -> stringResource(R.string.notes_title)
+    NotesSection.FOLDERS -> state.breadcrumb.lastOrNull()?.name ?: stringResource(R.string.notes_nav_folders)
+    NotesSection.SEARCH -> stringResource(R.string.notes_nav_search)
+    NotesSection.TRASH -> stringResource(R.string.trash)
 }

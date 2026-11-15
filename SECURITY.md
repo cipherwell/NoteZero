@@ -53,6 +53,12 @@ high-value data yet.
 - Issues in third-party libraries that are not reachable from NoteZero's code paths
   (report upstream; we will track).
 
+## Audits
+
+- `docs/AUDIT-2026-11-15-phase5.md` — independent adversarial audit of the Phase-5 codebase
+  (0 HIGH/CRITICAL; 2 MEDIUM + 8 LOW findings). All findings were remediated or explicitly
+  deferred with reasons; the report contains the per-finding remediation log and evidence.
+
 ## Security expectations for contributions
 
 - Crypto changes require a spec update in `docs/CRYPTO-SPEC.md` and test vectors.

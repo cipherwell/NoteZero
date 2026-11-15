@@ -59,6 +59,16 @@ class FakeNoteRepository : NoteRepository {
     /** Test-only master password used by [verifyMasterPassword]; null = no vault password. */
     var masterPassword: String? = null
 
+    /**
+     * When true the next [saveItem] simulates losing the auto-lock race: the vault locks
+     * (index cleared, LOCKED published) and the call throws `IllegalStateException` exactly
+     * like the real repository's `requireUnlocked()` would.
+     */
+    var failNextSaveAfterLock: Boolean = false
+
+    /** Same race simulation for [setPinned] (notes-list mutation path, audit F10). */
+    var lockRaceOnNextPin: Boolean = false
+
     var verifyMasterPasswordCalls: Int = 0
         private set
 
@@ -164,6 +174,11 @@ class FakeNoteRepository : NoteRepository {
     }
 
     override suspend fun saveItem(item: Item): Item {
+        if (failNextSaveAfterLock) {
+            failNextSaveAfterLock = false
+            lockSessionLikeTheRealRepository()
+            throw IllegalStateException("Vault is locked")
+        }
         saveCount += 1
         val existing = itemById(item.id)
         val saved = item.copy(
@@ -196,6 +211,11 @@ class FakeNoteRepository : NoteRepository {
     }
 
     override suspend fun setPinned(id: String, pinned: Boolean) {
+        if (lockRaceOnNextPin) {
+            lockRaceOnNextPin = false
+            lockSessionLikeTheRealRepository()
+            throw IllegalStateException("Vault is locked")
+        }
         mutate(id) { it.copy(pinned = pinned, updatedAt = nextClock(), version = it.version + 1) }
     }
 
@@ -287,6 +307,14 @@ class FakeNoteRepository : NoteRepository {
     ): BackupImportReport? = BackupImportReport(0, 0, 0, 0)
 
     // ---- Internals -----------------------------------------------------------
+
+    /** Mirrors `requireUnlocked()` on a vault that locked mid-call: nothing is mutable after. */
+    private fun lockSessionLikeTheRealRepository() {
+        _status.value = VaultStatus.LOCKED
+        _items.value = emptyList()
+        _folders.value = emptyList()
+        _verifiedLockedIds.value = emptySet()
+    }
 
     private fun mutate(id: String, transform: (Item) -> Item) {
         _items.value = _items.value.map { if (it.id == id) transform(it) else it }

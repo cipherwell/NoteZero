@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.backup
 
+import com.cipherwell.notezero.R
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -105,25 +107,24 @@ fun BackupSectionContent(
     val canStart = !busy
 
     Column(modifier = modifier.testTag(BACKUP_SECTION_TAG)) {
-        NzSectionHeader(title = "Data & backup")
+        NzSectionHeader(title = stringResource(R.string.backup_section_title))
         NzCard {
             Text(
-                text = "Encrypted backup",
+                text = stringResource(R.string.backup_title),
                 style = NoteZeroType.Body,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             NzFormSpacer(NoteZeroSpacing.xs)
             Text(
-                text = "Backups are sealed with AES-256-GCM under your vault key. Nothing " +
-                    "leaves this device except the file you pick.",
+                text = stringResource(R.string.backup_description),
                 style = NoteZeroType.Caption,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.testTag("settings_backup_note"),
             )
             NzFormSpacer(NoteZeroSpacing.m)
             NzSwitchRow(
-                title = "Protect this backup with a separate password",
-                description = "The file then needs that password to be restored anywhere.",
+                title = stringResource(R.string.backup_separate_password_title),
+                description = stringResource(R.string.backup_separate_password_description),
                 checked = separatePassword,
                 enabled = canStart,
                 onCheckedChange = {
@@ -144,7 +145,7 @@ fun BackupSectionContent(
                         password = it
                         mismatch = false
                     },
-                    label = "Backup password",
+                    label = stringResource(R.string.backup_password_label),
                     modifier = Modifier.testTag("settings_backup_password"),
                     enabled = canStart,
                     imeAction = ImeAction.Next,
@@ -156,7 +157,7 @@ fun BackupSectionContent(
                         confirmation = it
                         mismatch = false
                     },
-                    label = "Confirm backup password",
+                    label = stringResource(R.string.backup_confirm_password_label),
                     modifier = Modifier.testTag("settings_backup_password_confirm"),
                     enabled = canStart,
                     isError = mismatch,
@@ -164,7 +165,7 @@ fun BackupSectionContent(
                 if (mismatch) {
                     NzFormSpacer(NoteZeroSpacing.s)
                     NzInfoBanner(
-                        text = "The two backup passwords do not match.",
+                        text = stringResource(R.string.backup_password_mismatch),
                         tone = com.cipherwell.notezero.ui.components.common.NzBannerTone.DANGER,
                         modifier = Modifier.testTag("settings_backup_password_error"),
                     )
@@ -172,7 +173,7 @@ fun BackupSectionContent(
             }
             NzFormSpacer(NoteZeroSpacing.m)
             NzPrimaryButton(
-                text = "Export encrypted backup",
+                text = stringResource(R.string.backup_export),
                 onClick = {
                     if (separatePassword) {
                         if (password.isEmpty()) {
@@ -199,7 +200,7 @@ fun BackupSectionContent(
             )
             NzFormSpacer(NoteZeroSpacing.s)
             NzSecondaryButton(
-                text = "Import encrypted backup",
+                text = stringResource(R.string.backup_import),
                 onClick = onImport,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -224,7 +225,7 @@ fun BackupSectionContent(
             if (terminal) {
                 NzFormSpacer(NoteZeroSpacing.xs)
                 NzTextButton(
-                    text = "Dismiss",
+                    text = stringResource(R.string.common_dismiss),
                     onClick = onDismiss,
                     modifier = Modifier.testTag("settings_backup_dismiss"),
                 )
@@ -232,16 +233,14 @@ fun BackupSectionContent(
             if (state is BackupUiState.NeedsCredential) {
                 NzFormSpacer(NoteZeroSpacing.m)
                 NzInfoBanner(
-                    text = "This backup was created by another vault. Enter that vault's " +
-                        "master password or its 12-word recovery phrase (words separated by " +
-                        "single spaces).",
+                    text = stringResource(R.string.backup_credential_note),
                     modifier = Modifier.testTag("settings_backup_credential_note"),
                 )
                 NzFormSpacer(NoteZeroSpacing.s)
                 SecureTextField(
                     value = credential,
                     onValueChange = { credential = it },
-                    label = "Source password or 12-word phrase",
+                    label = stringResource(R.string.backup_credential_label),
                     modifier = Modifier.testTag("settings_backup_credential_field"),
                     imeAction = ImeAction.Done,
                     onImeAction = {
@@ -255,7 +254,7 @@ fun BackupSectionContent(
                 NzFormSpacer(NoteZeroSpacing.s)
                 Row(horizontalArrangement = Arrangement.spacedBy(NoteZeroSpacing.s)) {
                     NzSecondaryButton(
-                        text = "Cancel",
+                        text = stringResource(R.string.common_cancel),
                         onClick = {
                             credential = ""
                             onCancelFlow()
@@ -265,7 +264,7 @@ fun BackupSectionContent(
                             .testTag("settings_backup_cancel"),
                     )
                     NzPrimaryButton(
-                        text = "Restore",
+                        text = stringResource(R.string.backup_restore),
                         onClick = {
                             val submitted = credential
                             credential = ""
@@ -283,36 +282,41 @@ fun BackupSectionContent(
 }
 
 /** Non-secret status copy; never includes a path, file name, title or credential. */
+@Composable
 private fun statusText(state: BackupUiState): String = when (state) {
     BackupUiState.Idle ->
-        "No backup in progress."
+        stringResource(R.string.backup_status_idle)
     BackupUiState.PickingLocation ->
-        "Waiting for the file picker…"
+        stringResource(R.string.backup_status_waiting)
     is BackupUiState.Running -> when (state.mode) {
-        BackupMode.IMPORT -> "Opening the backup…"
-        else -> "Encrypting your vault…"
+        BackupMode.IMPORT -> stringResource(R.string.backup_status_opening)
+        else -> stringResource(R.string.backup_status_encrypting)
     }
     is BackupUiState.Success -> when (state.mode) {
         BackupMode.IMPORT -> state.report?.let { report ->
-            "Restored ${report.imported} notes and ${report.foldersImported} folders " +
-                "· ${report.duplicated} duplicates ignored · ${report.skipped} conflicts skipped."
-        } ?: "Backup restored."
-        else -> "Encrypted backup saved."
+            stringResource(
+                R.string.backup_status_restored,
+                report.imported,
+                report.foldersImported,
+                report.duplicated,
+                report.skipped,
+            )
+        } ?: stringResource(R.string.backup_status_restored_simple)
+        else -> stringResource(R.string.backup_status_saved)
     }
     BackupUiState.NeedsCredential ->
-        "This backup belongs to another vault. Enter that vault's password or recovery phrase."
+        stringResource(R.string.backup_status_needs_credential)
     is BackupUiState.Error -> when (state.kind) {
         BackupErrorKind.INVALID_FILE ->
-            "That file is not a valid NoteZero backup."
+            stringResource(R.string.backup_error_invalid)
         BackupErrorKind.WRONG_CREDENTIAL ->
-            "The password or phrase does not open this backup."
+            stringResource(R.string.backup_error_wrong_credential)
         BackupErrorKind.IO ->
-            "The backup file could not be read or written."
+            stringResource(R.string.backup_error_io)
         BackupErrorKind.LOCKED ->
-            "The vault locked before the backup finished. Unlock to resume — your chosen " +
-                "file is still selected."
+            stringResource(R.string.backup_error_locked)
         BackupErrorKind.EMPTY_VAULT ->
-            "There is nothing to back up yet. Create a note first."
+            stringResource(R.string.backup_error_empty)
     }
 }
 

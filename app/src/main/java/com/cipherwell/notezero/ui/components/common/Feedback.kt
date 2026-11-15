@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.components.common
 
+import com.cipherwell.notezero.R
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -22,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
@@ -44,9 +46,10 @@ fun NoteZeroConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
-    dismissLabel: String = "Cancel",
+    dismissLabel: String? = null,
     destructive: Boolean = false,
 ) {
+    val resolvedDismissLabel = dismissLabel ?: stringResource(R.string.common_cancel)
     AlertDialog(
         onDismissRequest = onDismiss,
         modifier = modifier,
@@ -73,7 +76,7 @@ fun NoteZeroConfirmDialog(
                 onClick = onDismiss,
                 modifier = Modifier.heightIn(min = NoteZeroSpacing.minTarget),
             ) {
-                Text(text = dismissLabel, style = NoteZeroType.Button)
+                Text(text = resolvedDismissLabel, style = NoteZeroType.Button)
             }
         },
         containerColor = MaterialTheme.colorScheme.surfaceContainer,

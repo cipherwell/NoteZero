@@ -438,4 +438,43 @@ class CodeWorkspaceViewModelTest {
         assertEquals(0, model.uiState.value.fileCount)
         assertEquals(1, model.uiState.value.lockedHiddenCount)
     }
+
+    // ---- auto-lock race (audit finding F10) ----------------------------------
+
+    @Test
+    fun `a file mutation that loses the auto-lock race reports stale state instead of crashing`() =
+        runTest(dispatcher) {
+            val model = viewModel()
+            advanceUntilIdle()
+            val file = repository.seedCodeFile(id = "f1", title = "One.kt", body = "alpha")
+            advanceUntilIdle()
+            assertFalse(model.sessionStale.value)
+
+            // The pre-check passes, then the repository mutex proves the vault already locked
+            // and throws IllegalStateException; it must surface as a non-secret flag (the test
+            // dispatcher would otherwise rethrow the uncaught coroutine exception).
+            repository.lockRaceOnNextTrash = true
+            model.trashFile(file)
+            advanceUntilIdle()
+
+            assertTrue("the UI can show a refresh notice", model.sessionStale.value)
+            assertEquals(VaultStatus.LOCKED, repository.status.value)
+        }
+
+    @Test
+    fun `workspace stale state clears on the next unlocked session`() = runTest(dispatcher) {
+        val model = viewModel()
+        advanceUntilIdle()
+        val file = repository.seedCodeFile(id = "f1", title = "One.kt", body = "alpha")
+        advanceUntilIdle()
+
+        repository.lockRaceOnNextTrash = true
+        model.trashFile(file)
+        advanceUntilIdle()
+        assertTrue(model.sessionStale.value)
+
+        repository.setStatus(VaultStatus.UNLOCKED)
+        advanceUntilIdle()
+        assertFalse(model.sessionStale.value)
+    }
 }

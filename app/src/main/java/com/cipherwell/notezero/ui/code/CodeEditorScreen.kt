@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.code
 
+import com.cipherwell.notezero.R
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -48,6 +49,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
@@ -61,6 +63,12 @@ import com.cipherwell.notezero.model.BlockDocument
 import com.cipherwell.notezero.model.MarkdownBlockCodec
 import com.cipherwell.notezero.ui.components.common.SensitiveClipboard
 import com.cipherwell.notezero.ui.editor.ChecklistMarkdown
+import com.cipherwell.notezero.ui.locks.LockBiometricPrompt
+import com.cipherwell.notezero.ui.locks.LockTargetKind
+import com.cipherwell.notezero.ui.locks.LockedNoteGate
+import com.cipherwell.notezero.ui.locks.LockedTarget
+import com.cipherwell.notezero.ui.locks.ReauthDialog
+import com.cipherwell.notezero.ui.locks.rememberLockReauthController
 import com.cipherwell.notezero.ui.editor.MarkdownPreview
 import com.cipherwell.notezero.ui.theme.NoteZeroShapes
 import com.cipherwell.notezero.ui.theme.NoteZeroSpacing
@@ -81,6 +89,12 @@ import kotlinx.coroutines.launch
  * re-open of the same file apply a new target line without recreating the ViewModel.
  * [exportTarget] is injectable so the confirmation gate is testable without a system picker.
  *
+ * Locked-content gate (decision #16, audit F7): the workspace already filters locked code
+ * files, but the editor is defence in depth — a locked+unverified file renders
+ * [LockedNoteGate] *before* the [CodeEditorViewModel] is created, exactly like
+ * [com.cipherwell.notezero.ui.editor.NoteEditorScreen], so no route (restored id, deep link,
+ * task restore) can load its source.
+ *
  * Markdown files additionally offer a preview that reuses
  * [com.cipherwell.notezero.ui.editor.MarkdownPreview] — no duplicate renderer exists.
  * Back always flushes pending edits before leaving (no keystroke is lost).
@@ -93,10 +107,31 @@ fun CodeEditorScreen(
     onBack: () -> Unit,
     initialLine: Int? = null,
     openToken: Int = 0,
-    exportTarget: CodeExportTarget = rememberSafCodeExportTarget(repository),
+    exportTarget: CodeExportTarget = rememberSafCodeExportTarget(repository, itemId),
+    /** Injectable only for tests; production uses the device presence prompt. */
+    biometricPrompt: LockBiometricPrompt? = null,
 ) {
     val context = LocalContext.current
+    val codeClipboardLabel = stringResource(R.string.common_code_clipboard_label)
     val preferences = remember(context) { CodeEditorPrefs(context) }
+
+    // Locked-content gate: decide before creating the ViewModel, so a masked file's name and
+    // source are never loaded into editor state. The workspace filter stays the primary
+    // control; this is the same defence in depth the notes editor has (audit F7).
+    val items by repository.items.collectAsStateWithLifecycle()
+    val verifiedLockedIds by repository.verifiedLockedIds.collectAsStateWithLifecycle()
+    val reauth = rememberLockReauthController(repository, biometricPrompt)
+    val lockedGate = items.firstOrNull { it.id == itemId }?.locked == true &&
+        itemId !in verifiedLockedIds
+    if (lockedGate) {
+        LockedNoteGate(
+            onReveal = { reauth.request(LockedTarget(itemId, LockTargetKind.NOTE)) },
+            onClose = onBack,
+        )
+        ReauthDialog(reauth)
+        return
+    }
+
     val viewModel: CodeEditorViewModel = viewModel(
         key = "code_editor_$itemId",
         factory = CodeEditorViewModelFactory(repository, itemId, preferences, initialLine),
@@ -133,7 +168,7 @@ fun CodeEditorScreen(
         if (payload.isEmpty()) return
         // Memory + clipboard only, never a file. The clip is marked sensitive so Android 13+
         // hides it from the copy overlay and clipboard previews (backported extra below 33).
-        SensitiveClipboard.copy(context, "NoteZero code", payload)
+        SensitiveClipboard.copy(context, codeClipboardLabel, payload)
     }
 
     BackHandler { leave() }
@@ -177,13 +212,13 @@ fun CodeEditorScreen(
                         onClick = { leave() },
                         modifier = Modifier.testTag(CodeTags.BACK),
                     ) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back to code files")
+                        Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back_to_code_files))
                     }
                 },
                 title = {
                     Column {
                         Text(
-                            text = state.fileName.ifEmpty { "Code file" },
+                            text = state.fileName.ifEmpty { stringResource(R.string.code_default_file) },
                             style = NoteZeroType.Callout,
                             maxLines = 1,
                         )
@@ -206,11 +241,11 @@ fun CodeEditorScreen(
                         onClick = { menuOpen = true },
                         modifier = Modifier.testTag(CodeTags.MORE),
                     ) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "Editor actions")
+                        Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.cd_editor_actions))
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
-                            text = { Text("Undo", style = NoteZeroType.Callout) },
+                            text = { Text(stringResource(R.string.common_undo), style = NoteZeroType.Callout) },
                             enabled = state.canUndo,
                             modifier = Modifier.testTag(CodeTags.UNDO),
                             onClick = {
@@ -219,7 +254,7 @@ fun CodeEditorScreen(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("Redo", style = NoteZeroType.Callout) },
+                            text = { Text(stringResource(R.string.common_redo), style = NoteZeroType.Callout) },
                             enabled = state.canRedo,
                             modifier = Modifier.testTag(CodeTags.REDO),
                             onClick = {
@@ -245,7 +280,7 @@ fun CodeEditorScreen(
 
                 state.missing -> CenteredEditorBox {
                     Text(
-                        text = "This code file is no longer available.",
+                        text = stringResource(R.string.code_file_unavailable),
                         style = NoteZeroType.Body,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -254,12 +289,23 @@ fun CodeEditorScreen(
 
                 state.tooLarge -> CenteredEditorBox {
                     Text(
-                        text = "This file is too large to open here (limit 2 MiB). " +
-                            "It stays encrypted in the vault.",
+                        text = stringResource(R.string.code_too_large),
                         style = NoteZeroType.Body,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.testTag(CodeTags.TOO_LARGE),
+                    )
+                }
+
+                state.sessionCleared -> CenteredEditorBox {
+                    // Non-secret placeholder: the vault locked/re-armed while this editor was
+                    // alive, so the source, file name and history were dropped (audit F1).
+                    Text(
+                        text = stringResource(R.string.common_session_cleared),
+                        style = NoteZeroType.Body,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.testTag(CodeTags.SESSION_CLEARED),
                     )
                 }
 
@@ -347,17 +393,19 @@ fun CodeEditorScreen(
 
     if (showGotoDialog) {
         val lineCount = lineIndex.lineCount
+        val invalidNumber = stringResource(R.string.code_goto_invalid)
+        val invalidRange = stringResource(R.string.code_goto_range, lineCount)
         CodeTextInputDialog(
-            title = "Go to line",
-            label = "Line number",
+            title = stringResource(R.string.code_goto_line_title),
+            label = stringResource(R.string.code_goto_line_label),
             initialValue = "",
-            confirmLabel = "Go",
+            confirmLabel = stringResource(R.string.code_go),
             keyboardType = KeyboardType.Number,
             validate = { raw ->
                 val number = raw.trim().toIntOrNull()
                 when {
-                    number == null -> "Enter a line number"
-                    number < 1 || number > lineCount -> "Enter a line between 1 and $lineCount"
+                    number == null -> invalidNumber
+                    number < 1 || number > lineCount -> invalidRange
                     else -> null
                 }
             },
@@ -405,14 +453,14 @@ private fun EditorToolbar(
             onClick = onFindToggle,
             modifier = Modifier.testTag(CodeTags.FIND_TOGGLE),
         ) {
-            Icon(Icons.Filled.Search, contentDescription = "Find and replace")
+            Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.cd_code_find_replace))
         }
         TextButton(
             onClick = onGotoLine,
             modifier = Modifier
                 .heightIn(min = NoteZeroSpacing.minTarget)
                 .testTag(CodeTags.GOTO_LINE),
-        ) { Text("Ln", style = NoteZeroType.Callout) }
+        ) { Text(stringResource(R.string.code_goto_short), style = NoteZeroType.Callout) }
         TextButton(
             onClick = onFontDecrease,
             enabled = state.fontSizeSp > CodeEditorPrefs.MIN_FONT_SIZE_SP,
@@ -438,7 +486,7 @@ private fun EditorToolbar(
             modifier = Modifier
                 .heightIn(min = NoteZeroSpacing.minTarget)
                 .testTag(CodeTags.WRAP_TOGGLE),
-            label = { Text("Wrap", style = NoteZeroType.Caption) },
+            label = { Text(stringResource(R.string.code_wrap), style = NoteZeroType.Caption) },
         )
         if (state.isMarkdown) {
             FilterChip(
@@ -447,7 +495,7 @@ private fun EditorToolbar(
                 modifier = Modifier
                     .heightIn(min = NoteZeroSpacing.minTarget)
                     .testTag(CodeTags.PREVIEW_TOGGLE),
-                label = { Text("Preview", style = NoteZeroType.Caption) },
+                label = { Text(stringResource(R.string.common_preview), style = NoteZeroType.Caption) },
             )
         }
     }
@@ -478,25 +526,25 @@ private fun EditorActionBar(
             modifier = Modifier
                 .heightIn(min = NoteZeroSpacing.minTarget)
                 .testTag(CodeTags.INDENT_INCREASE),
-        ) { Text("Indent", style = NoteZeroType.Callout) }
+        ) { Text(stringResource(R.string.code_indent), style = NoteZeroType.Callout) }
         TextButton(
             onClick = onOutdent,
             modifier = Modifier
                 .heightIn(min = NoteZeroSpacing.minTarget)
                 .testTag(CodeTags.INDENT_DECREASE),
-        ) { Text("Outdent", style = NoteZeroType.Callout) }
+        ) { Text(stringResource(R.string.code_outdent), style = NoteZeroType.Callout) }
         TextButton(
             onClick = onCopy,
             modifier = Modifier
                 .heightIn(min = NoteZeroSpacing.minTarget)
                 .testTag(CodeTags.COPY),
-        ) { Text("Copy", style = NoteZeroType.Callout) }
+        ) { Text(stringResource(R.string.code_copy), style = NoteZeroType.Callout) }
         TextButton(
             onClick = onExport,
             modifier = Modifier
                 .heightIn(min = NoteZeroSpacing.minTarget)
                 .testTag(CodeTags.EXPORT),
-        ) { Text("Export", style = NoteZeroType.Callout) }
+        ) { Text(stringResource(R.string.code_export), style = NoteZeroType.Callout) }
     }
 }
 
@@ -522,7 +570,7 @@ private fun FindReplaceBar(
                     onValueChange = onQueryChange,
                     singleLine = true,
                     textStyle = NoteZeroType.Mono,
-                    placeholder = { Text("Find", style = NoteZeroType.Caption) },
+                    placeholder = { Text(stringResource(R.string.code_find), style = NoteZeroType.Caption) },
                     modifier = Modifier
                         .weight(1f)
                         .testTag(CodeTags.FIND_QUERY),
@@ -540,14 +588,14 @@ private fun FindReplaceBar(
                     enabled = state.matches.isNotEmpty(),
                     modifier = Modifier.testTag(CodeTags.FIND_PREV),
                 ) {
-                    Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Previous match")
+                    Icon(Icons.Filled.KeyboardArrowUp, contentDescription = stringResource(R.string.cd_code_previous_match))
                 }
                 IconButton(
                     onClick = onNext,
                     enabled = state.matches.isNotEmpty(),
                     modifier = Modifier.testTag(CodeTags.FIND_NEXT),
                 ) {
-                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Next match")
+                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.cd_code_next_match))
                 }
                 FilterChip(
                     selected = state.caseSensitive,
@@ -564,7 +612,7 @@ private fun FindReplaceBar(
                     onValueChange = onReplaceQueryChange,
                     singleLine = true,
                     textStyle = NoteZeroType.Mono,
-                    placeholder = { Text("Replace", style = NoteZeroType.Caption) },
+                    placeholder = { Text(stringResource(R.string.code_replace), style = NoteZeroType.Caption) },
                     modifier = Modifier
                         .weight(1f)
                         .testTag(CodeTags.REPLACE_FIELD),
@@ -574,13 +622,13 @@ private fun FindReplaceBar(
                     modifier = Modifier
                         .heightIn(min = NoteZeroSpacing.minTarget)
                         .testTag(CodeTags.REPLACE),
-                ) { Text("Replace", style = NoteZeroType.Callout) }
+                ) { Text(stringResource(R.string.code_replace), style = NoteZeroType.Callout) }
                 TextButton(
                     onClick = onReplaceAll,
                     modifier = Modifier
                         .heightIn(min = NoteZeroSpacing.minTarget)
                         .testTag(CodeTags.REPLACE_ALL),
-                ) { Text("All", style = NoteZeroType.Callout) }
+                ) { Text(stringResource(R.string.code_replace_all), style = NoteZeroType.Callout) }
             }
         }
     }
@@ -600,14 +648,19 @@ private fun EditorStatusRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = "Ln $cursorLine, Col $cursorColumn · ${languageLabel(state.language)}",
+            text = stringResource(
+                R.string.code_status,
+                cursorLine,
+                cursorColumn,
+                languageLabel(state.language),
+            ),
             style = NoteZeroType.Caption,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.testTag(CodeTags.STATUS),
         )
         if (!state.syntaxHighlighting) {
             Text(
-                text = "Plain text — file over 256 KiB",
+                text = stringResource(R.string.code_plain_text),
                 style = NoteZeroType.Caption,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -630,7 +683,7 @@ private fun ConflictBanner(
     ) {
         Column(modifier = Modifier.padding(NoteZeroSpacing.m)) {
             Text(
-                text = "This code file changed elsewhere.",
+                text = stringResource(R.string.code_conflict_title),
                 style = NoteZeroType.Callout,
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
@@ -640,14 +693,14 @@ private fun ConflictBanner(
                     modifier = Modifier
                         .heightIn(min = NoteZeroSpacing.minTarget)
                         .testTag(CodeTags.CONFLICT_KEEP),
-                ) { Text("Keep my edits") }
+                ) { Text(stringResource(R.string.common_keep_my_edits)) }
                 Spacer(Modifier.padding(horizontal = NoteZeroSpacing.xxs))
                 TextButton(
                     onClick = onReload,
                     modifier = Modifier
                         .heightIn(min = NoteZeroSpacing.minTarget)
                         .testTag(CodeTags.CONFLICT_RELOAD),
-                ) { Text("Reload latest") }
+                ) { Text(stringResource(R.string.common_reload_latest)) }
             }
         }
     }
@@ -669,6 +722,7 @@ private fun CenteredEditorBox(content: @Composable () -> Unit) {
  */
 internal fun saveStateLabel(state: CodeEditorViewModel.State): String = when {
     state.loading -> "Loading…"
+    state.sessionCleared -> "Session locked"
     state.missing -> "File unavailable"
     state.tooLarge -> "File too large"
     state.conflict -> "Conflict — unsaved edits"

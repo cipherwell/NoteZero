@@ -1,13 +1,16 @@
-NoteZero is an offline-first, end-to-end encrypted notes app with a serious local code editor.
+NoteZero is an offline-first, end-to-end encrypted notes app with a serious local code editor and encrypted attachments.
 
-Your data never leaves the device: NoteZero requests no network permission at all, has no accounts, no cloud sync and no telemetry. Notes are encrypted with AES-256-GCM under a random 256-bit vault key that is only ever unlocked by your master password, a 12-word recovery phrase or your device biometrics.
+Your data never leaves the device: NoteZero requests no network permission at all, has no accounts, no cloud sync and no telemetry. Notes, folders, attachments and code files are encrypted with AES-256-GCM under a random 256-bit vault key that is only ever unlocked by your master password, a 12-word recovery phrase or your device biometrics.
 
-Features (building to v1.0):
-- Notes with Markdown editing and rich block preview: headings, lists, checklists, code blocks, quotes, tables
+Features:
+- Notes with Markdown editing and rich block preview: headings, lists, checklists, code blocks, quotes and tables
 - Folders, tags, pins, favourites, search, trash and undo
-- A code editor with syntax highlighting for common languages (later phase)
-- Encrypted backups exported to a location you choose
-- Auto-lock, screen protection, sensitive clipboard handling
+- Lock individual notes and folders; locked content is hidden until you re-authenticate with biometrics or your master password
+- Encrypted attachments: import images (system photo picker) or files (SAF); thumbnails stay in memory only
+- A local code editor: file tree, syntax highlighting for Kotlin/Java/JS/TS/Python/JSON/XML/Markdown/Shell, line numbers, find/replace, go-to-line, undo/redo, workspace-wide search, font size and wrap
+- Encrypted backup export/import through the system file picker, duplicate-safe and password-protected if you choose
+- Auto-lock on background/screen-off, screen-capture protection, sensitive clipboard flags
 - Biometric unlock backed by the Android Keystore
+- No network permission by design; release APKs are byte-for-byte reproducible
 
-NoteZero is MIT-licensed and reproducibly buildable. Same security bar as the author's VaultZero, but an independent app with its own package and signing key.
+NoteZero is MIT-licensed. Same security bar as the author's VaultZero, but an independent app with its own package and signing key.

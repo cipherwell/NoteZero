@@ -60,7 +60,11 @@ official BIP-39 English (Trezor) 12-word vectors, RFC 4231 HMAC, RFC 4648 Base64
 biometrics; it asserts that a prompt-free Keystore `doFinal` is refused by per-use auth and
 that unauthenticated enrollment persists nothing.
 
-## 4. UI evidence (real emulator renders, `-PallowScreenshots=true` build)
+## 4. UI evidence (real emulator renders, `-PallowScreenshots=true` **debug** build)
+
+The `-PallowScreenshots` / `-PdevDisableAutoLock` properties exist only on the **debug**
+variant; the release variant hardcodes both `BuildConfig` fields to `false` (audit F4/D3), so
+this section's flag can never reach a shipped release.
 
 | Screenshot | What it proves |
 |---|---|
@@ -77,7 +81,9 @@ that unauthenticated enrollment persists nothing.
 
 - **FLAG_SECURE is on by default**: on the normal build, `adb exec-out screencap -p`
   returns a **0-byte file** (secure window cannot be captured); the same screens rendered
-  normally with `-PallowScreenshots=true`. Screenshot-enabled builds are debug-only.
+  normally with `-PallowScreenshots=true` on a debug build. Screenshot-enabled builds are
+  debug-only by construction: the release variant hardcodes `ALLOW_SCREENSHOTS = false` and
+  `DEV_DISABLE_AUTO_LOCK = false` in `app/build.gradle.kts` (audit F4/D3).
 - **Offline guarantee**: `scripts/check-offline.sh --gradle` → exit 0.
 - **Release APK permissions** (`aapt2 dump permissions app-release-unsigned.apk`):
   `android.permission.USE_BIOMETRIC` plus `androidx.core`'s signature-level
@@ -232,6 +238,11 @@ captures from the screenshot-enabled debug build; hashes in git.
 
 ### Reproducibility evidence
 
+**This section is the single source for the measured release hashes** (audit D8):
+`docs/REPRODUCIBLE-BUILDS.md` points here and must not restate a hash. Only the **APK** is
+claimed byte-for-byte reproducible; the AAB entry below records the built artifact but is
+explicitly not part of that claim.
+
 ```
 -- building build-a in /tmp/notezero-repro-final/a
 18254b31924321142b292999cf44fd9ef07e9efe04d6aad366b5196b57845eaa  build-a.apk
@@ -272,3 +283,87 @@ captures from the screenshot-enabled debug build; hashes in git.
 - AAB byte-equality and cross-toolchain reproducibility (same script can be extended).
 - String extraction to `res/values/strings.xml` for translation; store assets/metadata polish.
 - Audit/pentest pass and F-Droid submission after the 3-month window (2027-02-15).
+
+---
+
+## 10. Increment 5 (same day): strings, security audit + remediation, reproducibility finalised
+
+### Build, tests & signing (release state)
+
+| Command | Result |
+|---|---|
+| `./gradlew :app:testDebugUnitTest` | **BUILD SUCCESSFUL — 764 tests, 0 failures, 0 errors, 0 skipped (60 classes)** |
+| `./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -PallowScreenshots=true` | **BUILD SUCCESSFUL** |
+| `adb shell am instrument -w com.cipherwell.notezero.test/…AndroidJUnitRunner` | **OK (10 tests)** incl. the extended E2E flow |
+| `./scripts/verify-reproducible.sh` (signed APK) | **RESULT: REPRODUCIBLE** — both builds `c48de399ed4cba11dfb89bebec896d7bc7737d8d544a0c832a34ca01484368da` |
+| `./scripts/verify-reproducible.sh --artifact aab` | **RESULT: REPRODUCIBLE** — both builds `00a66b1e132ac48af4667c1c3e6f2ba872ddcc8cbad4adb0c3b40d79c9caf22a` |
+| published `releases/notezero-0.1.0-release.apk` | `c48de399ed4cba11dfb89bebec896d7bc7737d8d544a0c832a34ca01484368da` (signed, verified certificate) |
+| published `releases/notezero-0.1.0-release.aab` | `00a66b1e132ac48af4667c1c3e6f2ba872ddcc8cbad4adb0c3b40d79c9caf22a` |
+| `apksigner verify --print-certs` | `CN=Cipherwell, O=Cipherwell, OU=NoteZero`, SHA-256 `FA:CA:DD:67:…:92:78` |
+| normal debug build + `adb exec-out screencap -p` | **0-byte capture** → FLAG_SECURE active |
+| `aapt2 dump permissions` on the release APK | `USE_BIOMETRIC` only (+ androidx.core signature-level receiver guard) |
+| `./scripts/check-offline.sh --gradle` | exit 0 |
+| release build with `-PallowScreenshots=true -PdevDisableAutoLock=true` | generated release `BuildConfig`: both fields **false** (debug-variant-only flags, audit F4) |
+
+### Test areas (764 / 60 classes)
+
+data 124 · code engine 139 · ui code 117 · other UI 65 · crypto 61 · ui notes 59 ·
+ui editor 49 · ui attachments 47 · model 43 · backup/settings 37 · ui locks 18 · security 5.
++24 tests over increment 4, mostly regression tests for the audit findings (editor state
+wipe on lock/re-arm, code editor locked gate, code export status gating, stale-session
+handling, recovery-reset session boundary).
+
+### UI strings (Phase-5 store readiness)
+
+- 336 `<string>` resources (325 new, 33 `cd_*` content descriptions) + 6 `<plurals>`;
+  all user-visible Composables now use `stringResource`/`pluralStringResource`.
+- Deliberate inline exceptions documented in `docs/STRINGS.md` (pure-JVM helpers such as
+  relative-time formatting, password policy, enum→message mappings, glyphs like `</>`).
+- Full suite stays green; visible English is unchanged except the corrected recovery-reset
+  copy (audit F2).
+
+### Security audit & remediation
+
+- `docs/AUDIT-2026-11-15-phase5.md`: independent adversarial audit — **0 HIGH / 0 CRITICAL**,
+  2 MEDIUM, 8 LOW, 8 INFO, 12 doc/code mismatches. Crypto core, AAD map, envelope parser,
+  backup authentication, lock masking (list/search/tags/counts/folders/code workspace), and
+  the offline/permission surface held up.
+- Remediation (audit remediation log in the report): **F1** editor ViewModels now wipe
+  decrypted draft/source, undo/redo, conflict and find state on lock or verification re-arm;
+  **F2** recovery-reset copy/docs corrected (phrase is unchanged; rotation is explicit);
+  **F3** credentials no longer stored in saved instance state; **F4** security build flags are
+  debug-variant only, release hardcodes FLAG_SECURE/auto-lock on; **F5** rotated phrase dropped
+  on lock; **F6** code plaintext export is status-gated; **F7** code editor locked-content
+  gate; **F8** biometric/reset session boundaries clear lock verifications; **F9** backup OOM
+  is a clean failure; **F10** auto-lock race surfaces as a stale-session state, not a crash.
+  Doc corrections D1-D12 applied (D1: re-wrap-on-unlock claim removed — deliberately not
+  implemented; DECISIONS #17).
+- Dependency/licence review: runtime deps Apache-2.0 except protobuf-lite BSD-3; test-only
+  JUnit EPL-1.0 is not shipped; no network/telemetry library (DEPENDENCIES.md updated).
+
+### Reproducibility (final)
+
+- Signed **APK and AAB are both byte-identical** across two independent clean builds from
+  different absolute paths (`--no-daemon --no-build-cache`, `SOURCE_DATE_EPOCH=1763054400`),
+  sha256 recorded above and in `releases/SHA256SUMS`.
+- CI now runs `scripts/verify-reproducible.sh --unsigned` on every push (new
+  `reproducibility` job), so nondeterminism fails the pipeline without needing signing keys.
+- AAB byte equality is now claimed (previously open); cross-toolchain reproducibility is still
+  not claimed — F-Droid must use the pinned toolchain in `docs/REPRODUCIBLE-BUILDS.md`.
+
+### Store readiness
+
+- `fastlane/metadata/android/en-US/`: title, short/full description, changelog, and
+  8 phone screenshots copied into `images/phoneScreenshots/`.
+- New `PRIVACY.md` (+ README/SECURITY links); F-Droid recipe updated with the pinned
+  toolchain/reproducible-build notes and `PrivacyPolicy` link.
+- 14 emulator screenshots remain the evidence set under `docs/screenshots/`.
+
+### Still open (Phase 5 tail)
+
+- F-Droid submission after the 3-month window (**2027-02-15**); tag the release commit.
+- Re-wrap-on-unlock KDF upgrade (deliberately not implemented; document-only for now).
+- UI i18n: infrastructure ready (all strings extracted); translations not started.
+- Cross-toolchain reproducibility verification with F-Droid's build image.
+- Remaining INFO items I1/I5 and the dialog-text `rememberSaveable` note (low impact,
+  documented in the audit).

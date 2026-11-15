@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.code
 
+import com.cipherwell.notezero.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,6 +21,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardOptions
@@ -104,7 +106,7 @@ fun CodeTextInputDialog(
             TextButton(
                 onClick = onDismiss,
                 modifier = Modifier.testTag(CodeTags.DIALOG_CANCEL),
-            ) { Text("Cancel") }
+            ) { Text(stringResource(R.string.common_cancel)) }
         },
     )
 }
@@ -143,7 +145,7 @@ fun CodeConfirmDialog(
             TextButton(
                 onClick = onDismiss,
                 modifier = Modifier.testTag(CodeTags.DIALOG_CANCEL),
-            ) { Text("Cancel") }
+            ) { Text(stringResource(R.string.common_cancel)) }
         },
     )
 }
@@ -164,12 +166,10 @@ fun CodeExportConfirmDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         modifier = Modifier.testTag(CodeTags.EXPORT_DIALOG),
-        title = { Text("Export an UNENCRYPTED copy?", style = NoteZeroType.Heading) },
+        title = { Text(stringResource(R.string.code_export_title), style = NoteZeroType.Heading) },
         text = {
             Text(
-                text = "This writes a plaintext copy of \"$fileName\" outside the vault, where " +
-                    "other apps, cloud backups and anyone with the file can read it. The " +
-                    "encrypted vault copy stays unchanged.",
+                text = stringResource(R.string.code_export_message, fileName),
                 style = NoteZeroType.Callout,
             )
         },
@@ -178,14 +178,14 @@ fun CodeExportConfirmDialog(
                 onClick = onConfirm,
                 modifier = Modifier.testTag(CodeTags.EXPORT_CONFIRM),
             ) {
-                Text("Export unencrypted copy", color = MaterialTheme.colorScheme.error)
+                Text(stringResource(R.string.code_export_confirm), color = MaterialTheme.colorScheme.error)
             }
         },
         dismissButton = {
             TextButton(
                 onClick = onDismiss,
                 modifier = Modifier.testTag(CodeTags.EXPORT_CANCEL),
-            ) { Text("Cancel") }
+            ) { Text(stringResource(R.string.common_cancel)) }
         },
     )
 }
@@ -203,7 +203,7 @@ fun CodeMoveDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         modifier = Modifier.testTag(CodeTags.MOVE_DIALOG),
-        title = { Text("Move file", style = NoteZeroType.Heading) },
+        title = { Text(stringResource(R.string.code_move_file), style = NoteZeroType.Heading) },
         text = {
             LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
                 item(key = "root") {
@@ -215,7 +215,7 @@ fun CodeMoveDialog(
                             .padding(vertical = NoteZeroSpacing.s)
                             .testTag(CodeTags.MOVE_ROOT),
                     ) {
-                        Text("Vault root", style = NoteZeroType.Callout)
+                        Text(stringResource(R.string.code_vault_root), style = NoteZeroType.Callout)
                     }
                 }
                 items(targets, key = { it.folder.id }) { choice ->
@@ -240,7 +240,7 @@ fun CodeMoveDialog(
             TextButton(
                 onClick = onDismiss,
                 modifier = Modifier.testTag(CodeTags.DIALOG_CANCEL),
-            ) { Text("Cancel") }
+            ) { Text(stringResource(R.string.common_cancel)) }
         },
     )
 }

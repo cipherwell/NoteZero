@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.code
 
+import com.cipherwell.notezero.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +26,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -65,7 +68,7 @@ internal fun CodeSearchBar(
                     onValueChange = onQueryChange,
                     singleLine = true,
                     textStyle = NoteZeroType.Mono,
-                    placeholder = { Text("Search code files", style = NoteZeroType.Caption) },
+                    placeholder = { Text(stringResource(R.string.code_search_placeholder), style = NoteZeroType.Caption) },
                     modifier = Modifier
                         .weight(1f)
                         .testTag(CodeTags.SEARCH_QUERY),
@@ -82,7 +85,7 @@ internal fun CodeSearchBar(
                     onClick = onClose,
                     modifier = Modifier.heightIn(min = NoteZeroSpacing.minTarget),
                 ) {
-                    Icon(Icons.Filled.Close, contentDescription = "Close search")
+                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.cd_code_close_search))
                 }
             }
             Text(
@@ -114,7 +117,7 @@ internal fun CodeSearchResults(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = "No matches in code files.",
+                text = stringResource(R.string.code_search_no_results),
                 style = NoteZeroType.Callout,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -153,7 +156,7 @@ private fun CodeSearchResultRow(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = NoteZeroSpacing.minTarget)
-            .clickable(onClickLabel = "Open at line ${match.line}", onClick = onOpen)
+            .clickable(onClickLabel = stringResource(R.string.cd_code_open_at_line, match.line), onClick = onOpen)
             .padding(horizontal = NoteZeroSpacing.s, vertical = NoteZeroSpacing.xs)
             .testTag(CodeTags.SEARCH_RESULT_ROW),
         verticalAlignment = Alignment.CenterVertically,
@@ -187,9 +190,9 @@ private fun CodeSearchResultRow(
 }
 
 /** Non-secret count label; never contains the query itself. */
+@Composable
 internal fun searchStatusLabel(query: String, resultCount: Int): String = when {
-    query.isBlank() -> "Type to search every code file"
-    resultCount == 0 -> "No matches"
-    resultCount == 1 -> "1 match"
-    else -> "$resultCount matches"
+    query.isBlank() -> stringResource(R.string.code_search_status_blank)
+    resultCount == 0 -> stringResource(R.string.code_search_status_none)
+    else -> pluralStringResource(R.plurals.code_match_count, resultCount, resultCount)
 }

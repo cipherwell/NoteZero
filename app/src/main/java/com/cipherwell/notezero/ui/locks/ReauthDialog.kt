@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.locks
 
+import com.cipherwell.notezero.R
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -10,6 +11,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import com.cipherwell.notezero.ui.components.common.SecureTextField
 import com.cipherwell.notezero.ui.theme.LocalNoteZeroColors
@@ -30,24 +32,27 @@ fun ReauthDialog(controller: LockReauthController) {
     val target = state.target ?: return
     if (!state.dialogVisible) return
     val danger = LocalNoteZeroColors.current.dangerText
-    val lockable = when (target.kind) {
-        LockTargetKind.NOTE -> "note"
-        LockTargetKind.FOLDER -> "folder"
-    }
     AlertDialog(
         onDismissRequest = controller::cancel,
         modifier = Modifier.testTag("reauth_dialog"),
         title = {
             Text(
-                text = if (target.kind == LockTargetKind.NOTE) "Locked note" else "Locked folder",
+                text = if (target.kind == LockTargetKind.NOTE) {
+                    stringResource(R.string.lock_locked_note)
+                } else {
+                    stringResource(R.string.lock_locked_folder)
+                },
                 style = NoteZeroType.Heading,
             )
         },
         text = {
             Column {
                 Text(
-                    text = "Enter your master password to reveal this $lockable. " +
-                        "It stays hidden until you verify; your vault stays unlocked.",
+                    text = if (target.kind == LockTargetKind.NOTE) {
+                        stringResource(R.string.lock_reauth_note)
+                    } else {
+                        stringResource(R.string.lock_reauth_folder)
+                    },
                     style = NoteZeroType.Callout,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -55,7 +60,7 @@ fun ReauthDialog(controller: LockReauthController) {
                 SecureTextField(
                     value = state.password,
                     onValueChange = controller::updatePassword,
-                    label = "Master password",
+                    label = stringResource(R.string.common_master_password),
                     enabled = !state.verifying && !state.cooldown,
                     isError = state.error != null,
                     modifier = Modifier
@@ -81,14 +86,20 @@ fun ReauthDialog(controller: LockReauthController) {
                 enabled = !state.verifying && !state.cooldown,
                 modifier = Modifier.testTag("reauth_confirm"),
             ) {
-                Text(if (state.verifying) "Verifying…" else "Reveal")
+                Text(
+                    if (state.verifying) {
+                        stringResource(R.string.common_verifying)
+                    } else {
+                        stringResource(R.string.common_reveal)
+                    },
+                )
             }
         },
         dismissButton = {
             TextButton(
                 onClick = controller::cancel,
                 modifier = Modifier.testTag("reauth_cancel"),
-            ) { Text("Cancel") }
+            ) { Text(stringResource(R.string.common_cancel)) }
         },
     )
 }

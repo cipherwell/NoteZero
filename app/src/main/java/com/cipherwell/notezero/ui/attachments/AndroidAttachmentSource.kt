@@ -3,6 +3,7 @@ package com.cipherwell.notezero.ui.attachments
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.cipherwell.notezero.R
 
 /**
  * Resolves a system-picker `content://` result into an [AttachmentSource].
@@ -49,9 +50,9 @@ object AttachmentSourceResolver {
         }
 
         val fallbackName = if (mimeType.startsWith("image/", ignoreCase = true)) {
-            "Photo"
+            context.getString(R.string.attach_photo)
         } else {
-            "Attachment"
+            context.getString(R.string.attach_fallback_name)
         }
         return AttachmentSource(
             displayName = AttachmentFormat.displayName(rawName, fallback = fallbackName),

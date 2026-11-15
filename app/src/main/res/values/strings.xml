@@ -1,18 +1,386 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  NoteZero user-visible strings.
+
+  Naming: <screen>_<purpose>, where <screen> is one of setup_, unlock_, recovery_,
+  settings_, notes_, editor_, lock_, attach_, code_, backup_. Cross-screen wording
+  lives under common_. Accessibility labels (contentDescription, onClickLabel,
+  stateDescription) always start with cd_.
+
+  Keep values byte-identical to the English copy the tests assert. Format arguments use
+  positional %1$s / %1$d placeholders; singular/plural counts are in plurals.xml.
+  See docs/STRINGS.md before renaming or moving an entry.
+-->
 <resources>
     <string name="app_name">NoteZero</string>
 
-    <!-- Setup / unlock / recovery -->
+    <!-- ==================== Common wording ==================== -->
+    <string name="common_cancel">Cancel</string>
+    <string name="common_close">Close</string>
+    <string name="common_create">Create</string>
+    <string name="common_delete">Delete</string>
+    <string name="common_dismiss">Dismiss</string>
+    <string name="common_edit">Edit</string>
+    <string name="common_preview">Preview</string>
+    <string name="common_rename">Rename</string>
+    <string name="common_restore">Restore</string>
+    <string name="common_reveal">Reveal</string>
+    <string name="common_verifying">Verifying…</string>
+    <string name="common_undo">Undo</string>
+    <string name="common_redo">Redo</string>
+    <string name="common_saved">Saved</string>
+    <string name="common_saving">Saving…</string>
+    <string name="common_loading">Loading…</string>
+    <string name="common_session_cleared">The vault locked, so this draft was cleared. Open it again to continue.</string>
+    <string name="common_session_cleared_short">Session ended</string>
+    <string name="common_unsaved_changes">Unsaved changes</string>
+    <string name="common_conflict">Conflict — unsaved edits</string>
+    <string name="common_keep_my_edits">Keep my edits</string>
+    <string name="common_reload_latest">Reload latest</string>
+    <string name="common_working">Working</string>
+    <string name="common_show">Show</string>
+    <string name="common_hide">Hide</string>
+    <string name="common_title">Title</string>
+    <string name="common_master_password">Master password</string>
+    <string name="common_folder_name">Folder name</string>
+
+    <!-- Recovery-phrase clipboard warning and actions (shared setup + settings). -->
+    <string name="common_copy_phrase">Copy phrase</string>
+    <string name="common_clear_clipboard_now">Clear clipboard now</string>
+    <string name="common_copied_clipboard_notice">Copied to the clipboard. Other apps can read the clipboard — paste the words into your password manager now, then clear it.</string>
+    <string name="common_copy_phrase_title">Copy recovery phrase?</string>
+    <string name="common_copy_phrase_message">The clipboard is readable by other apps. Prefer writing the 12 words on paper. If you copy them, paste them into a password manager and clear the clipboard afterwards. NoteZero clears it automatically after 60 seconds.</string>
+    <string name="common_copy_anyway">Copy anyway</string>
+    <string name="common_recovery_clipboard_label">NoteZero recovery phrase</string>
+    <string name="common_code_clipboard_label">NoteZero code</string>
+
+    <!-- Platform biometric prompts (unlock + enrol). -->
+    <string name="common_biometric_unlock_subtitle">Confirm it\'s you to unlock your vault</string>
+    <string name="common_biometric_use_password">Use password</string>
+    <string name="common_biometric_enable_title">Enable biometric unlock</string>
+    <string name="common_biometric_enable_subtitle">Confirm it\'s you to protect your vault key</string>
+
+    <!-- Accessibility labels shared by more than one screen. -->
+    <string name="cd_back">Back</string>
+    <string name="cd_back_to_notes">Back to notes</string>
+    <string name="cd_back_to_parent_folder">Back to parent folder</string>
+    <string name="cd_back_to_code_files">Back to code files</string>
+    <string name="cd_editor_actions">Editor actions</string>
+
+    <!-- ==================== Setup ==================== -->
     <string name="setup_title">Create your vault</string>
     <string name="setup_subtitle">Everything is encrypted on this device. No account, no cloud.</string>
-    <string name="unlock_title">Unlock NoteZero</string>
-    <string name="unlock_biometric">Unlock with biometrics</string>
-    <string name="recovery_title">Recovery phrase</string>
+    <string name="setup_loading">Creating your encrypted vault…</string>
+    <string name="setup_confirm_password">Confirm master password</string>
+    <string name="setup_error_mismatch">The two passwords do not match.</string>
+    <string name="setup_error_rule_missing">The password is missing: %1$s.</string>
+    <string name="setup_error_failed">Could not create the vault. Nothing was saved — try again.</string>
+    <string name="setup_create">Create vault</string>
+    <string name="setup_recovery_warning">NoteZero cannot recover your password. The 12-word recovery phrase, which comes next, is the only backup.</string>
+    <string name="setup_phrase_title">Save your recovery phrase</string>
+    <string name="setup_phrase_subtitle">These 12 words are shown only once. They are the only way back into your vault if you forget the master password.</string>
+    <string name="setup_phrase_warning">Write the words down in order and keep them offline. Anyone with these words can open your vault.</string>
+    <string name="setup_phrase_acknowledge">I\'ve written it down</string>
+    <string name="setup_confirm_title">Confirm your phrase</string>
+    <string name="setup_confirm_subtitle">Enter the requested words to prove you wrote the phrase down.</string>
+    <string name="setup_word_label">Word %1$d</string>
+    <string name="setup_confirm_mismatch">Those words do not match the phrase. Check the order on your written copy.</string>
+    <string name="setup_finish">Finish setup</string>
+    <string name="setup_rotate_hint">If you ever need a new recovery phrase, you can rotate the recovery kit in Settings using your master password.</string>
 
-    <!-- Notes -->
+    <!-- ==================== Unlock ==================== -->
+    <string name="unlock_title">Unlock NoteZero</string>
+    <string name="unlock_locked_title">Your vault is locked</string>
+    <string name="unlock_error_lockout">Too many attempts. Try again in %1$ds.</string>
+    <string name="unlock_error_wrong_password">Incorrect password. Try again.</string>
+    <string name="unlock_error_corrupt">This vault could not be read. Use your recovery phrase to reset it.</string>
+    <string name="unlock_error_biometric_failed">Biometric unlock failed. Enter your password.</string>
+    <string name="unlock_error_biometric_unavailable">Biometric unlock is not available. Enter your password.</string>
+    <string name="unlock_error_biometric_lockout">Biometric authentication is locked. Enter your password.</string>
+    <string name="unlock_button">Unlock</string>
+    <string name="unlock_biometric">Unlock with biometrics</string>
+    <string name="unlock_use_recovery">Use recovery phrase</string>
+    <string name="unlock_tagline">No account. No network. Just your encrypted vault.</string>
+    <string name="unlock_loading">Unlocking…</string>
+
+    <!-- ==================== Recovery ==================== -->
+    <string name="recovery_title">Recovery phrase</string>
+    <string name="recovery_loading">Checking your recovery phrase…</string>
+    <string name="recovery_error_invalid">That phrase is not valid. Check the spelling, the order and that all 12 words are filled in.</string>
+    <string name="recovery_error_wrong_phrase">That phrase does not unlock this vault. Check the words and their order.</string>
+    <string name="recovery_error_corrupt">This vault could not be read. The recovery phrase may not match it.</string>
+    <string name="recovery_error_failed">Could not reset the vault. Nothing was changed — try again.</string>
+    <string name="recovery_heading">Use your recovery phrase</string>
+    <string name="recovery_subtitle">Enter the 12 words of your recovery kit, in order.</string>
+    <string name="recovery_word_label">Word %1$d</string>
+    <string name="recovery_continue">Continue</string>
+    <string name="recovery_back_to_unlock">Back to unlock</string>
+    <string name="recovery_error_mismatch">The two passwords do not match.</string>
+    <string name="recovery_error_rule_missing">The password is missing: %1$s.</string>
+    <string name="recovery_error_corrupt_password">This vault could not be read. Nothing was changed.</string>
+    <string name="recovery_new_password_title">Choose a new password</string>
+    <string name="recovery_new_password_subtitle">Your notes stay encrypted as they are. Only the key wrappers change. Your existing 12-word recovery phrase keeps working — rotating it is a separate action in Settings, and it is the only way to get a new phrase.</string>
+    <string name="recovery_new_password_label">New master password</string>
+    <string name="recovery_confirm_password_label">Confirm new password</string>
+    <string name="recovery_reset">Reset vault</string>
+    <string name="recovery_back_to_phrase">Back to phrase</string>
+    <string name="recovery_reset_notice">Vault reset. Your recovery phrase is unchanged — the one you already wrote down still works. Rotate it in Settings if you want a new one.</string>
+
+    <!-- ==================== Settings ==================== -->
+    <string name="settings">Settings</string>
+    <string name="settings_section_vault">Vault</string>
+    <string name="settings_section_security">Security</string>
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="settings_section_about">About</string>
+    <string name="settings_error_weak_password">The new password does not meet the requirements below.</string>
+    <string name="settings_error_wrong_current">The current password is incorrect.</string>
+    <string name="settings_biometric_title">Biometric unlock</string>
+    <string name="settings_biometric_unavailable">Not available on this device. Password unlock always works.</string>
+    <string name="settings_biometric_enabled">Enabled. Uses the Android Keystore; re-enrolling biometrics invalidates it.</string>
+    <string name="settings_biometric_disabled">Unlock with your fingerprint or face; the key stays in the Keystore.</string>
+    <string name="settings_lock_now">Lock vault now</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_theme_system">System</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_autolock_title">Auto-lock after inactivity</string>
+    <string name="settings_autolock_hour">1 hour</string>
+    <string name="settings_autolock_minutes">%1$d min</string>
+    <string name="settings_autolock_hint">The vault also locks immediately when the app goes to the background.</string>
+    <string name="settings_offline_title">Offline by design</string>
+    <string name="settings_offline_body">No network permission, no account, no telemetry. Notes are encrypted with AES-256-GCM; the vault key is wrapped with PBKDF2-HMAC-SHA256.</string>
+    <string name="settings_version">NoteZero %1$s</string>
+    <string name="settings_loading">Updating your vault…</string>
+    <string name="settings_info_unavailable">Vault information is available after unlock.</string>
+    <string name="settings_info_created">Created</string>
+    <string name="settings_info_items">Items</string>
+    <string name="settings_info_folders">Folders</string>
+    <string name="settings_info_kdf">Key derivation</string>
+    <string name="settings_info_kdf_value">PBKDF2-HMAC-SHA256 · %1$d iterations</string>
+    <string name="settings_info_encryption">Encryption</string>
+    <string name="settings_info_schema">Schema</string>
+    <string name="settings_info_schema_value">v%1$d</string>
+    <string name="settings_change_password_title">Master password</string>
+    <string name="settings_change_password_hint">Changing it rewraps the vault key; your notes are never re-encrypted.</string>
+    <string name="settings_change_password_toggle">Change master password</string>
+    <string name="settings_current_password">Current password</string>
+    <string name="settings_new_password">New password</string>
+    <string name="settings_confirm_new_password">Confirm new password</string>
+    <string name="settings_change_password_mismatch">The two new passwords do not match.</string>
+    <string name="settings_change_password">Change password</string>
+    <string name="settings_recovery_kit">Recovery kit</string>
+    <string name="settings_rotate_hint">Rotate the 12-word phrase if it may have been seen by someone else. The old phrase stops working immediately.</string>
+    <string name="settings_rotate_toggle">Rotate recovery phrase</string>
+    <string name="settings_rotate">Rotate phrase</string>
+    <string name="settings_rotated_title">New recovery phrase</string>
+    <string name="settings_rotated_hint">Write these 12 words down in order. This is the only time they are shown. The previous phrase no longer works.</string>
+    <string name="settings_rotated_saved">I\'ve saved it</string>
+
+    <!-- ==================== Notes ==================== -->
     <string name="notes_title">Notes</string>
+    <string name="notes_nav_folders">Folders</string>
+    <string name="notes_nav_search">Search</string>
     <string name="new_note">New note</string>
     <string name="search_notes">Search notes</string>
     <string name="trash">Trash</string>
-    <string name="settings">Settings</string>
+    <string name="notes_empty_trash">Empty</string>
+    <string name="notes_new_note">New Note</string>
+    <string name="notes_empty_title">No notes yet</string>
+    <string name="notes_empty_subtitle">Tap New Note to capture your first thought. Everything is encrypted on this device.</string>
+    <string name="notes_section_pinned">Pinned</string>
+    <string name="notes_section_favourites">Favourites</string>
+    <string name="notes_section_recent">Recent</string>
+    <string name="notes_folders_empty_title">This folder is empty</string>
+    <string name="notes_folders_empty_subtitle">Create a subfolder, or open a note from the Notes tab and move it here.</string>
+    <string name="notes_folder_items_header">Notes in this folder</string>
+    <string name="notes_search_placeholder">Search title, body, tags, folders</string>
+    <string name="notes_search_empty_title">Search your vault</string>
+    <string name="notes_search_empty_subtitle">Find notes by title, body, tag or folder. Searches stay in memory — nothing leaves the device.</string>
+    <string name="notes_search_no_matches">No matches</string>
+    <string name="notes_search_no_matches_subtitle">No note matches \"%1$s\".</string>
+    <string name="notes_section_results">Results</string>
+    <string name="notes_trash_empty_title">Trash is empty</string>
+    <string name="notes_trash_empty_subtitle">Notes you delete appear here until the trash is emptied.</string>
+    <string name="notes_rename_note">Rename note</string>
+    <string name="notes_title_label">Title</string>
+    <string name="notes_rename_folder">Rename folder</string>
+    <string name="notes_delete_folder_title">Delete folder?</string>
+    <string name="notes_delete_folder_message">Notes and subfolders inside move to the parent folder. Nothing is permanently deleted.</string>
+    <string name="notes_delete_folder">Delete folder</string>
+    <string name="notes_new_folder">New folder</string>
+    <string name="notes_empty_trash_title">Empty trash?</string>
+    <string name="notes_empty_trash_message">Every note in the trash will be permanently deleted. This cannot be undone.</string>
+    <string name="notes_empty_trash_confirm">Empty trash</string>
+    <string name="notes_all_folders">All folders</string>
+    <string name="notes_pin">Pin note</string>
+    <string name="notes_unpin">Unpin note</string>
+    <string name="notes_add_favourite">Add favourite</string>
+    <string name="notes_remove_favourite">Remove favourite</string>
+    <string name="notes_move_to_folder">Move to folder</string>
+    <string name="notes_lock_note">Lock note</string>
+    <string name="notes_remove_lock">Remove lock</string>
+    <string name="notes_move_to_trash">Move to trash</string>
+    <string name="notes_lock_folder">Lock folder</string>
+    <string name="notes_no_folder">No folder (vault root)</string>
+    <string name="notes_locked_verify">Locked · verify to view</string>
+    <string name="notes_folder_path_suffix">"  ·  %1$s"</string>
+
+    <!-- ==================== Editor ==================== -->
+    <string name="editor_font_proportional">Use proportional font</string>
+    <string name="editor_font_monospace">Use monospace font</string>
+    <string name="editor_note_unavailable">This note is no longer available.</string>
+    <string name="editor_count">%1$d words · %2$d chars</string>
+    <string name="editor_body_placeholder">Write in Markdown. Type - [ ] for a checklist.</string>
+    <string name="editor_conflict_title">This note changed elsewhere.</string>
+    <string name="editor_save_missing">Note unavailable</string>
+    <string name="editor_save_error">Save failed — retrying on next edit</string>
+    <string name="editor_preview_empty">Nothing to preview yet. Switch to Edit and start writing Markdown.</string>
+
+    <!-- ==================== Locked notes & folders ==================== -->
+    <string name="lock_locked_note">Locked note</string>
+    <string name="lock_locked_folder">Locked folder</string>
+    <string name="lock_reauth_note">Enter your master password to reveal this note. It stays hidden until you verify; your vault stays unlocked.</string>
+    <string name="lock_reauth_folder">Enter your master password to reveal this folder. It stays hidden until you verify; your vault stays unlocked.</string>
+    <string name="lock_gate_message">This note is locked. Verify it\'s you to show its content; it stays encrypted on this device.</string>
+    <string name="lock_reveal_note">Reveal note</string>
+    <string name="lock_settings_title">Locked notes &amp; folders</string>
+    <string name="lock_settings_none">No locked item is revealed right now. Locked notes and folders stay hidden until you verify with biometrics or your master password.</string>
+    <string name="lock_settings_count">%1$d locked item(s) revealed for this session. Re-arm to hide them again immediately.</string>
+    <string name="lock_settings_rearm">Re-arm locked notes now</string>
+    <string name="lock_biometric_title">Reveal locked content</string>
+    <string name="lock_biometric_subtitle">Confirm it\'s you to show this locked item</string>
+
+    <!-- ==================== Attachments ==================== -->
+    <string name="attach_title">Attachments</string>
+    <string name="attach_fallback_name">Attachment</string>
+    <string name="attach_photo">Photo</string>
+    <string name="attach_file">File</string>
+    <string name="attach_remove_title">Remove attachment?</string>
+    <string name="attach_remove_message">\"%1$s\" will be permanently deleted from this note. The encrypted copy is removed from the vault.</string>
+    <string name="attach_importing">Adding attachment…</string>
+    <string name="attach_error">Attachment error</string>
+    <string name="attach_none">No attachments</string>
+    <string name="attach_viewer_meta">%1$s · %2$s</string>
+    <string name="attach_export_cancelled">Export cancelled.</string>
+    <string name="attach_export_written">Decrypted copy written outside the vault.</string>
+    <string name="attach_export_failed">The decrypted copy could not be written.</string>
+    <string name="attach_preview_unavailable">Preview unavailable — export a decrypted copy to open it.</string>
+    <string name="attach_open_error">This attachment could not be opened. Its bytes may be corrupt, or the vault locked.</string>
+    <string name="attach_export_warning_title">Write an UNENCRYPTED copy?</string>
+    <string name="attach_export_warning_message">This writes an UNENCRYPTED copy outside the vault. Anyone with access to that file — or to the location you choose — can read it, and NoteZero cannot protect it once it leaves the vault.</string>
+    <string name="attach_export_locked">The vault is locked. Unlock to export a copy.</string>
+    <string name="attach_choose_location">Choose location</string>
+
+    <!-- ==================== Code workspace ==================== -->
+    <string name="code_title">Code</string>
+    <string name="code_header_counts">%1$s · %2$s · encrypted</string>
+    <string name="code_locked_hidden">%1$d locked item(s) hidden — verify in Notes</string>
+    <string name="code_new_folder">New folder</string>
+    <string name="code_locked_title">Vault is locked</string>
+    <string name="code_locked_subtitle">Unlock the vault to open the code workspace.</string>
+    <string name="code_new_file_title">New code file</string>
+    <string name="code_file_name">File name</string>
+    <string name="code_untitled_placeholder" translatable="false">untitled.kt</string>
+    <string name="code_rename_file_title">Rename file</string>
+    <string name="code_rename_folder_title">Rename folder</string>
+    <string name="code_delete_file_title">Delete file?</string>
+    <string name="code_delete_file_message">\"%1$s\" moves to the trash. Nothing is permanently deleted from this screen.</string>
+    <string name="code_delete_file">Delete file</string>
+    <string name="code_delete_folder_title">Delete folder?</string>
+    <string name="code_delete_folder_message">Files and subfolders inside move to the parent folder. Nothing is permanently deleted.</string>
+    <string name="code_delete_folder">Delete folder</string>
+    <string name="code_empty_title">Your code vault</string>
+    <string name="code_empty_subtitle">Create a code file to start writing. Every keystroke is encrypted on this device.</string>
+    <string name="code_new_file">New file</string>
+    <string name="code_file_unavailable">This code file is no longer available.</string>
+    <string name="code_too_large">This file is too large to open here (limit 2 MiB). It stays encrypted in the vault.</string>
+    <string name="code_default_file">Code file</string>
+    <string name="code_goto_short">Ln</string>
+    <string name="code_wrap">Wrap</string>
+    <string name="code_indent">Indent</string>
+    <string name="code_outdent">Outdent</string>
+    <string name="code_copy">Copy</string>
+    <string name="code_export">Export</string>
+    <string name="code_find">Find</string>
+    <string name="code_replace">Replace</string>
+    <string name="code_replace_all">All</string>
+    <string name="code_goto_line_title">Go to line</string>
+    <string name="code_goto_line_label">Line number</string>
+    <string name="code_go">Go</string>
+    <string name="code_goto_invalid">Enter a line number</string>
+    <string name="code_goto_range">Enter a line between 1 and %1$d</string>
+    <string name="code_status">Ln %1$d, Col %2$d · %3$s</string>
+    <string name="code_plain_text">Plain text — file over 256 KiB</string>
+    <string name="code_conflict_title">This code file changed elsewhere.</string>
+    <string name="code_search_placeholder">Search code files</string>
+    <string name="code_search_no_results">No matches in code files.</string>
+    <string name="code_search_status_blank">Type to search every code file</string>
+    <string name="code_search_status_none">No matches</string>
+    <string name="code_new_file_here">New file here</string>
+    <string name="code_new_folder_here">New folder here</string>
+    <string name="code_move_file">Move file</string>
+    <string name="code_vault_root">Vault root</string>
+    <string name="code_export_title">Export an UNENCRYPTED copy?</string>
+    <string name="code_export_message">This writes a plaintext copy of \"%1$s\" outside the vault, where other apps, cloud backups and anyone with the file can read it. The encrypted vault copy stays unchanged.</string>
+    <string name="code_export_confirm">Export unencrypted copy</string>
+
+    <!-- Accessibility labels for the code workspace. -->
+    <string name="cd_code_close_workspace_search">Close workspace search</string>
+    <string name="cd_code_search">Search code files</string>
+    <string name="cd_code_close_search">Close search</string>
+    <string name="cd_code_new_file">New code file</string>
+    <string name="cd_code_find_replace">Find and replace</string>
+    <string name="cd_code_previous_match">Previous match</string>
+    <string name="cd_code_next_match">Next match</string>
+    <string name="cd_code_open_at_line">Open at line %1$d</string>
+    <string name="cd_code_collapse_folder">Collapse folder</string>
+    <string name="cd_code_expand_folder">Expand folder</string>
+    <string name="cd_code_open_file">Open file</string>
+    <string name="cd_code_folder_actions">Folder actions</string>
+    <string name="cd_code_file_actions">File actions</string>
+
+    <!-- ==================== Backup ==================== -->
+    <string name="backup_section_title">Data &amp; backup</string>
+    <string name="backup_title">Encrypted backup</string>
+    <string name="backup_description">Backups are sealed with AES-256-GCM under your vault key. Nothing leaves this device except the file you pick.</string>
+    <string name="backup_separate_password_title">Protect this backup with a separate password</string>
+    <string name="backup_separate_password_description">The file then needs that password to be restored anywhere.</string>
+    <string name="backup_password_label">Backup password</string>
+    <string name="backup_confirm_password_label">Confirm backup password</string>
+    <string name="backup_password_mismatch">The two backup passwords do not match.</string>
+    <string name="backup_export">Export encrypted backup</string>
+    <string name="backup_import">Import encrypted backup</string>
+    <string name="backup_credential_note">This backup was created by another vault. Enter that vault\'s master password or its 12-word recovery phrase (words separated by single spaces).</string>
+    <string name="backup_credential_label">Source password or 12-word phrase</string>
+    <string name="backup_restore">Restore</string>
+    <string name="backup_status_idle">No backup in progress.</string>
+    <string name="backup_status_waiting">Waiting for the file picker…</string>
+    <string name="backup_status_opening">Opening the backup…</string>
+    <string name="backup_status_encrypting">Encrypting your vault…</string>
+    <string name="backup_status_restored">Restored %1$d notes and %2$d folders · %3$d duplicates ignored · %4$d conflicts skipped.</string>
+    <string name="backup_status_restored_simple">Backup restored.</string>
+    <string name="backup_status_saved">Encrypted backup saved.</string>
+    <string name="backup_status_needs_credential">This backup belongs to another vault. Enter that vault\'s password or recovery phrase.</string>
+    <string name="backup_error_invalid">That file is not a valid NoteZero backup.</string>
+    <string name="backup_error_wrong_credential">The password or phrase does not open this backup.</string>
+    <string name="backup_error_io">The backup file could not be read or written.</string>
+    <string name="backup_error_locked">The vault locked before the backup finished. Unlock to resume — your chosen file is still selected.</string>
+    <string name="backup_error_empty">There is nothing to back up yet. Create a note first.</string>
+
+    <!-- Accessibility labels for attachments and notes lists. -->
+    <string name="cd_attach_add">Add attachment</string>
+    <string name="cd_attach_delete">Delete attachment</string>
+    <string name="cd_attach_close_viewer">Close attachment viewer</string>
+    <string name="cd_attach_export">Export decrypted copy</string>
+    <string name="cd_notes_code_workspace">Code workspace</string>
+    <string name="cd_notes_trash">Trash</string>
+    <string name="cd_notes_clear_search">Clear search</string>
+    <string name="cd_notes_pinned">Pinned</string>
+    <string name="cd_notes_favourite">Favourite</string>
+    <string name="cd_notes_locked">Locked</string>
+    <string name="cd_notes_locked_note">Locked note</string>
+    <string name="cd_notes_locked_folder">Locked folder</string>
+    <string name="cd_notes_note_actions">Note actions</string>
+    <string name="cd_notes_folder_actions">Folder actions</string>
+    <string name="cd_notes_delete_forever">Delete forever</string>
 </resources>

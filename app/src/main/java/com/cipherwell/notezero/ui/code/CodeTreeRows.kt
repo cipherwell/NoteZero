@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.code
 
+import com.cipherwell.notezero.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,6 +27,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cipherwell.notezero.code.CodeLanguage
@@ -70,7 +73,11 @@ fun CodeFolderRow(
             .heightIn(min = NoteZeroSpacing.minTarget)
             .padding(start = IndentStep * node.depth)
             .clickable(
-                onClickLabel = if (node.expanded) "Collapse folder" else "Expand folder",
+                onClickLabel = if (node.expanded) {
+                    stringResource(R.string.cd_code_collapse_folder)
+                } else {
+                    stringResource(R.string.cd_code_expand_folder)
+                },
                 onClick = onToggle,
             )
             .testTag(CodeTags.FOLDER_ROW),
@@ -78,7 +85,11 @@ fun CodeFolderRow(
     ) {
         Icon(
             imageVector = if (node.expanded) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowRight,
-            contentDescription = if (node.expanded) "Collapse folder" else "Expand folder",
+            contentDescription = if (node.expanded) {
+                stringResource(R.string.cd_code_collapse_folder)
+            } else {
+                stringResource(R.string.cd_code_expand_folder)
+            },
             modifier = Modifier.size(24.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -93,7 +104,11 @@ fun CodeFolderRow(
                 .padding(start = NoteZeroSpacing.xs),
         )
         Text(
-            text = if (node.fileCount == 1) "1 file" else "${node.fileCount} files",
+            text = pluralStringResource(
+                R.plurals.code_file_count,
+                node.fileCount,
+                node.fileCount,
+            ),
             style = NoteZeroType.Caption,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -101,32 +116,32 @@ fun CodeFolderRow(
             onClick = { menuOpen = true },
             modifier = Modifier.testTag(CodeTags.FOLDER_MORE),
         ) {
-            Icon(Icons.Filled.MoreVert, contentDescription = "Folder actions")
+            Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.cd_code_folder_actions))
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             DropdownMenuItem(
-                text = { Text("New file here", style = NoteZeroType.Callout) },
+                text = { Text(stringResource(R.string.code_new_file_here), style = NoteZeroType.Callout) },
                 onClick = {
                     menuOpen = false
                     onNewFile()
                 },
             )
             DropdownMenuItem(
-                text = { Text("New folder here", style = NoteZeroType.Callout) },
+                text = { Text(stringResource(R.string.code_new_folder_here), style = NoteZeroType.Callout) },
                 onClick = {
                     menuOpen = false
                     onNewFolder()
                 },
             )
             DropdownMenuItem(
-                text = { Text("Rename folder", style = NoteZeroType.Callout) },
+                text = { Text(stringResource(R.string.code_rename_folder_title), style = NoteZeroType.Callout) },
                 onClick = {
                     menuOpen = false
                     onRename()
                 },
             )
             DropdownMenuItem(
-                text = { Text("Delete folder", style = NoteZeroType.Callout) },
+                text = { Text(stringResource(R.string.code_delete_folder), style = NoteZeroType.Callout) },
                 onClick = {
                     menuOpen = false
                     onDelete()
@@ -155,7 +170,7 @@ fun CodeFileRow(
             .fillMaxWidth()
             .heightIn(min = NoteZeroSpacing.minTarget)
             .padding(start = IndentStep * node.depth)
-            .clickable(onClickLabel = "Open file", onClick = onOpen)
+            .clickable(onClickLabel = stringResource(R.string.cd_code_open_file), onClick = onOpen)
             .testTag(CodeTags.FILE_ROW),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -179,25 +194,25 @@ fun CodeFileRow(
             onClick = { menuOpen = true },
             modifier = Modifier.testTag(CodeTags.FILE_MORE),
         ) {
-            Icon(Icons.Filled.MoreVert, contentDescription = "File actions")
+            Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.cd_code_file_actions))
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             DropdownMenuItem(
-                text = { Text("Rename file", style = NoteZeroType.Callout) },
+                text = { Text(stringResource(R.string.code_rename_file_title), style = NoteZeroType.Callout) },
                 onClick = {
                     menuOpen = false
                     onRename()
                 },
             )
             DropdownMenuItem(
-                text = { Text("Move file", style = NoteZeroType.Callout) },
+                text = { Text(stringResource(R.string.code_move_file), style = NoteZeroType.Callout) },
                 onClick = {
                     menuOpen = false
                     onMove()
                 },
             )
             DropdownMenuItem(
-                text = { Text("Delete file", style = NoteZeroType.Callout) },
+                text = { Text(stringResource(R.string.code_delete_file), style = NoteZeroType.Callout) },
                 onClick = {
                     menuOpen = false
                     onDelete()

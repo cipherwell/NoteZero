@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.screens.unlock
 
+import com.cipherwell.notezero.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,12 +18,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import com.cipherwell.notezero.ui.UnlockFailure
 import com.cipherwell.notezero.ui.UnlockUiState
@@ -55,7 +56,9 @@ fun UnlockScreen(
     onUseRecoveryPhrase: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var password by rememberSaveable { mutableStateOf("") }
+    // Plain `remember`: a master password must never be written to saved instance state
+    // (that Bundle leaves the process). Audit finding F3.
+    var password by remember { mutableStateOf("") }
     val passwordFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { passwordFocus.requestFocus() }
     LaunchedEffect(unlock.isWorking) {
@@ -64,16 +67,17 @@ fun UnlockScreen(
 
     val errorText: String? = when {
         unlock.lockoutActive ->
-            "Too many attempts. Try again in ${unlock.lockoutSecondsLeft}s."
-        unlock.failure == UnlockFailure.WRONG_PASSWORD -> "Incorrect password. Try again."
+            stringResource(R.string.unlock_error_lockout, unlock.lockoutSecondsLeft)
+        unlock.failure == UnlockFailure.WRONG_PASSWORD ->
+            stringResource(R.string.unlock_error_wrong_password)
         unlock.failure == UnlockFailure.CORRUPT_VAULT ->
-            "This vault could not be read. Use your recovery phrase to reset it."
+            stringResource(R.string.unlock_error_corrupt)
         unlock.failure == UnlockFailure.BIOMETRIC_FAILED ->
-            "Biometric unlock failed. Enter your password."
+            stringResource(R.string.unlock_error_biometric_failed)
         unlock.failure == UnlockFailure.BIOMETRIC_UNAVAILABLE ->
-            "Biometric unlock is not available. Enter your password."
+            stringResource(R.string.unlock_error_biometric_unavailable)
         unlock.failure == UnlockFailure.BIOMETRIC_LOCKOUT ->
-            "Biometric authentication is locked. Enter your password."
+            stringResource(R.string.unlock_error_biometric_lockout)
         else -> null
     }
 
@@ -90,14 +94,14 @@ fun UnlockScreen(
                 verticalArrangement = Arrangement.Center,
             ) {
                 Text(
-                    text = "NoteZero",
+                    text = stringResource(R.string.app_name),
                     style = NoteZeroType.LargeTitle,
                     color = MaterialTheme.colorScheme.onBackground,
                     textAlign = TextAlign.Center,
                 )
                 NzFormSpacer(NoteZeroSpacing.s)
                 Text(
-                    text = "Your vault is locked",
+                    text = stringResource(R.string.unlock_locked_title),
                     style = NoteZeroType.Body,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -106,7 +110,7 @@ fun UnlockScreen(
                 SecureTextField(
                     value = password,
                     onValueChange = { password = it },
-                    label = "Master password",
+                    label = stringResource(R.string.common_master_password),
                     modifier = Modifier.testTag("unlock_password"),
                     enabled = !unlock.isWorking && !unlock.lockoutActive,
                     isError = errorText != null,
@@ -129,7 +133,7 @@ fun UnlockScreen(
                 }
                 NzFormSpacer(NoteZeroSpacing.xl)
                 NzPrimaryButton(
-                    text = "Unlock",
+                    text = stringResource(R.string.unlock_button),
                     onClick = {
                         onUnlock(password.toCharArray())
                         password = ""
@@ -143,7 +147,7 @@ fun UnlockScreen(
                 if (showBiometric) {
                     NzFormSpacer(NoteZeroSpacing.m)
                     NzSecondaryButton(
-                        text = "Unlock with biometrics",
+                        text = stringResource(R.string.unlock_biometric),
                         onClick = onBiometricUnlock,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -153,7 +157,7 @@ fun UnlockScreen(
                 }
                 NzFormSpacer(NoteZeroSpacing.l)
                 NzTextButton(
-                    text = "Use recovery phrase",
+                    text = stringResource(R.string.unlock_use_recovery),
                     onClick = onUseRecoveryPhrase,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -162,7 +166,7 @@ fun UnlockScreen(
                 )
                 Spacer(Modifier.height(NoteZeroSpacing.m))
                 Text(
-                    text = "No account. No network. Just your encrypted vault.",
+                    text = stringResource(R.string.unlock_tagline),
                     style = NoteZeroType.Caption,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -171,7 +175,7 @@ fun UnlockScreen(
             }
         }
         if (unlock.isWorking) {
-            NzLoadingOverlay(label = "Unlocking…")
+            NzLoadingOverlay(label = stringResource(R.string.unlock_loading))
         }
     }
 }

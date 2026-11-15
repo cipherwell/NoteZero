@@ -8,9 +8,11 @@ import com.cipherwell.notezero.data.VaultStatus
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -57,6 +59,25 @@ class NotesViewModel(
 
     /** Latest controls value (not thread-safe for external mutation; read-only helper). */
     val currentControls: NotesControls get() = controls.value
+
+    private val _sessionStale = MutableStateFlow(false)
+
+    /**
+     * True when a mutation lost the auto-lock race: the `isUnlocked()` pre-check passed but
+     * the repository had already wiped the VMK, so it threw `IllegalStateException` instead
+     * of mutating. Non-secret refresh state (no ids, no content) — the screen can show a
+     * "session ended" notice and the vault's LOCKED routing takes over. Reset on the next
+     * unlocked session. Audit finding F10.
+     */
+    val sessionStale: StateFlow<Boolean> = _sessionStale.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            repository.status.collect { status ->
+                if (status == VaultStatus.UNLOCKED) _sessionStale.value = false
+            }
+        }
+    }
 
     // ---- Filter / navigation -------------------------------------------------
 
@@ -194,12 +215,22 @@ class NotesViewModel(
 
     /**
      * Runs [block] only while unlocked. The vault can auto-lock between a click and the
-     * coroutine dispatch, hence the guard inside the coroutine as well.
+     * coroutine dispatch, hence the guard inside the coroutine as well. That guard is still
+     * outside the repository mutex, so the lock can win again before the call: the resulting
+     * `IllegalStateException("Vault is locked")` is converted into [sessionStale] instead of
+     * escaping an uncaught coroutine exception and crashing the app (audit F10).
      */
     private fun mutate(block: suspend () -> Unit) {
         if (!isUnlocked()) return
         viewModelScope.launch {
-            if (isUnlocked()) block()
+            if (!isUnlocked()) return@launch
+            try {
+                block()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: IllegalStateException) {
+                _sessionStale.value = true
+            }
         }
     }
 }

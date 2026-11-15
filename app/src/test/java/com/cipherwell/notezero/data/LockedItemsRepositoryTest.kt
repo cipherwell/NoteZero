@@ -3,6 +3,7 @@ package com.cipherwell.notezero.data
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.cipherwell.notezero.crypto.BiometricDecrypt
 import com.cipherwell.notezero.crypto.CryptoAad
 import com.cipherwell.notezero.crypto.KeyEnvelope
 import com.cipherwell.notezero.crypto.NoteCrypto
@@ -28,6 +29,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.UUID
+import javax.crypto.Cipher
 
 /**
  * End-to-end tests for locked notes & folders (decision #15) against real crypto and
@@ -332,6 +334,43 @@ class LockedItemsRepositoryTest {
     }
 
     @Test
+    fun recoveryResetAndBiometricUnlockStartUnverifiedWithACleanRateLimit() = runBlocking {
+        val repo = newRepository()
+        val phrase = repo.setupVault(PASSWORD.toCharArray())
+        val lockedNote = repo.saveItem(repo.createItem(ItemKind.NOTE).copy(title = "locked"))
+        assertTrue(repo.setItemLocked(lockedNote.id, true))
+        repo.markLockVerified(lockedNote.id)
+        assertEquals(setOf(lockedNote.id), repo.verifiedLockedIds.value)
+
+        // A failed re-auth arms the growing-delay limiter for this session.
+        assertFalse(repo.verifyMasterPassword("nope".toCharArray()))
+
+        // Recovery reset re-wraps the SAME phrase (decision #12) and is a session boundary:
+        // verifications are re-masked and the limiter starts clean, like unlock()/setupVault().
+        assertEquals(
+            UnlockResult.SUCCESS,
+            repo.resetWithRecoveryPhrase(phrase, NEW_PASSWORD.toCharArray()),
+        )
+        assertTrue("recovery reset clears every verification", repo.verifiedLockedIds.value.isEmpty())
+        assertTrue(
+            "recovery reset clears the re-auth limiter (no clock advance needed)",
+            repo.verifyMasterPassword(NEW_PASSWORD.toCharArray()),
+        )
+
+        // completeBiometricUnlock tears a live session down before trying the cipher. With no
+        // Keystore enrolment in a JVM test the attempt fails, but the teardown must re-mask
+        // immediately: a stale verification can never outlive the VMK it belongs to.
+        repo.markLockVerified(lockedNote.id)
+        assertEquals(setOf(lockedNote.id), repo.verifiedLockedIds.value)
+        val failed = repo.completeBiometricUnlock(
+            BiometricDecrypt(Cipher.getInstance("AES/GCM/NoPadding")),
+        )
+        assertEquals(UnlockResult.BIOMETRIC_FAILED, failed)
+        assertTrue("biometric teardown clears every verification", repo.verifiedLockedIds.value.isEmpty())
+        repo.awaitStatus(VaultStatus.LOCKED)
+    }
+
+    @Test
     fun backgroundLockClearsVerificationsButPickerDeferralDoesNot() = runBlocking {
         val repo = unlockedRepository()
         val note = repo.saveItem(repo.createItem(ItemKind.NOTE).copy(title = "locked"))
@@ -555,5 +594,6 @@ class LockedItemsRepositoryTest {
 
     private companion object {
         const val PASSWORD = "correct horse battery staple"
+        const val NEW_PASSWORD = "another correct horse battery staple"
     }
 }

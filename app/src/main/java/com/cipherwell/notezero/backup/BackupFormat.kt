@@ -171,9 +171,22 @@ object BackupFormat {
             envelopes = envelopes,
         )
         val aad = buildAad(header)
-        val plaintext = encodePayload(contents)
+        // Peak heap while writing is several times the payload (plaintext payload, its
+        // encrypted copy, plus the attachment blobs already held by the repository). A vault
+        // close to the 64 MiB stream cap can exhaust a small heap: convert the allocation
+        // failure into a normal failure so the repository returns `false` instead of the
+        // process dying (audit finding F9). Nothing has been written yet, so no partial file.
+        val plaintext = try {
+            encodePayload(contents)
+        } catch (oom: OutOfMemoryError) {
+            throw IllegalStateException("backup payload does not fit in memory", oom)
+        }
         try {
-            val sealed = NoteCrypto.encrypt(NoteCrypto.secretKey(vmk), plaintext, aad)
+            val sealed = try {
+                NoteCrypto.encrypt(NoteCrypto.secretKey(vmk), plaintext, aad)
+            } catch (oom: OutOfMemoryError) {
+                throw IllegalStateException("backup payload does not fit in memory", oom)
+            }
             val buffered = BufferedOutputStream(out, 64 * 1024)
             buffered.write(header)
             writeU32(buffered, sealed.size.toLong())
@@ -192,7 +205,12 @@ object BackupFormat {
     fun read(input: InputStream): BackupEnvelope? = try {
         val bytes = readBounded(input)
         if (bytes == null || bytes.isEmpty()) null else decodeEnvelope(bytes)
-    } catch (t: Throwable) {
+    } catch (oom: OutOfMemoryError) {
+        // A hostile/large file (or a small heap) must fail closed, not crash the app: peak
+        // heap is several multiples of MAX_BACKUP_BYTES, so the stream cap is not an OOM
+        // guarantee (audit finding F9; chunked format v3 is the real fix).
+        null
+    } catch (e: Exception) {
         null
     }
 
@@ -499,6 +517,12 @@ class BackupEnvelope internal constructor(
         } ?: return null
         return try {
             decodeDecryptedPayload(plaintext)
+        } catch (oom: OutOfMemoryError) {
+            // Up to MAX_ITEM_COUNT decoded records can exhaust the heap before validation
+            // finishes; report an unreadable file instead of crashing (audit finding F9).
+            null
+        } catch (e: Exception) {
+            null
         } finally {
             NoteCrypto.wipe(plaintext)
         }

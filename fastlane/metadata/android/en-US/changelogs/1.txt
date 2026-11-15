@@ -1,1 +1,1 @@
-First bootstrap build (Phase 1): security core and notes MVP skeleton.
+First public build (0.1.0): encrypted vault, notes MVP with Markdown/blocks/checklists, folders/tags/pins/search/trash, encrypted attachments, encrypted SAF backup/restore, local code editor with syntax highlighting and workspace search, locked notes/folders, biometric unlock, auto-lock. No network permission.

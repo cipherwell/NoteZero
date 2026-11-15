@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.attachments
 
+import com.cipherwell.notezero.R
 import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -46,6 +47,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -116,7 +119,7 @@ fun AttachmentStrip(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "Attachments",
+                text = stringResource(R.string.attach_title),
                 style = NoteZeroType.FieldLabel,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -135,13 +138,13 @@ fun AttachmentStrip(
             Box {
                 NzIconButton(
                     icon = Icons.Filled.Add,
-                    contentDescription = "Add attachment",
+                    contentDescription = stringResource(R.string.cd_attach_add),
                     onClick = { menuOpen = true },
                     modifier = Modifier.testTag("attachment_add"),
                 )
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(
-                        text = { Text("Photo", style = NoteZeroType.Callout) },
+                        text = { Text(stringResource(R.string.attach_photo), style = NoteZeroType.Callout) },
                         modifier = Modifier.testTag("attachment_add_photo"),
                         onClick = {
                             menuOpen = false
@@ -159,7 +162,7 @@ fun AttachmentStrip(
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("File", style = NoteZeroType.Callout) },
+                        text = { Text(stringResource(R.string.attach_file), style = NoteZeroType.Callout) },
                         modifier = Modifier.testTag("attachment_add_file"),
                         onClick = {
                             menuOpen = false
@@ -217,11 +220,10 @@ fun AttachmentStrip(
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
             modifier = Modifier.testTag("attachment_delete_dialog"),
-            title = { Text("Remove attachment?", style = NoteZeroType.Heading) },
+            title = { Text(stringResource(R.string.attach_remove_title), style = NoteZeroType.Heading) },
             text = {
                 Text(
-                    text = "\"${target.displayName}\" will be permanently deleted from " +
-                        "this note. The encrypted copy is removed from the vault.",
+                    text = stringResource(R.string.attach_remove_message, target.displayName),
                     style = NoteZeroType.Body,
                 )
             },
@@ -236,7 +238,7 @@ fun AttachmentStrip(
                         .testTag("attachment_delete_confirm"),
                 ) {
                     Text(
-                        text = "Delete",
+                        text = stringResource(R.string.common_delete),
                         style = NoteZeroType.Button,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -249,7 +251,7 @@ fun AttachmentStrip(
                         .heightIn(min = NoteZeroSpacing.minTarget)
                         .testTag("attachment_delete_cancel"),
                 ) {
-                    Text("Cancel", style = NoteZeroType.Button)
+                    Text(stringResource(R.string.common_cancel), style = NoteZeroType.Button)
                 }
             },
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -299,7 +301,7 @@ private fun AttachmentChip(
             }
             NzIconButton(
                 icon = Icons.Filled.Delete,
-                contentDescription = "Delete attachment",
+                contentDescription = stringResource(R.string.cd_attach_delete),
                 onClick = onDelete,
                 modifier = Modifier.testTag("attachment_delete"),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -364,10 +366,10 @@ private fun typeBadge(ref: AttachmentRef): String {
     }
 }
 
+@Composable
 private fun statusLabel(state: AttachmentUiState, count: Int): String = when {
-    state is AttachmentUiState.Importing -> "Adding attachment…"
-    state is AttachmentUiState.Error -> "Attachment error"
-    count == 1 -> "1 attachment"
-    count > 1 -> "$count attachments"
-    else -> "No attachments"
+    state is AttachmentUiState.Importing -> stringResource(R.string.attach_importing)
+    state is AttachmentUiState.Error -> stringResource(R.string.attach_error)
+    count > 0 -> pluralStringResource(R.plurals.attach_count, count, count)
+    else -> stringResource(R.string.attach_none)
 }

@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.editor
 
+import com.cipherwell.notezero.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -30,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -76,7 +78,7 @@ fun MarkdownPreview(
     ) {
         if (document.blocks.isEmpty()) {
             Text(
-                text = "Nothing to preview yet. Switch to Edit and start writing Markdown.",
+                text = stringResource(R.string.editor_preview_empty),
                 style = NoteZeroType.Callout,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

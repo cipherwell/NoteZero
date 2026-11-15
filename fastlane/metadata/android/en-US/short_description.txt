@@ -1,1 +1,1 @@
-Offline, end-to-end encrypted notes and a code editor. No cloud, no account, no network.
+Offline, end-to-end encrypted notes, attachments and code editor. No cloud, no account, no network.

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Count-sensitive strings. Android selects exactly one quantity per locale; "one" and
+  "other" are the only English forms NoteZero needs today. Values keep the rendered
+  English identical to the pre-extraction literals (e.g. "1 file", "0 folders").
+-->
+<resources>
+    <!-- Folder rows: "3 notes", "3 notes · 2 folders". -->
+    <plurals name="notes_note_count">
+        <item quantity="one">%1$d note</item>
+        <item quantity="other">%1$d notes</item>
+    </plurals>
+    <plurals name="notes_folder_count">
+        <item quantity="one">%1$d folder</item>
+        <item quantity="other">%1$d folders</item>
+    </plurals>
+
+    <!-- Attachment strip status: "1 attachment" / "2 attachments". -->
+    <plurals name="attach_count">
+        <item quantity="one">%1$d attachment</item>
+        <item quantity="other">%1$d attachments</item>
+    </plurals>
+
+    <!-- Code workspace header and folder rows: "1 file", "0 folders". -->
+    <plurals name="code_file_count">
+        <item quantity="one">%1$d file</item>
+        <item quantity="other">%1$d files</item>
+    </plurals>
+    <plurals name="code_folder_count">
+        <item quantity="one">%1$d folder</item>
+        <item quantity="other">%1$d folders</item>
+    </plurals>
+
+    <!-- Workspace search status: "1 match" / "3 matches". -->
+    <plurals name="code_match_count">
+        <item quantity="one">%1$d match</item>
+        <item quantity="other">%1$d matches</item>
+    </plurals>
+</resources>

@@ -69,15 +69,21 @@ per attachment:
   32  raw SHA-256 (model holds the lowercase 64-char hex string)
 ```
 
-Version 2 is written from now on. **Version 1 payloads still decode** to an item with an
-empty attachment list — no migration, no re-encryption; the next save writes v2. Unknown
-versions, a version-1 payload with trailing bytes, oversized counts/fields/bad hex or any
-truncation fail closed (row skipped+counted, never plaintext). Payload version table:
+**Version 3** is written from now on: Phase 5 appended a trailing `locked` byte to the v2
+payload (decision #15). v2 is the same layout without that byte. **Version 1 and 2 payloads
+still decode** — v1 to an item with an empty attachment list, v2 with `locked = false` — no
+migration, no re-encryption; the next save writes v3. Unknown versions, a version-1 payload
+with trailing bytes, oversized counts/fields/bad hex or any truncation fail closed (row
+skipped+counted, never plaintext). Payload version table:
 
-| payload version | written by | attachments | reader support |
-|---|---|---|---|
-| 1 | Phase 1–3 builds | none (empty list) | yes (until a future major format change) |
-| 2 | this build | metadata list | yes |
+| payload version | written by | attachments | lock flag | reader support |
+|---|---|---|---|---|
+| 1 | Phase 1–3 builds | none (empty list) | absent (⇒ unlocked) | yes (until a future major format change) |
+| 2 | Phase 4 builds | metadata list | absent (⇒ unlocked) | yes |
+| 3 | this build (Phase 5) | metadata list | trailing `locked` byte | yes |
+
+The authoritative layout of v3 (including the lock byte, inside the AEAD envelope) is
+`docs/DATA-MODEL.md` §2 (audit D7).
 
 **Attachment refs are repository-owned metadata.** `saveItem` keeps the stored list; only
 `importAttachment`/`deleteAttachment` (and backup restore) mutate it. This makes editor
@@ -189,10 +195,12 @@ backup.
   SHA-256/AAD checks). v1 backups import unchanged with `attachmentsImported = attachmentsSkipped = 0`.
 - `BackupImportReport` gains defaulted `attachmentsImported` / `attachmentsSkipped` counts.
 
-**Size cap:** the backup envelope keeps its existing 64 MiB `MAX_BACKUP_BYTES` OOM guard, and
-attachment bytes count toward it. A vault whose attachments no longer fit fails the export
+**Size cap:** the backup envelope keeps its existing 64 MiB `MAX_BACKUP_BYTES` **stream cap**,
+and attachment bytes count toward it. A vault whose attachments no longer fit fails the export
 cleanly (`exportBackup` returns false, no partial file is written) — it never silently drops
-attachments and never pretends a truncated backup is valid. Chunked/streamed v3 backups are
+attachments and never pretends a truncated backup is valid. This is a cap on the file, not an
+OOM guarantee: peak heap while importing/exporting is several times the cap (audit F9), so
+both boundaries now catch `OutOfMemoryError` and fail closed. Chunked/streamed v3 backups are
 the follow-up if the quota is ever fully used.
 
 ## 9. Threat notes / what this does not hide

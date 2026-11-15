@@ -1,34 +1,59 @@
 #!/usr/bin/env bash
-# Verify whether NoteZero release builds are byte-for-byte reproducible.
+# Verify whether NoteZero release artifacts are byte-for-byte reproducible.
 #
 # Builds the same commit twice from two *different* directories (so absolute-path leakage is
-# exercised too), with a fixed SOURCE_DATE_EPOCH, then compares the signed APKs byte-for-byte
-# and, if they differ, lists the zip entries that differ with their SHA-256.
+# exercised too), with a fixed SOURCE_DATE_EPOCH, then compares the selected artifact
+# byte-for-byte and, if it differs, lists the zip entries that differ with their SHA-256.
 #
-# Requirements: JDK 17, Android SDK (local.properties), release signing env sourced:
-#   set -a; . ~/.cipherwell-release/notezero.env; set +a
+# Usage:
+#   scripts/verify-reproducible.sh [workdir]                        # signed release APK
+#   scripts/verify-reproducible.sh --unsigned [workdir]             # unsigned release APK (CI)
+#   scripts/verify-reproducible.sh --artifact aab [workdir]         # release AAB
 #
-# Usage: scripts/verify-reproducible.sh [workdir]     (default /tmp/notezero-repro)
-# Exit 0 = byte-identical (reproducible), 1 = differences found (report printed).
+# Requirements: JDK 17, Android SDK (local.properties). Signed mode additionally requires
+# the release signing env:  set -a; . ~/.cipherwell-release/notezero.env; set +a
+#
+# Exit codes: 0 = byte-identical (reproducible), 1 = differences found (report printed),
+#             2 = setup/build error.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WORK="${1:-/tmp/notezero-repro}"
 JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-17-openjdk}"
 export JAVA_HOME
 # Fixed reference instant: 2026-11-15T12:00:00Z. Same for both builds and documented in
 # docs/REPRODUCIBLE-BUILDS.md so third parties can re-run the check identically.
 export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-1763054400}"
 
+ARTIFACT="apk"
+UNSIGNED=0
+WORK=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --unsigned) UNSIGNED=1 ;;
+    --artifact) shift; ARTIFACT="${1:-apk}" ;;
+    --artifact=*) ARTIFACT="${1#--artifact=}" ;;
+    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    *) WORK="$1" ;;
+  esac
+  shift
+done
+WORK="${WORK:-/tmp/notezero-repro-$ARTIFACT$([[ $UNSIGNED -eq 1 ]] && echo '-unsigned')}"
+
 fail() { echo "ERROR: $*" >&2; exit 2; }
 
-[[ -n "${NOTEZERO_KEYSTORE_PATH:-}" ]] || fail "source ~/.cipherwell-release/notezero.env first (signed release required)"
+if [[ "$ARTIFACT" != "apk" && "$ARTIFACT" != "aab" ]]; then
+  fail "--artifact must be 'apk' or 'aab' (got: $ARTIFACT)"
+fi
+if [[ $UNSIGNED -eq 0 && -z "${NOTEZERO_KEYSTORE_PATH:-}" ]]; then
+  fail "signed mode requires the release signing env (source ~/.cipherwell-release/notezero.env); use --unsigned for the CI check"
+fi
 [[ -x "$JAVA_HOME/bin/java" ]] || fail "JDK 17 not found at $JAVA_HOME"
 
 echo "== NoteZero reproducible-release check =="
-echo "project : $ROOT"
-echo "workdir : $WORK"
-echo "epoch   : $SOURCE_DATE_EPOCH"
+echo "project  : $ROOT"
+echo "workdir  : $WORK"
+echo "epoch    : $SOURCE_DATE_EPOCH"
+echo "artifact : $ARTIFACT$([[ $UNSIGNED -eq 1 ]] && echo ' (unsigned)')"
 echo
 
 rm -rf "$WORK"
@@ -46,12 +71,29 @@ copy_project() {
 build_once() {
   local dir="$1" label="$2"
   echo "-- building $label in $dir"
-  ( cd "$dir" && ./gradlew --no-daemon --no-build-cache --console=plain -q :app:assembleRelease ) \
-    || fail "build $label failed"
-  local apk="$dir/app/build/outputs/apk/release/app-release.apk"
-  [[ -f "$apk" ]] || fail "build $label produced no signed APK at $apk"
-  cp "$apk" "$WORK/$label.apk"
-  sha256sum "$WORK/$label.apk" | sed "s|$WORK/||"
+  (
+    cd "$dir" || exit 1
+    if [[ $UNSIGNED -eq 1 ]]; then
+      unset NOTEZERO_KEYSTORE_PATH NOTEZERO_STORE_PASSWORD NOTEZERO_KEY_PASSWORD NOTEZERO_KEY_ALIAS
+    fi
+    ./gradlew --no-daemon --no-build-cache --console=plain -q \
+      :app:assembleRelease :app:bundleRelease
+  ) || fail "build $label failed"
+
+  local artifact
+  case "$ARTIFACT" in
+    apk)
+      if [[ $UNSIGNED -eq 1 ]]; then
+        artifact="$dir/app/build/outputs/apk/release/app-release-unsigned.apk"
+      else
+        artifact="$dir/app/build/outputs/apk/release/app-release.apk"
+      fi
+      ;;
+    aab) artifact="$dir/app/build/outputs/bundle/release/app-release.aab" ;;
+  esac
+  [[ -f "$artifact" ]] || fail "build $label produced no artifact at $artifact"
+  cp "$artifact" "$WORK/$label.$ARTIFACT"
+  sha256sum "$WORK/$label.$ARTIFACT" | sed "s|$WORK/||"
 }
 
 copy_project "$WORK/a"
@@ -61,13 +103,13 @@ build_once "$WORK/a" "build-a"
 build_once "$WORK/b" "build-b"
 echo
 
-A="$WORK/build-a.apk"
-B="$WORK/build-b.apk"
+A="$WORK/build-a.$ARTIFACT"
+B="$WORK/build-b.$ARTIFACT"
 HA="$(sha256sum "$A" | cut -d' ' -f1)"
 HB="$(sha256sum "$B" | cut -d' ' -f1)"
 
 if [[ "$HA" == "$HB" ]]; then
-  echo "RESULT: REPRODUCIBLE — both builds are byte-identical (sha256 $HA)."
+  echo "RESULT: REPRODUCIBLE — both $ARTIFACT builds are byte-identical (sha256 $HA)."
   exit 0
 fi
 
@@ -75,7 +117,7 @@ echo "RESULT: NOT byte-identical."
 echo "  a: $HA"
 echo "  b: $HB"
 echo
-echo "== differing APK entries =="
+echo "== differing archive entries =="
 python3 - "$A" "$B" <<'PY'
 import hashlib, sys, zipfile
 
@@ -110,7 +152,7 @@ for name in diff:
     print(f"       a sha256={sa} crc={ca:08x} time={ta} size={la}")
     print(f"       b sha256={sb} crc={cb:08x} time={tb} size={lb}")
 if not only_a and not only_b and not diff:
-    print("  all zip entries are identical — difference is in the signing block / zip structure")
+    print("  all archive entries are identical — difference is in the signing block / archive structure")
 PY
 echo
 echo "Record this output in docs/REPRODUCIBLE-BUILDS.md (state the exact causes found)."

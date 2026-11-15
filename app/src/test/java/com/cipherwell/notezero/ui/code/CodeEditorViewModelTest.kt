@@ -509,18 +509,23 @@ class CodeEditorViewModelTest {
     }
 
     @Test
-    fun `locking the vault stops writes`() = runTest(dispatcher) {
+    fun `locking the vault drops the source and refuses new edits`() = runTest(dispatcher) {
         seed()
         val model = viewModel()
         advanceUntilIdle()
 
+        // Audit F1: the Activity-scoped ViewModel must wipe the source on lock, not keep it.
         repository.setStatus(VaultStatus.LOCKED)
+        advanceUntilIdle()
+        assertTrue(model.state.value.sessionCleared)
+
         model.onTextChanged("should not save", 0, 15)
         advanceTimeBy(CodeEditorViewModel.AUTOSAVE_DEBOUNCE_MS + 10)
         advanceUntilIdle()
 
         assertEquals(0, repository.saveCount)
-        assertTrue(model.state.value.dirty)
+        assertEquals("", model.state.value.body)
+        assertFalse(model.state.value.dirty)
     }
 
     // ---- Open-at-line, indent and copy payloads -------------------------------
@@ -666,5 +671,66 @@ class CodeEditorViewModelTest {
         val missing = viewModel("missing")
         advanceUntilIdle()
         assertEquals("", missing.copySelectionOrAll())
+    }
+
+    // ---- decrypted-content lifetime (audit finding F1) -----------------------
+
+    @Test
+    fun `lock while the code editor is open drops the source and the undo history`() = runTest(dispatcher) {
+        seed(body = "fun main() = println(\"secret\")")
+        val model = viewModel()
+        advanceUntilIdle()
+        model.onTextChanged("fun main() = println(\"secret edited\")", 0, 37)
+        assertTrue(model.state.value.canUndo)
+
+        // Auto-lock: the Activity-scoped ViewModel must drop the source now.
+        repository.lock()
+        advanceUntilIdle()
+
+        val state = model.state.value
+        assertTrue("the screen shows the non-secret cleared placeholder", state.sessionCleared)
+        assertEquals("", state.body)
+        assertEquals("", state.fileName)
+        assertFalse(state.canUndo)
+        assertFalse(state.canRedo)
+        assertFalse(state.dirty)
+        assertFalse(state.conflict)
+        assertEquals("", model.copySelectionOrAll())
+
+        model.undo()
+        assertEquals("", model.state.value.body)
+        assertFalse(model.flush(force = true))
+    }
+
+    @Test
+    fun `re-arming the lock while the code editor is open drops the source`() = runTest(dispatcher) {
+        repository.seedCodeFile(id = "f1", title = "Secret.kt", body = "secret = 1", locked = true)
+        repository.setVerifiedLockedIds(setOf("f1"))
+        val model = viewModel()
+        advanceUntilIdle()
+        assertEquals("secret = 1", model.state.value.body)
+
+        repository.setVerifiedLockedIds(emptySet())
+        advanceUntilIdle()
+
+        assertTrue(model.state.value.sessionCleared)
+        assertEquals("", model.state.value.body)
+        assertEquals("", model.state.value.fileName)
+    }
+
+    @Test
+    fun `a code save that loses the auto-lock race clears the source`() = runTest(dispatcher) {
+        seed(body = "secret = 1")
+        val model = viewModel()
+        advanceUntilIdle()
+        model.onTextChanged("secret = 2", 0, 10)
+
+        repository.failNextSaveAfterLock = true
+        assertFalse(model.flush(force = true))
+        advanceUntilIdle()
+
+        assertTrue(model.state.value.sessionCleared)
+        assertEquals("", model.state.value.body)
+        assertFalse(model.state.value.dirty)
     }
 }

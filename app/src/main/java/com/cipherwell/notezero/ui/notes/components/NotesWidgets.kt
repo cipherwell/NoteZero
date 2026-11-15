@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.notes.components
 
+import com.cipherwell.notezero.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,6 +44,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -89,7 +92,7 @@ fun NotesPillNav(
         ) {
             PillNavItem(
                 selected = current == NotesSection.NOTES,
-                label = "Notes",
+                label = stringResource(R.string.notes_title),
                 testTag = "nav_notes",
                 onClick = { onSectionSelected(NotesSection.NOTES) },
             ) { tint ->
@@ -97,13 +100,13 @@ fun NotesPillNav(
             }
             PillNavItem(
                 selected = current == NotesSection.FOLDERS,
-                label = "Folders",
+                label = stringResource(R.string.notes_nav_folders),
                 testTag = "folder_nav",
                 onClick = { onSectionSelected(NotesSection.FOLDERS) },
             ) { tint -> FolderGlyph(tint = tint, modifier = Modifier.size(20.dp)) }
             PillNavItem(
                 selected = current == NotesSection.SEARCH,
-                label = "Search",
+                label = stringResource(R.string.notes_nav_search),
                 testTag = "nav_search",
                 onClick = { onSectionSelected(NotesSection.SEARCH) },
             ) { tint ->
@@ -111,7 +114,7 @@ fun NotesPillNav(
             }
             PillNavItem(
                 selected = false,
-                label = "Settings",
+                label = stringResource(R.string.settings),
                 testTag = "settings_button",
                 onClick = onOpenSettings,
             ) { tint ->
@@ -275,7 +278,7 @@ fun NoteRow(
                         Spacer(Modifier.width(NoteZeroSpacing.xs))
                         Icon(
                             imageVector = Icons.Filled.Star,
-                            contentDescription = "Pinned",
+                            contentDescription = stringResource(R.string.cd_notes_pinned),
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(14.dp),
                         )
@@ -284,7 +287,7 @@ fun NoteRow(
                         Spacer(Modifier.width(NoteZeroSpacing.xs))
                         Icon(
                             imageVector = Icons.Filled.Favorite,
-                            contentDescription = "Favourite",
+                            contentDescription = stringResource(R.string.cd_notes_favourite),
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(14.dp),
                         )
@@ -293,7 +296,11 @@ fun NoteRow(
                         Spacer(Modifier.width(NoteZeroSpacing.xs))
                         Icon(
                             imageVector = Icons.Filled.Lock,
-                            contentDescription = if (row.masked) "Locked" else "Locked note",
+                            contentDescription = if (row.masked) {
+                                stringResource(R.string.cd_notes_locked)
+                            } else {
+                                stringResource(R.string.cd_notes_locked_note)
+                            },
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(14.dp),
                         )
@@ -319,7 +326,7 @@ fun NoteRow(
                     )
                     if (row.folderPath != null) {
                         Text(
-                            text = "  ·  ${row.folderPath}",
+                            text = stringResource(R.string.notes_folder_path_suffix, row.folderPath),
                             style = NoteZeroType.Caption,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -335,7 +342,7 @@ fun NoteRow(
                 ) {
                     Icon(
                         imageVector = Icons.Filled.MoreVert,
-                        contentDescription = "Note actions",
+                        contentDescription = stringResource(R.string.cd_notes_note_actions),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -375,33 +382,50 @@ private fun NoteContextMenu(
         // user cannot identify. Revealing or removing the lock needs re-auth first.
         if (!masked) {
             DropdownMenuItem(
-                text = { Text(if (item.pinned) "Unpin note" else "Pin note", style = NoteZeroType.Callout) },
+                text = {
+                    Text(
+                        if (item.pinned) stringResource(R.string.notes_unpin) else stringResource(R.string.notes_pin),
+                        style = NoteZeroType.Callout,
+                    )
+                },
                 onClick = onTogglePin,
             )
             DropdownMenuItem(
                 text = {
-                    Text(if (item.favorite) "Remove favourite" else "Add favourite", style = NoteZeroType.Callout)
+                    Text(
+                        if (item.favorite) {
+                            stringResource(R.string.notes_remove_favourite)
+                        } else {
+                            stringResource(R.string.notes_add_favourite)
+                        },
+                        style = NoteZeroType.Callout,
+                    )
                 },
                 onClick = onToggleFavorite,
             )
             DropdownMenuItem(
-                text = { Text("Rename", style = NoteZeroType.Callout) },
+                text = { Text(stringResource(R.string.common_rename), style = NoteZeroType.Callout) },
                 onClick = onRename,
             )
             DropdownMenuItem(
-                text = { Text("Move to folder", style = NoteZeroType.Callout) },
+                text = { Text(stringResource(R.string.notes_move_to_folder), style = NoteZeroType.Callout) },
                 onClick = onMove,
             )
         }
         DropdownMenuItem(
-            text = { Text(if (item.locked) "Remove lock" else "Lock note", style = NoteZeroType.Callout) },
+            text = {
+                Text(
+                    if (item.locked) stringResource(R.string.notes_remove_lock) else stringResource(R.string.notes_lock_note),
+                    style = NoteZeroType.Callout,
+                )
+            },
             onClick = onLockToggle,
             modifier = Modifier.testTag("note_lock_action"),
         )
         if (!masked) {
             HorizontalDivider()
             DropdownMenuItem(
-                text = { Text("Move to trash", style = NoteZeroType.Callout, color = MaterialTheme.colorScheme.error) },
+                text = { Text(stringResource(R.string.notes_move_to_trash), style = NoteZeroType.Callout, color = MaterialTheme.colorScheme.error) },
                 onClick = onTrash,
             )
         }
@@ -468,25 +492,32 @@ fun FolderRow(
                         Spacer(Modifier.width(NoteZeroSpacing.xs))
                         Icon(
                             imageVector = Icons.Filled.Lock,
-                            contentDescription = if (row.masked) "Locked" else "Locked folder",
+                            contentDescription = if (row.masked) {
+                                stringResource(R.string.cd_notes_locked)
+                            } else {
+                                stringResource(R.string.cd_notes_locked_folder)
+                            },
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(14.dp),
                         )
                     }
                 }
+                val noteCount = pluralStringResource(
+                    R.plurals.notes_note_count,
+                    row.itemCount,
+                    row.itemCount,
+                )
                 Text(
                     text = if (row.masked) {
-                        "Locked · verify to view"
+                        stringResource(R.string.notes_locked_verify)
+                    } else if (row.childFolderCount > 0) {
+                        "$noteCount · " + pluralStringResource(
+                            R.plurals.notes_folder_count,
+                            row.childFolderCount,
+                            row.childFolderCount,
+                        )
                     } else {
-                        buildString {
-                            append(row.itemCount)
-                            append(if (row.itemCount == 1) " note" else " notes")
-                            if (row.childFolderCount > 0) {
-                                append(" · ")
-                                append(row.childFolderCount)
-                                append(if (row.childFolderCount == 1) " folder" else " folders")
-                            }
-                        }
+                        noteCount
                     },
                     style = NoteZeroType.Caption,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -499,21 +530,25 @@ fun FolderRow(
                 ) {
                     Icon(
                         imageVector = Icons.Filled.MoreVert,
-                        contentDescription = "Folder actions",
+                        contentDescription = stringResource(R.string.cd_notes_folder_actions),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     if (!row.masked) {
                         DropdownMenuItem(
-                            text = { Text("Rename folder", style = NoteZeroType.Callout) },
+                            text = { Text(stringResource(R.string.notes_rename_folder), style = NoteZeroType.Callout) },
                             onClick = { menuOpen = false; onRename() },
                         )
                     }
                     DropdownMenuItem(
                         text = {
                             Text(
-                                if (row.folder.locked) "Remove lock" else "Lock folder",
+                                if (row.folder.locked) {
+                                    stringResource(R.string.notes_remove_lock)
+                                } else {
+                                    stringResource(R.string.notes_lock_folder)
+                                },
                                 style = NoteZeroType.Callout,
                             )
                         },
@@ -524,7 +559,7 @@ fun FolderRow(
                         DropdownMenuItem(
                             text = {
                                 Text(
-                                    "Delete folder",
+                                    stringResource(R.string.notes_delete_folder),
                                     style = NoteZeroType.Callout,
                                     color = MaterialTheme.colorScheme.error,
                                 )
@@ -579,7 +614,7 @@ fun TrashRow(
                         Spacer(Modifier.width(NoteZeroSpacing.xs))
                         Icon(
                             imageVector = Icons.Filled.Lock,
-                            contentDescription = "Locked",
+                            contentDescription = stringResource(R.string.cd_notes_locked),
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(14.dp),
                         )
@@ -594,14 +629,14 @@ fun TrashRow(
             TextButton(
                 onClick = onRestore,
                 modifier = Modifier.testTag("trash_restore"),
-            ) { Text("Restore") }
+            ) { Text(stringResource(R.string.common_restore)) }
             IconButton(
                 onClick = onDeleteForever,
                 modifier = Modifier.testTag("trash_delete_forever"),
             ) {
                 Icon(
                     imageVector = Icons.Filled.Delete,
-                    contentDescription = "Delete forever",
+                    contentDescription = stringResource(R.string.cd_notes_delete_forever),
                     tint = MaterialTheme.colorScheme.error,
                 )
             }

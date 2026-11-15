@@ -43,6 +43,8 @@ object CodeTags {
     const val PREVIEW_TOGGLE = "code_preview_toggle"
     const val PREVIEW = "code_markdown_preview"
     const val TOO_LARGE = "code_too_large"
+    /** Shown when a lock/re-arm dropped the draft: the source and history were cleared. */
+    const val SESSION_CLEARED = "code_session_cleared"
 
     // ---- Editor extra states ------------------------------------------------
     const val CONFLICT_BANNER = "code_conflict_banner"

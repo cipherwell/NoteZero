@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.screens.settings
 
+import com.cipherwell.notezero.R
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.activity.compose.BackHandler
@@ -30,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.cipherwell.notezero.BuildConfig
@@ -138,7 +140,7 @@ fun SettingsScreen(
                 NzBackButton(onClick = onBack)
                 Spacer(Modifier.padding(start = NoteZeroSpacing.s))
                 Text(
-                    text = "Settings",
+                    text = stringResource(R.string.settings),
                     style = NoteZeroType.Title,
                     color = MaterialTheme.colorScheme.onBackground,
                 )
@@ -154,11 +156,11 @@ fun SettingsScreen(
             }
 
             // ---- Vault info (non-secret only) ------------------------------
-            NzSectionHeader(title = "Vault")
+            NzSectionHeader(title = stringResource(R.string.settings_section_vault))
             VaultInfoCard(state = state)
 
             // ---- Security --------------------------------------------------
-            NzSectionHeader(title = "Security")
+            NzSectionHeader(title = stringResource(R.string.settings_section_security))
             ChangePasswordCard(
                 expanded = changePasswordExpanded,
                 onToggle = { changePasswordExpanded = !changePasswordExpanded },
@@ -166,9 +168,9 @@ fun SettingsScreen(
                 isWorking = settings.isWorking,
                 errorText = when {
                     settings.isError && settings.message == SettingsMessage.PASSWORD_REJECTED ->
-                        "The new password does not meet the requirements below."
+                        stringResource(R.string.settings_error_weak_password)
                     settings.isError && settings.message == SettingsMessage.PASSWORD_WRONG ->
-                        "The current password is incorrect."
+                        stringResource(R.string.settings_error_wrong_current)
                     else -> null
                 },
             )
@@ -182,14 +184,14 @@ fun SettingsScreen(
             NzFormSpacer(NoteZeroSpacing.l)
             NzCard {
                 NzSwitchRow(
-                    title = "Biometric unlock",
+                    title = stringResource(R.string.settings_biometric_title),
                     description = when {
                         !state.biometricAvailable ->
-                            "Not available on this device. Password unlock always works."
+                            stringResource(R.string.settings_biometric_unavailable)
                         state.biometricEnabled ->
-                            "Enabled. Uses the Android Keystore; re-enrolling biometrics invalidates it."
+                            stringResource(R.string.settings_biometric_enabled)
                         else ->
-                            "Unlock with your fingerprint or face; the key stays in the Keystore."
+                            stringResource(R.string.settings_biometric_disabled)
                     },
                     checked = state.biometricEnabled,
                     enabled = state.biometricAvailable && !settings.isWorking,
@@ -202,7 +204,7 @@ fun SettingsScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 NzFormSpacer(NoteZeroSpacing.s)
                 NzSecondaryButton(
-                    text = "Lock vault now",
+                    text = stringResource(R.string.settings_lock_now),
                     onClick = onLockNow,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -223,10 +225,10 @@ fun SettingsScreen(
             }
 
             // ---- Appearance -------------------------------------------------
-            NzSectionHeader(title = "Appearance")
+            NzSectionHeader(title = stringResource(R.string.settings_section_appearance))
             NzCard {
                 Text(
-                    text = "Theme",
+                    text = stringResource(R.string.settings_theme),
                     style = NoteZeroType.Body,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
@@ -235,9 +237,9 @@ fun SettingsScreen(
                     ThemeMode.entries.forEach { mode ->
                         NzSelectableChip(
                             label = when (mode) {
-                                ThemeMode.SYSTEM -> "System"
-                                ThemeMode.LIGHT -> "Light"
-                                ThemeMode.DARK -> "Dark"
+                                ThemeMode.SYSTEM -> stringResource(R.string.settings_theme_system)
+                                ThemeMode.LIGHT -> stringResource(R.string.settings_theme_light)
+                                ThemeMode.DARK -> stringResource(R.string.settings_theme_dark)
                             },
                             selected = state.themeMode == mode,
                             onClick = { onSetThemeMode(mode) },
@@ -253,7 +255,7 @@ fun SettingsScreen(
                 }
                 NzFormSpacer(NoteZeroSpacing.xl)
                 Text(
-                    text = "Auto-lock after inactivity",
+                    text = stringResource(R.string.settings_autolock_title),
                     style = NoteZeroType.Body,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
@@ -262,7 +264,11 @@ fun SettingsScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(NoteZeroSpacing.s)) {
                         rowOptions.forEach { minutes ->
                             NzSelectableChip(
-                                label = if (minutes == 60) "1 hour" else "$minutes min",
+                                label = if (minutes == 60) {
+                                    stringResource(R.string.settings_autolock_hour)
+                                } else {
+                                    stringResource(R.string.settings_autolock_minutes, minutes)
+                                },
                                 selected = state.autoLockMinutes == minutes,
                                 onClick = { onSetAutoLockMinutes(minutes) },
                                 modifier = Modifier.testTag("settings_autolock_$minutes"),
@@ -272,30 +278,29 @@ fun SettingsScreen(
                     Spacer(Modifier.height(NoteZeroSpacing.s))
                 }
                 Text(
-                    text = "The vault also locks immediately when the app goes to the background.",
+                    text = stringResource(R.string.settings_autolock_hint),
                     style = NoteZeroType.Caption,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 
             // ---- About ------------------------------------------------------
-            NzSectionHeader(title = "About")
+            NzSectionHeader(title = stringResource(R.string.settings_section_about))
             NzCard {
                 Text(
-                    text = "Offline by design",
+                    text = stringResource(R.string.settings_offline_title),
                     style = NoteZeroType.Body,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 NzFormSpacer(NoteZeroSpacing.xs)
                 Text(
-                    text = "No network permission, no account, no telemetry. Notes are encrypted " +
-                        "with AES-256-GCM; the vault key is wrapped with PBKDF2-HMAC-SHA256.",
+                    text = stringResource(R.string.settings_offline_body),
                     style = NoteZeroType.Caption,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 NzFormSpacer(NoteZeroSpacing.m)
                 Text(
-                    text = "NoteZero ${BuildConfig.VERSION_NAME}",
+                    text = stringResource(R.string.settings_version, BuildConfig.VERSION_NAME),
                     style = NoteZeroType.Caption,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -304,7 +309,7 @@ fun SettingsScreen(
         }
 
         if (settings.isWorking) {
-            NzLoadingOverlay(label = "Updating your vault…")
+            NzLoadingOverlay(label = stringResource(R.string.settings_loading))
         }
     }
 
@@ -323,20 +328,20 @@ private fun VaultInfoCard(state: VaultUiState) {
     NzCard {
         if (info == null) {
             Text(
-                text = "Vault information is available after unlock.",
+                text = stringResource(R.string.settings_info_unavailable),
                 style = NoteZeroType.Caption,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
-            InfoRow(label = "Created", value = formatDate(info.createdAt))
-            InfoRow(label = "Items", value = info.itemCount.toString())
-            InfoRow(label = "Folders", value = info.folderCount.toString())
+            InfoRow(label = stringResource(R.string.settings_info_created), value = formatDate(info.createdAt))
+            InfoRow(label = stringResource(R.string.settings_info_items), value = info.itemCount.toString())
+            InfoRow(label = stringResource(R.string.settings_info_folders), value = info.folderCount.toString())
             InfoRow(
-                label = "Key derivation",
-                value = "PBKDF2-HMAC-SHA256 · ${info.kdfIterations} iterations",
+                label = stringResource(R.string.settings_info_kdf),
+                value = stringResource(R.string.settings_info_kdf_value, info.kdfIterations),
             )
-            InfoRow(label = "Encryption", value = "AES-256-GCM")
-            InfoRow(label = "Schema", value = "v${info.schemaVersion}")
+            InfoRow(label = stringResource(R.string.settings_info_encryption), value = "AES-256-GCM")
+            InfoRow(label = stringResource(R.string.settings_info_schema), value = stringResource(R.string.settings_info_schema_value, info.schemaVersion))
         }
     }
 }
@@ -372,26 +377,31 @@ private fun ChangePasswordCard(
     isWorking: Boolean,
     errorText: String?,
 ) {
-    var current by rememberSaveable { mutableStateOf("") }
-    var next by rememberSaveable { mutableStateOf("") }
-    var confirmation by rememberSaveable { mutableStateOf("") }
+    // Credentials: plain `remember`, never saved instance state (audit finding F3).
+    var current by remember { mutableStateOf("") }
+    var next by remember { mutableStateOf("") }
+    var confirmation by remember { mutableStateOf("") }
     var mismatch by rememberSaveable { mutableStateOf(false) }
 
     NzCard {
         Text(
-            text = "Master password",
+            text = stringResource(R.string.settings_change_password_title),
             style = NoteZeroType.Body,
             color = MaterialTheme.colorScheme.onSurface,
         )
         NzFormSpacer(NoteZeroSpacing.xs)
         Text(
-            text = "Changing it rewraps the vault key; your notes are never re-encrypted.",
+            text = stringResource(R.string.settings_change_password_hint),
             style = NoteZeroType.Caption,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         NzFormSpacer(NoteZeroSpacing.s)
         NzTextButton(
-            text = if (expanded) "Close" else "Change master password",
+            text = if (expanded) {
+                stringResource(R.string.common_close)
+            } else {
+                stringResource(R.string.settings_change_password_toggle)
+            },
             onClick = onToggle,
             modifier = Modifier.testTag("settings_change_password_toggle"),
         )
@@ -400,7 +410,7 @@ private fun ChangePasswordCard(
             SecureTextField(
                 value = current,
                 onValueChange = { current = it },
-                label = "Current password",
+                label = stringResource(R.string.settings_current_password),
                 modifier = Modifier.testTag("settings_current_password"),
                 enabled = !isWorking,
                 imeAction = ImeAction.Next,
@@ -412,7 +422,7 @@ private fun ChangePasswordCard(
                     next = it
                     mismatch = false
                 },
-                label = "New password",
+                label = stringResource(R.string.settings_new_password),
                 modifier = Modifier.testTag("settings_new_password"),
                 enabled = !isWorking,
                 isError = errorText != null,
@@ -425,7 +435,7 @@ private fun ChangePasswordCard(
                     confirmation = it
                     mismatch = false
                 },
-                label = "Confirm new password",
+                label = stringResource(R.string.settings_confirm_new_password),
                 modifier = Modifier.testTag("settings_confirm_password"),
                 enabled = !isWorking,
                 isError = mismatch,
@@ -435,14 +445,14 @@ private fun ChangePasswordCard(
             if (mismatch || errorText != null) {
                 NzFormSpacer(NoteZeroSpacing.s)
                 NzInfoBanner(
-                    text = if (mismatch) "The two new passwords do not match." else errorText.orEmpty(),
+                    text = if (mismatch) stringResource(R.string.settings_change_password_mismatch) else errorText.orEmpty(),
                     tone = NzBannerTone.DANGER,
                     modifier = Modifier.testTag("settings_change_password_error"),
                 )
             }
             NzFormSpacer(NoteZeroSpacing.m)
             NzPrimaryButton(
-                text = "Change password",
+                text = stringResource(R.string.settings_change_password),
                 onClick = {
                     if (current.isEmpty() || next.isEmpty()) return@NzPrimaryButton
                     if (!PasswordPolicy.matches(next, confirmation)) {
@@ -471,24 +481,28 @@ private fun RotateRecoveryCard(
     onRotateRecoveryPhrase: (currentPassword: CharArray) -> Unit,
     isWorking: Boolean,
 ) {
-    var current by rememberSaveable { mutableStateOf("") }
+    // Current password for the rotation: plain `remember` (audit finding F3).
+    var current by remember { mutableStateOf("") }
 
     NzCard {
         Text(
-            text = "Recovery kit",
+            text = stringResource(R.string.settings_recovery_kit),
             style = NoteZeroType.Body,
             color = MaterialTheme.colorScheme.onSurface,
         )
         NzFormSpacer(NoteZeroSpacing.xs)
         Text(
-            text = "Rotate the 12-word phrase if it may have been seen by someone else. " +
-                "The old phrase stops working immediately.",
+            text = stringResource(R.string.settings_rotate_hint),
             style = NoteZeroType.Caption,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         NzFormSpacer(NoteZeroSpacing.s)
         NzTextButton(
-            text = if (expanded) "Close" else "Rotate recovery phrase",
+            text = if (expanded) {
+                stringResource(R.string.common_close)
+            } else {
+                stringResource(R.string.settings_rotate_toggle)
+            },
             onClick = onToggle,
             modifier = Modifier.testTag("settings_rotate_toggle"),
         )
@@ -497,7 +511,7 @@ private fun RotateRecoveryCard(
             SecureTextField(
                 value = current,
                 onValueChange = { current = it },
-                label = "Current password",
+                label = stringResource(R.string.settings_current_password),
                 modifier = Modifier.testTag("settings_rotate_password"),
                 enabled = !isWorking,
                 imeAction = ImeAction.Done,
@@ -510,7 +524,7 @@ private fun RotateRecoveryCard(
             )
             NzFormSpacer(NoteZeroSpacing.m)
             NzPrimaryButton(
-                text = "Rotate phrase",
+                text = stringResource(R.string.settings_rotate),
                 onClick = {
                     if (current.isEmpty()) return@NzPrimaryButton
                     onRotateRecoveryPhrase(current.toCharArray())
@@ -534,12 +548,11 @@ private fun RotatedPhraseDialog(
     AlertDialog(
         // The phrase must be acknowledged before it is dropped from memory.
         onDismissRequest = { },
-        title = { Text(text = "New recovery phrase", style = NoteZeroType.Heading) },
+        title = { Text(text = stringResource(R.string.settings_rotated_title), style = NoteZeroType.Heading) },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text(
-                    text = "Write these 12 words down in order. This is the only time they are " +
-                        "shown. The previous phrase no longer works.",
+                    text = stringResource(R.string.settings_rotated_hint),
                     style = NoteZeroType.Body,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -555,7 +568,7 @@ private fun RotatedPhraseDialog(
         confirmButton = {
             TextButton(onClick = onAcknowledge) {
                 Text(
-                    text = "I've saved it",
+                    text = stringResource(R.string.settings_rotated_saved),
                     style = NoteZeroType.Button,
                     color = com.cipherwell.notezero.ui.theme.LocalNoteZeroColors.current.accentText,
                 )

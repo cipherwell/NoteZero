@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.locks
 
+import com.cipherwell.notezero.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.cipherwell.notezero.ui.components.common.NzPrimaryButton
@@ -54,7 +56,7 @@ fun LockedNoteGate(
                 onClick = onClose,
                 modifier = Modifier.testTag("editor_locked_back"),
             ) {
-                Icon(Icons.Filled.ArrowBack, contentDescription = "Back to notes")
+                Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back_to_notes))
             }
         }
         Box(
@@ -74,20 +76,19 @@ fun LockedNoteGate(
                     modifier = Modifier.size(48.dp),
                 )
                 Text(
-                    text = LockVisibility.MASKED_NOTE_TITLE,
+                    text = stringResource(R.string.lock_locked_note),
                     style = NoteZeroType.Heading,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
-                    text = "This note is locked. Verify it's you to show its content; " +
-                        "it stays encrypted on this device.",
+                    text = stringResource(R.string.lock_gate_message),
                     style = NoteZeroType.Callout,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
                 Spacer(Modifier.height(NoteZeroSpacing.s))
                 NzPrimaryButton(
-                    text = "Reveal note",
+                    text = stringResource(R.string.lock_reveal_note),
                     onClick = onReveal,
                     modifier = Modifier.testTag("editor_locked_reveal"),
                 )

@@ -67,7 +67,7 @@ AAD domain separation (`CryptoAad`):
    store both blobs + created_at in `vault_meta`. Return the phrase once.
 2. **Unlock**: derive KEK, unwrap VMK, keep VMK **in memory only**, load + decrypt item index.
 3. **Change password**: unwrap VMK with old env, wrap with new env, replace row. Notes untouched.
-4. **Recovery reset**: derive recovery KEK, unwrap VMK, wrap under new password env, rotate recovery env + phrase.
+4. **Recovery reset**: derive recovery KEK, unwrap VMK, wrap under new password env, re-wrap the **same** recovery phrase under a fresh salt (decision #12 — no phrase rotation here; rotation is `rotateRecoveryPhrase(currentPassword)` from settings, which shows the new phrase once).
 5. **Biometric**: enable is two-phase while unlocked — `prepareEnroll()` → BiometricPrompt
    (CryptoObject) → `completeEnroll(enroll, vmk)`; per-use-auth Keystore keys cannot encrypt without
    a prompt. Unlock is `prepareDecrypt()` → prompt → `completeDecrypt()`. Re-enrolment invalidation

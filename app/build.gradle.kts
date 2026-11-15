@@ -16,21 +16,6 @@ android {
     versionName = "0.1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-    // Screenshot protection (FLAG_SECURE) is always on in production. Automated UI
-    // verification may opt in explicitly:
-    //   ./gradlew assembleDebug -PallowScreenshots=true
-    buildConfigField(
-      "boolean",
-      "ALLOW_SCREENSHOTS",
-      (project.findProperty("allowScreenshots") as String? ?: "false"),
-    )
-    // Dev-only convenience for instrumented tests; release builds never pass the flag.
-    buildConfigField(
-      "boolean",
-      "DEV_DISABLE_AUTO_LOCK",
-      (project.findProperty("devDisableAutoLock") as String? ?: "false"),
-    )
   }
 
   // Production signing is supplied via env vars (CI secrets or a local key store outside
@@ -73,9 +58,26 @@ android {
       isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = if (hasReleaseSigning) signingConfigs.getByName("release") else null
+      // Security invariants are NOT overridable in release builds: FLAG_SECURE and the
+      // background/idle auto-lock are always enabled. The -P flags exist only on debug.
+      buildConfigField("boolean", "ALLOW_SCREENSHOTS", "false")
+      buildConfigField("boolean", "DEV_DISABLE_AUTO_LOCK", "false")
     }
     debug {
       signingConfig = signingConfigs.getByName("debugConfig")
+      // Debug-only testing escape hatches (never present in a release build):
+      //   ./gradlew assembleDebug -PallowScreenshots=true       # lets adb capture UI evidence
+      //   ./gradlew assembleDebug -PdevDisableAutoLock=true     # keeps the test vault unlocked
+      buildConfigField(
+        "boolean",
+        "ALLOW_SCREENSHOTS",
+        (project.findProperty("allowScreenshots") as String? ?: "false"),
+      )
+      buildConfigField(
+        "boolean",
+        "DEV_DISABLE_AUTO_LOCK",
+        (project.findProperty("devDisableAutoLock") as String? ?: "false"),
+      )
     }
   }
 

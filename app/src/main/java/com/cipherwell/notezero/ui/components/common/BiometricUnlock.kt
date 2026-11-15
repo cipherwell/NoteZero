@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import com.cipherwell.notezero.R
 import javax.crypto.Cipher
 
 /**
@@ -74,9 +75,9 @@ class BiometricPromptLauncher(private val activity: Activity) {
     ) {
         showPrompt(
             cipher = cipher,
-            title = "Unlock NoteZero",
-            subtitle = "Confirm it's you to unlock your vault",
-            negativeButton = "Use password",
+            title = activity.getString(R.string.unlock_title),
+            subtitle = activity.getString(R.string.common_biometric_unlock_subtitle),
+            negativeButton = activity.getString(R.string.common_biometric_use_password),
             onAuthenticated = onAuthenticated,
             onError = onError,
         )
@@ -89,9 +90,9 @@ class BiometricPromptLauncher(private val activity: Activity) {
     ) {
         showPrompt(
             cipher = cipher,
-            title = "Enable biometric unlock",
-            subtitle = "Confirm it's you to protect your vault key",
-            negativeButton = "Cancel",
+            title = activity.getString(R.string.common_biometric_enable_title),
+            subtitle = activity.getString(R.string.common_biometric_enable_subtitle),
+            negativeButton = activity.getString(R.string.common_cancel),
             onAuthenticated = onAuthenticated,
             onError = onError,
         )

@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.components.common
 
+import com.cipherwell.notezero.R
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
@@ -29,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.cipherwell.notezero.ui.theme.LocalNoteZeroColors
 import com.cipherwell.notezero.ui.theme.NoteZeroShapes
@@ -148,6 +150,7 @@ fun RecoveryPhraseCopyControl(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val clipboardLabel = stringResource(R.string.common_recovery_clipboard_label)
     var showWarning by remember { mutableStateOf(false) }
     var copied by rememberSaveable { mutableStateOf(false) }
     val latestCopied = rememberUpdatedState(copied)
@@ -166,19 +169,18 @@ fun RecoveryPhraseCopyControl(
     Column(modifier = modifier.fillMaxWidth()) {
         if (!copied) {
             NzSecondaryButton(
-                text = "Copy phrase",
+                text = stringResource(R.string.common_copy_phrase),
                 onClick = { showWarning = true },
                 modifier = Modifier.fillMaxWidth(),
             )
         } else {
             NzInfoBanner(
-                text = "Copied to the clipboard. Other apps can read the clipboard — paste the " +
-                    "words into your password manager now, then clear it.",
+                text = stringResource(R.string.common_copied_clipboard_notice),
                 tone = NzBannerTone.WARNING,
             )
             Spacer(Modifier.padding(top = NoteZeroSpacing.xs))
             NzTextButton(
-                text = "Clear clipboard now",
+                text = stringResource(R.string.common_clear_clipboard_now),
                 onClick = {
                     SensitiveClipboard.clear(context)
                     copied = false
@@ -190,14 +192,12 @@ fun RecoveryPhraseCopyControl(
 
     if (showWarning) {
         NoteZeroConfirmDialog(
-            title = "Copy recovery phrase?",
-            message = "The clipboard is readable by other apps. Prefer writing the 12 words on " +
-                "paper. If you copy them, paste them into a password manager and clear the " +
-                "clipboard afterwards. NoteZero clears it automatically after 60 seconds.",
-            confirmLabel = "Copy anyway",
+            title = stringResource(R.string.common_copy_phrase_title),
+            message = stringResource(R.string.common_copy_phrase_message),
+            confirmLabel = stringResource(R.string.common_copy_anyway),
             onConfirm = {
                 showWarning = false
-                SensitiveClipboard.copy(context, "NoteZero recovery phrase", words.joinToString(" "))
+                SensitiveClipboard.copy(context, clipboardLabel, words.joinToString(" "))
                 copied = true
             },
             onDismiss = { showWarning = false },

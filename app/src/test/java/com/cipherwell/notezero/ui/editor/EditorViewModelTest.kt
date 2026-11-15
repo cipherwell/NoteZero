@@ -45,6 +45,7 @@ class EditorViewModelTest {
         id: String = "n1",
         title: String = "Title",
         body: String = "hello",
+        locked: Boolean = false,
     ): Item {
         val item = Item(
             id = id,
@@ -53,6 +54,7 @@ class EditorViewModelTest {
             body = body,
             createdAt = 1_000L,
             updatedAt = 1_000L,
+            locked = locked,
         )
         repository.setItems(repository.items.value + item)
         return item
@@ -221,22 +223,34 @@ class EditorViewModelTest {
     }
 
     @Test
-    fun `autosave is suspended while the vault is locked and resumes on unlock`() = runTest(dispatcher) {
+    fun `locking the vault drops the draft and refuses new edits until unlock`() = runTest(dispatcher) {
         seedNote()
         val viewModel = EditorViewModel(repository, "n1")
         advanceUntilIdle()
 
+        // Audit F1: a lock wipes the decrypted draft instead of keeping it in the
+        // Activity-scoped ViewModel.
         repository.setStatus(VaultStatus.LOCKED)
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.sessionCleared)
+
+        // A stale edit cannot be typed into (or saved from) a locked editor.
         viewModel.updateBody("secret draft")
         advanceTimeBy(EditorViewModel.AUTOSAVE_DEBOUNCE_MS + 1)
         advanceUntilIdle()
-
         assertEquals(0, repository.saveCount)
-        assertTrue(viewModel.state.value.dirty)
+        assertEquals("", viewModel.state.value.body)
 
+        // A new session reloads the stored copy and autosave works again.
         repository.setStatus(VaultStatus.UNLOCKED)
-        assertTrue(viewModel.flush())
-        assertEquals("secret draft", repository.itemById("n1")!!.body)
+        advanceUntilIdle()
+        assertFalse(viewModel.state.value.sessionCleared)
+        assertEquals("hello", viewModel.state.value.body)
+        viewModel.updateBody("edited after unlock")
+        advanceTimeBy(EditorViewModel.AUTOSAVE_DEBOUNCE_MS + 1)
+        advanceUntilIdle()
+        assertEquals(1, repository.saveCount)
+        assertEquals("edited after unlock", repository.itemById("n1")!!.body)
     }
 
     @Test
@@ -322,4 +336,93 @@ class EditorViewModelTest {
         assertTrue(viewModel.state.value.missing)
         assertTrue(repository.savedItems.isEmpty())
     }
+
+    // ---- decrypted-content lifetime (audit finding F1) -----------------------
+
+    @Test
+    fun `lock while the editor is open drops the draft and the undo history`() = runTest(dispatcher) {
+        seedNote(title = "Groceries", body = "secret body")
+        val viewModel = EditorViewModel(repository, "n1")
+        advanceUntilIdle()
+        viewModel.updateBody("secret body edited")
+        assertTrue("an undo snapshot exists before the lock", viewModel.state.value.canUndo)
+
+        // Auto-lock: the repository wipes the VMK/index and publishes LOCKED. The
+        // Activity-scoped ViewModel must drop the plaintext now, not on Activity destruction.
+        repository.lock()
+        advanceUntilIdle()
+
+        val state = viewModel.state.value
+        assertTrue("the screen shows the non-secret cleared placeholder", state.sessionCleared)
+        assertEquals("", state.title)
+        assertEquals("", state.body)
+        assertFalse(state.canUndo)
+        assertFalse(state.canRedo)
+        assertFalse(state.dirty)
+        assertFalse(state.conflict)
+
+        // Undo cannot resurrect a snapshot: the stacks were cleared.
+        viewModel.undo()
+        assertEquals("", viewModel.state.value.body)
+        // No write can be attempted against the locked vault either.
+        assertFalse(viewModel.flush(force = true))
+    }
+
+    @Test
+    fun `re-arming the lock while the editor is open drops the draft`() = runTest(dispatcher) {
+        seedNote(title = "Secret title", body = "secret body", locked = true)
+        repository.revealForTest("n1")
+        val viewModel = EditorViewModel(repository, "n1")
+        advanceUntilIdle()
+        assertEquals("secret body", viewModel.state.value.body)
+
+        // "Re-arm locked notes now": the note is still unlocked-at-rest, but this session no
+        // longer has a verification for it, so the draft must disappear immediately.
+        repository.clearLockVerifications()
+        advanceUntilIdle()
+
+        assertTrue(viewModel.state.value.sessionCleared)
+        assertEquals("", viewModel.state.value.title)
+        assertEquals("", viewModel.state.value.body)
+        assertFalse(viewModel.state.value.canUndo)
+    }
+
+    @Test
+    fun `a new unlocked session reloads the note into a cleared editor`() = runTest(dispatcher) {
+        val note = seedNote(title = "Groceries", body = "secret body")
+        val viewModel = EditorViewModel(repository, "n1")
+        advanceUntilIdle()
+        repository.lock()
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.sessionCleared)
+
+        // The fake, like the real repository, repopulates the index on unlock.
+        repository.setItems(listOf(note))
+        repository.setStatus(VaultStatus.UNLOCKED)
+        advanceUntilIdle()
+
+        val state = viewModel.state.value
+        assertFalse(state.sessionCleared)
+        assertEquals("Groceries", state.title)
+        assertEquals("secret body", state.body)
+        assertFalse(state.dirty)
+    }
+
+    @Test
+    fun `a save that loses the auto-lock race clears the draft instead of keeping plaintext`() =
+        runTest(dispatcher) {
+            seedNote(title = "Groceries", body = "secret body")
+            val viewModel = EditorViewModel(repository, "n1")
+            advanceUntilIdle()
+            viewModel.updateBody("secret body edited")
+
+            repository.failNextSaveAfterLock = true
+            assertFalse(viewModel.flush(force = true))
+            advanceUntilIdle()
+
+            val state = viewModel.state.value
+            assertTrue("the locked-race save clears the plaintext", state.sessionCleared)
+            assertEquals("", state.body)
+            assertFalse(state.dirty)
+        }
 }

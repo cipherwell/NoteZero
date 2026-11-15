@@ -6,7 +6,10 @@ Same rules as `docs/CONTRACTS.md`: no new dependencies, no network, no plaintext
 logs, stay in scope, no git/build-file/manifest/res edits, pure-JVM logic where possible.
 
 Current state: Phases 1–3 complete, Phase 4 attachments shipped (commit `c2beb0b`).
-663 unit / 10 device tests green.
+The **phase-start** test baseline was 663 unit / 10 device tests green; the phase ended at
+740 unit / 10 device tests (recorded in `CHANGELOG.md` and
+`docs/VERIFICATION-2026-11-15.md` §9). Treat the 663 figure as historical, not current
+(audit D12).
 
 ---
 

@@ -102,4 +102,33 @@ class AppRootTest : UiTestBase() {
         composeRule.onNodeWithTag("settings_screen").assertDoesNotExist()
         composeRule.onNodeWithTag("notes_list").assertExists()
     }
+
+    @Test
+    fun `a recovery reset confirms the phrase is unchanged and can be dismissed`() {
+        val repository = FakeNoteRepository(
+            initialStatus = VaultStatus.LOCKED,
+            initialPassword = FakeNoteRepository.STRONG_PASSWORD,
+        )
+        val viewModel = viewModel(repository)
+        setThemedContent { AppRoot(repository = repository, viewModel = viewModel) }
+        composeRule.onNodeWithTag("unlock_password").assertExists()
+
+        // Drive the reset through the real VaultViewModel state machine (the 12-word UI entry
+        // itself is covered by RecoveryScreenTest); the shell must surface the non-secret
+        // "your phrase is unchanged" confirmation once the vault unlocks (audit finding F2).
+        composeRule.runOnIdle {
+            viewModel.resetWithRecoveryPhrase(
+                FakeNoteRepository.DEFAULT_PHRASE,
+                FakeNoteRepository.OTHER_STRONG_PASSWORD.toCharArray(),
+            )
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("notes_list").assertExists()
+        composeRule.onNodeWithTag("recovery_reset_notice").assertExists()
+        composeRule.onNodeWithTag("recovery_reset_notice_dismiss").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("recovery_reset_notice").assertDoesNotExist()
+        composeRule.onNodeWithTag("notes_list").assertExists()
+    }
 }

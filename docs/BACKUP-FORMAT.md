@@ -39,24 +39,29 @@ vault password, the recovery phrase or the backup password.
 ## 2. Wire layout (big-endian)
 
 ```
-┌──────────────────────── header (plaintext, authenticated as AAD) ───────────────────────┐
-│ off  size  field                                                                         │
-│ 0    4     magic "NZBK"                                                                  │
-│ 4    1     formatVersion = 1                                                             │
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│ off  size  field                                                                        │
+│ 0    4     magic "NZBK"                                                                 │
+│ 4    1     formatVersion = 2   (writer; a reader also accepts legacy 1)                 │
 │ 5    1     mode: 0 = MODE_VAULT_KEY, 1 = MODE_EXTRA_PASSWORD                            │
 │ 6    1     flags: bit0 password envelope present, bit1 recovery envelope present        │
-│ 7    1     reserved = 0                                                                  │
+│ 7    1     reserved = 0                                                                 │
 │ 8    8     exportedAt  (i64 epoch millis, informational)                                │
 │ 16   4     itemCount   (u32, must match the payload)                                    │
 │ 20   4     folderCount (u32, must match the payload)                                    │
-│ 24   4     envelopeBlockLen (u32, <= 16 KiB)                                            │
-│ 28   n     envelope block:                                                              │
+│ 24   4     attachmentCount (u32, v2 only, must match the payload)                       │
+│ 28   4     envelopeBlockLen (u32, <= 16 KiB)                                            │
+│ 32   n     envelope block:                                                              │
 │             count u8 (<= 4)                                                             │
 │             per envelope: len u16 (<= KeyEnvelope.MAX_BYTES = 1024) + KeyEnvelope bytes │
-└──────────────────────────────────────────────────────────────────────────────────────────┘
+└─────────────────────────────────────────────────────────────────────────────────────────┘
     4        payloadLen (u32)
     m        sealed payload = iv(12) || AES-256-GCM ciphertext || tag(16)
 ```
+
+A **v1** file (`formatVersion = 1`, still read) has the same layout without the
+`attachmentCount` field: `envelopeBlockLen` sits at offset 24 and the fixed header is 28
+bytes. The v2 writer always emits `formatVersion = 2` (audit D6).
 
 Total header = `32 + envelopeBlockLen` for v2 (`28 + envelopeBlockLen` for a read v1 file,
 which has no `attachmentCount`). The AAD is exactly the format domain string
@@ -175,11 +180,13 @@ can never silently roll back newer local work.
 | truncated stream, bytes appended after payload, wrong `payloadLen` | `read` ⇒ null |
 | unknown format version, mode, flag bit or non-zero reserved byte | `read` ⇒ null |
 | header count/envelope tamper, embedded envelope tamper | parses structurally, `decrypt`/AAD ⇒ null |
-| oversized header count / envelope block (`> 16 KiB`) / file (`> 64 MiB`) | null (OOM guard) |
+| oversized header count / envelope block (`> 16 KiB`) / file (`> 64 MiB`) | null (stream cap, not an OOM guarantee — see below) |
+| `OutOfMemoryError` while reading/decoding the payload (hostile or simply large file on a small heap) | `read`/`decrypt` ⇒ null; `importBackup` ⇒ null |
 | payload byte/tag tamper, wrong VMK, cross-vault without credential | `decrypt` ⇒ null |
 | wrong backup password / wrong source password / wrong source phrase | `importBackup` ⇒ null |
 | import into a locked vault | `importBackup` ⇒ null |
 | export while locked, or any IO/encode failure | `exportBackup` ⇒ false |
+| `OutOfMemoryError` while encoding/sealing the payload on export | `BackupFormat.write` converts it to an `IllegalStateException`; `exportBackup` ⇒ false (no partial file: everything is encoded before the first byte is written) |
 | v2 blob tampered / inner AAD swap / SHA-256 or size mismatch | that attachment skipped+counted; the rest of the import proceeds |
 | v2 blob record for an item/ref not in the target index | skipped+counted (note still imported) |
 | v2 file whose attachment count exceeds the header/format limit, or header/payload count mismatch | `read` ⇒ null / `decrypt` ⇒ null |
@@ -197,6 +204,14 @@ can never silently roll back newer local work.
 | Max items / folders in one backup | 500 000 / 100 000 |
 | Payload version | 2 (v1 still read) |
 | Envelope format version | 2 (v1 still read) |
+
+**Peak-memory note (audit F9):** the 64 MiB `MAX_BACKUP_BYTES` cap bounds the *stream*, not
+the heap. Reading materialises the file, then the payload copy, then the GCM plaintext, then
+up to 500 000 decoded records; export similarly holds the attachment ciphertext blobs plus the
+plaintext payload plus the sealed copy. Both boundaries now catch `OutOfMemoryError` and fail
+cleanly (`read`/`decrypt`/`importBackup` ⇒ null, `exportBackup` ⇒ false) instead of crashing
+the process, but the cap must not be described as an "OOM guard". The real fix is the chunked,
+streamed payload of format v3 (decision #14 deferred item).
 
 Rules for future versions: bump `FORMAT_VERSION` (or `payloadVersion`) for any change to
 field layout or meaning; add new flags/modes only with a documented mapping, because current

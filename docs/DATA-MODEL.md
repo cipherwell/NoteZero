@@ -220,8 +220,9 @@ Validates the BIP-39 phrase, unwraps the VMK with the recovery envelope, install
 password envelope under `newPassword`, re-wraps the recovery envelope under a fresh salt,
 and unlocks. **The phrase itself is not changed** by reset: the frozen `NoteRepository`
 interface returns no phrase, so rotating to an unseen phrase would silently strand the
-user's recovery kit. Deliberate, documented deviation from the terse contract wording
-("rotate the kit"); actual phrase rotation is `rotateRecoveryPhrase(currentPassword)`, which
+user's recovery kit. This used to deviate from the terse contract wording ("rotate the kit");
+that wording is corrected now (audit D2/D11) and the behaviour is unchanged. Actual phrase
+rotation is `rotateRecoveryPhrase(currentPassword)`, which
 generates and returns a fresh 12-word phrase and replaces only the recovery envelope. Old
 phrases stop working after rotation; old backups are unaffected because each backup carries
 its own key envelopes.
@@ -295,7 +296,10 @@ operation.
 - `close()`;
 - `onAppBackgrounded()` **when it locks immediately** — a background lock that actually applies;
 - `endExternalActivity()` when it settles a deferred background by locking;
-- `setupVault()` / `unlock()` (every new session starts unverified).
+- `setupVault()` / `unlock()` / `completeBiometricUnlock()` / `resetWithRecoveryPhrase()`
+  (every session boundary starts unverified and with a clean re-auth rate limiter — audit F8;
+  the reset and biometric paths may be entered while already unlocked, so they clear before
+  publishing `UNLOCKED`).
 
 It is deliberately **not** cleared when `beginExternalActivity()` is active: that background
 was caused by the system SAF picker (decision #13), the vault stays unlocked, and the user did

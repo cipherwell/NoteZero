@@ -84,13 +84,17 @@ available and reviewed first):
 1. Add `KdfId.ARGON2ID(2)` and its parameters (memory, passes, lanes) to the envelope. That
    requires envelope `version = 2` because the v1 layout has no parameter bytes.
 2. `fromBytes` accepts v1 and v2; derive with the recorded KDF, then transparently re-wrap
-   the VMK under a fresh v2 envelope on the next successful unlock (same pattern as the
-   iteration upgrade path below).
+   the VMK under a fresh v2 envelope on the next successful unlock. That re-wrap-on-unlock
+   path does not exist yet (see §2.1 and §10): it must be implemented together with the
+   Argon2id slot, not before.
 3. Old v1 envelopes stay readable forever; nothing re-encrypts note content.
 
 The iteration count is recorded **per envelope**, so raising `DEFAULT_ITERATIONS` is
-backwards compatible: an envelope is opened with its recorded work factor and re-wrapped
-with the current default on the next successful password unlock (data-layer policy).
+backwards compatible: an envelope is opened with its recorded work factor. There is **no
+re-wrap on unlock** in the current implementation (audit D1): an existing vault keeps its
+recorded iteration count until a password write rewrites the envelope — `changePassword`,
+`resetWithRecoveryPhrase` or `rotateRecoveryPhrase`. Raising the default therefore upgrades
+new vaults immediately and existing vaults only on their next password change/reset.
 `KeyEnvelope` rejects counts below `NoteCrypto.MIN_ACCEPTED_ITERATIONS` (10,000) and above
 `MAX_ITERATIONS` (10,000,000) on both read and write, bounding offline and online DoS.
 
@@ -122,7 +126,8 @@ with the current default on the next successful password unlock (data-layer poli
   VMK. Password change = unwrap with old envelope, wrap with new envelope, replace row.
 - **Recovery KEK**: PBKDF2-HMAC-SHA256(canonical 12-word phrase, separate salt,
   iterations). Recovery reset = unwrap with recovery KEK, wrap under a new password
-  envelope, rotate the recovery envelope **and phrase**.
+  envelope, and re-wrap the **same** recovery phrase under a fresh salt (decision #12;
+  phrase rotation is the separate settings action).
 - **Biometric wrapping key**: AES-256-GCM key created inside Android Keystore with
   `setUserAuthenticationRequired(true)`, per-use strong biometric auth
   (`setUserAuthenticationParameters(0, AUTH_BIOMETRIC_STRONG)` on API 30+,
@@ -143,8 +148,11 @@ with the current default on the next successful password unlock (data-layer poli
    the vault meta is corrupt: fail closed, never guess.
 3. **Change password** — unwrap VMK with the old password envelope, wrap under new KEK +
    new salt, replace the row. Note ciphertext untouched.
-4. **Recovery reset** — unwrap with the recovery KEK, wrap under the new password
-   envelope, replace the recovery envelope and phrase. Old phrase stops working.
+4. **Recovery reset** — unwrap with the recovery KEK, wrap the VMK under the new password
+   envelope, and re-wrap the **same** recovery phrase under a fresh salt (decision #12).
+   The old phrase keeps working: rotation to a new phrase is the separate
+   `rotateRecoveryPhrase(currentPassword)` action, which replaces only the recovery
+   envelope and returns the new phrase once. A reset never shows a new phrase (audit F2/D2).
 5. **Biometric enrol/unlock** — see §5.
 
 ---
@@ -313,9 +321,11 @@ itself.
   can extract it while unlocked (see `docs/THREAT-MODEL.md`).
 - **PBKDF2 600k is a floor, not a KDF race winner**: Argon2id is the reserved upgrade
   (§2.2) and must be adopted before any claim of best-practice password hashing.
-- **Iteration upgrade is data-layer policy**: this module provides the versioned slot
-  (envelope stores its own iterations); the re-wrap-on-unlock behaviour is implemented and
-  tested in the data layer, not here.
+- **Iteration upgrade is data-layer policy and is not implemented yet**: this module
+  provides the versioned slot (each envelope stores its own iteration count), but nothing
+  re-wraps an existing envelope on unlock. An old vault keeps its old work factor until the
+  password is changed/reset; the upgrade would have to be added (and tested) in
+  `EncryptedNoteRepository.unlock()` before this document may claim it again (audit D1).
 - **Biometric prompt UX**: the crypto layer returns ciphers; it does not show prompts. The
   UI must pass the cipher through a `BiometricPrompt.CryptoObject` and handle
   cancel/lockout; UI-owned tests cover that.

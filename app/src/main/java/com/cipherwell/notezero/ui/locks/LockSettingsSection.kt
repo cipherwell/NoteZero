@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.locks
 
+import com.cipherwell.notezero.R
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
@@ -8,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cipherwell.notezero.data.NoteRepository
 import com.cipherwell.notezero.ui.components.common.NzCard
@@ -36,25 +38,23 @@ fun LockSettingsSection(
     val verifiedIds by repository.verifiedLockedIds.collectAsStateWithLifecycle()
     NzCard(modifier = modifier.testTag("settings_lock_section")) {
         Text(
-            text = "Locked notes & folders",
+            text = stringResource(R.string.lock_settings_title),
             style = NoteZeroType.Body,
             color = MaterialTheme.colorScheme.onSurface,
         )
         Spacer(Modifier.height(NoteZeroSpacing.xs))
         Text(
             text = if (verifiedIds.isEmpty()) {
-                "No locked item is revealed right now. Locked notes and folders stay " +
-                    "hidden until you verify with biometrics or your master password."
+                stringResource(R.string.lock_settings_none)
             } else {
-                "${verifiedIds.size} locked item(s) revealed for this session. " +
-                    "Re-arm to hide them again immediately."
+                stringResource(R.string.lock_settings_count, verifiedIds.size)
             },
             style = NoteZeroType.Caption,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(NoteZeroSpacing.m))
         NzSecondaryButton(
-            text = "Re-arm locked notes now",
+            text = stringResource(R.string.lock_settings_rearm),
             onClick = repository::clearLockVerifications,
             modifier = Modifier.testTag("settings_relock"),
         )

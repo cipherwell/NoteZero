@@ -14,6 +14,7 @@ import com.cipherwell.notezero.model.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import java.io.InputStream
 import java.io.OutputStream
 
@@ -47,6 +48,12 @@ class FakeCodeRepository : NoteRepository {
     private val _verifiedLockedIds = MutableStateFlow<Set<String>>(emptySet())
     override val verifiedLockedIds: StateFlow<Set<String>> = _verifiedLockedIds.asStateFlow()
 
+    /** Test-only master password used by [verifyMasterPassword]; null = no vault password. */
+    var masterPassword: String? = null
+
+    var verifyMasterPasswordCalls: Int = 0
+        private set
+
     // ---- Test knobs ---------------------------------------------------------
 
     /** Monotonic fake clock for createdAt/updatedAt. */
@@ -57,6 +64,16 @@ class FakeCodeRepository : NoteRepository {
 
     /** When true the next [saveItem] throws once (save-error handling test). */
     var failNextSave: Boolean = false
+
+    /**
+     * When true the next [saveItem] simulates losing the auto-lock race: the vault locks
+     * (index cleared, LOCKED published) and the call throws `IllegalStateException` like the
+     * real repository's `requireUnlocked()` (audit findings F1/F10).
+     */
+    var failNextSaveAfterLock: Boolean = false
+
+    /** Same race simulation for [trashItem] (code-workspace mutation path, audit F10). */
+    var lockRaceOnNextTrash: Boolean = false
 
     val savedItems: MutableList<Item> = mutableListOf()
 
@@ -76,6 +93,9 @@ class FakeCodeRepository : NoteRepository {
     fun setVerifiedLockedIds(ids: Set<String>) {
         _verifiedLockedIds.value = ids
     }
+
+    /** Test helper: reveal a locked id without driving a prompt (as the repository does). */
+    fun revealForTest(id: String) = markLockVerified(id)
 
     fun setStatus(status: VaultStatus) {
         _status.value = status
@@ -190,6 +210,25 @@ class FakeCodeRepository : NoteRepository {
         _folders.value = emptyList()
     }
 
+    override suspend fun verifyMasterPassword(password: CharArray): Boolean {
+        verifyMasterPasswordCalls += 1
+        val stored = masterPassword
+        val matches = stored != null && String(password) == stored
+        // Mirrors the real repository: the caller's array is wiped on every path.
+        password.fill('\u0000')
+        return matches
+    }
+
+    override fun markLockVerified(id: String) {
+        if (id.isBlank()) return
+        if (_status.value != VaultStatus.UNLOCKED) return
+        _verifiedLockedIds.update { it + id }
+    }
+
+    override fun clearLockVerifications() {
+        _verifiedLockedIds.value = emptySet()
+    }
+
     override suspend fun changePassword(current: CharArray, next: CharArray): Boolean = true
 
     override suspend fun resetWithRecoveryPhrase(
@@ -235,6 +274,11 @@ class FakeCodeRepository : NoteRepository {
     }
 
     override suspend fun saveItem(item: Item): Item {
+        if (failNextSaveAfterLock) {
+            failNextSaveAfterLock = false
+            lockSessionLikeTheRealRepository()
+            throw IllegalStateException("Vault is locked")
+        }
         if (failNextSave) {
             failNextSave = false
             throw IllegalStateException("fake save failure")
@@ -251,6 +295,11 @@ class FakeCodeRepository : NoteRepository {
     }
 
     override suspend fun trashItem(id: String) {
+        if (lockRaceOnNextTrash) {
+            lockRaceOnNextTrash = false
+            lockSessionLikeTheRealRepository()
+            throw IllegalStateException("Vault is locked")
+        }
         mutate(id) { it.copy(trashed = true, updatedAt = nextClock()) }
     }
 
@@ -280,6 +329,14 @@ class FakeCodeRepository : NoteRepository {
 
     private fun mutate(id: String, transform: (Item) -> Item) {
         _items.value = _items.value.map { if (it.id == id) transform(it) else it }
+    }
+
+    /** Mirrors `requireUnlocked()` on a vault that locked mid-call. */
+    private fun lockSessionLikeTheRealRepository() {
+        _status.value = VaultStatus.LOCKED
+        _items.value = emptyList()
+        _folders.value = emptyList()
+        _verifiedLockedIds.value = emptySet()
     }
 
     // ---- Folders -------------------------------------------------------------

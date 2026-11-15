@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.screens.setup
 
+import com.cipherwell.notezero.R
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -19,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import com.cipherwell.notezero.ui.SetupStep
 import com.cipherwell.notezero.ui.SetupUiState
@@ -63,7 +65,7 @@ fun SetupScreen(
             SetupStep.DONE -> Unit // Shell has already routed to the unlocked notes list.
         }
         if (setup.isWorking) {
-            NzLoadingOverlay(label = "Creating your encrypted vault…")
+            NzLoadingOverlay(label = stringResource(R.string.setup_loading))
         }
     }
 }
@@ -73,8 +75,11 @@ private fun PasswordStep(
     setup: SetupUiState,
     onCreateVault: (CharArray) -> Unit,
 ) {
-    var password by rememberSaveable { mutableStateOf("") }
-    var confirmation by rememberSaveable { mutableStateOf("") }
+    // Credentials live in plain `remember` on purpose: `rememberSaveable` writes them to the
+    // Activity's saved instance state Bundle, which leaves the process (system_server) and
+    // outlives the composable. Same rule as the backup flow (audit finding F3).
+    var password by remember { mutableStateOf("") }
+    var confirmation by remember { mutableStateOf("") }
     var mismatch by rememberSaveable { mutableStateOf(false) }
     val passwordFocus = remember { FocusRequester() }
 
@@ -88,9 +93,10 @@ private fun PasswordStep(
     LaunchedEffect(Unit) { passwordFocus.requestFocus() }
 
     val errorText: String? = when {
-        mismatch -> "The two passwords do not match."
-        setup.passwordRule != null -> "The password is missing: ${PasswordPolicy.label(setup.passwordRule)}."
-        setup.failed -> "Could not create the vault. Nothing was saved — try again."
+        mismatch -> stringResource(R.string.setup_error_mismatch)
+        setup.passwordRule != null ->
+            stringResource(R.string.setup_error_rule_missing, PasswordPolicy.label(setup.passwordRule))
+        setup.failed -> stringResource(R.string.setup_error_failed)
         else -> null
     }
 
@@ -103,8 +109,8 @@ private fun PasswordStep(
     ) {
         Spacer(Modifier.height(NoteZeroSpacing.xxxl))
         NzLargeTitle(
-            title = "Create your vault",
-            subtitle = "Everything is encrypted on this device. No account, no cloud.",
+            title = stringResource(R.string.setup_title),
+            subtitle = stringResource(R.string.setup_subtitle),
         )
         NzFormSpacer(NoteZeroSpacing.xxl)
         SecureTextField(
@@ -113,7 +119,7 @@ private fun PasswordStep(
                 password = it
                 mismatch = false
             },
-            label = "Master password",
+            label = stringResource(R.string.common_master_password),
             modifier = Modifier.testTag("setup_password"),
             isError = errorText != null,
             imeAction = ImeAction.Next,
@@ -126,7 +132,7 @@ private fun PasswordStep(
                 confirmation = it
                 mismatch = false
             },
-            label = "Confirm master password",
+            label = stringResource(R.string.setup_confirm_password),
             modifier = Modifier.testTag("setup_confirm"),
             isError = mismatch,
             imeAction = ImeAction.Done,
@@ -148,7 +154,7 @@ private fun PasswordStep(
         }
         NzFormSpacer(NoteZeroSpacing.xxl)
         NzPrimaryButton(
-            text = "Create vault",
+            text = stringResource(R.string.setup_create),
             onClick = {
                 if (PasswordPolicy.matches(password, confirmation)) {
                     onCreateVault(password.toCharArray())
@@ -164,8 +170,7 @@ private fun PasswordStep(
         )
         NzFormSpacer(NoteZeroSpacing.m)
         NzInfoBanner(
-            text = "NoteZero cannot recover your password. The 12-word recovery phrase, " +
-                "which comes next, is the only backup.",
+            text = stringResource(R.string.setup_recovery_warning),
             tone = NzBannerTone.INFO,
         )
         NzBottomSpacer()
@@ -187,9 +192,8 @@ private fun PhraseStep(
     ) {
         Spacer(Modifier.height(NoteZeroSpacing.xxxl))
         NzLargeTitle(
-            title = "Save your recovery phrase",
-            subtitle = "These 12 words are shown only once. They are the only way back into " +
-                "your vault if you forget the master password.",
+            title = stringResource(R.string.setup_phrase_title),
+            subtitle = stringResource(R.string.setup_phrase_subtitle),
         )
         NzFormSpacer(NoteZeroSpacing.xxl)
         RecoveryPhraseGrid(
@@ -198,15 +202,14 @@ private fun PhraseStep(
         )
         NzFormSpacer(NoteZeroSpacing.l)
         NzInfoBanner(
-            text = "Write the words down in order and keep them offline. Anyone with these " +
-                "words can open your vault.",
+            text = stringResource(R.string.setup_phrase_warning),
             tone = NzBannerTone.WARNING,
         )
         NzFormSpacer(NoteZeroSpacing.m)
         RecoveryPhraseCopyControl(words = phrase, modifier = Modifier.testTag("setup_copy_phrase"))
         NzFormSpacer(NoteZeroSpacing.xxl)
         NzPrimaryButton(
-            text = "I've written it down",
+            text = stringResource(R.string.setup_phrase_acknowledge),
             onClick = onAcknowledgePhrase,
             modifier = Modifier
                 .fillMaxWidth()
@@ -222,7 +225,8 @@ private fun ConfirmStep(
     onConfirmPhrase: (List<String>) -> Boolean,
 ) {
     val entries = setup.confirmIndices.size
-    var words by rememberSaveable { mutableStateOf(List(entries) { "" }) }
+    // Typed recovery words are credentials too: plain `remember`, never saved instance state.
+    var words by remember { mutableStateOf(List(entries) { "" }) }
     val firstFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { firstFocus.requestFocus() }
 
@@ -235,8 +239,8 @@ private fun ConfirmStep(
     ) {
         Spacer(Modifier.height(NoteZeroSpacing.xxxl))
         NzLargeTitle(
-            title = "Confirm your phrase",
-            subtitle = "Enter the requested words to prove you wrote the phrase down.",
+            title = stringResource(R.string.setup_confirm_title),
+            subtitle = stringResource(R.string.setup_confirm_subtitle),
         )
         NzFormSpacer(NoteZeroSpacing.xxl)
         setup.confirmIndices.forEachIndexed { position, wordIndex ->
@@ -245,7 +249,7 @@ private fun ConfirmStep(
                 onValueChange = { value ->
                     words = words.toMutableList().also { it[position] = value }
                 },
-                label = "Word ${wordIndex + 1}",
+                label = stringResource(R.string.setup_word_label, wordIndex + 1),
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("setup_confirm_word_$position"),
@@ -257,7 +261,7 @@ private fun ConfirmStep(
         }
         if (setup.confirmMismatch) {
             NzInfoBanner(
-                text = "Those words do not match the phrase. Check the order on your written copy.",
+                text = stringResource(R.string.setup_confirm_mismatch),
                 tone = NzBannerTone.DANGER,
                 modifier = Modifier.testTag("setup_error"),
             )
@@ -265,7 +269,7 @@ private fun ConfirmStep(
         }
         NzFormSpacer(NoteZeroSpacing.s)
         NzPrimaryButton(
-            text = "Finish setup",
+            text = stringResource(R.string.setup_finish),
             onClick = { onConfirmPhrase(words) },
             modifier = Modifier
                 .fillMaxWidth()
@@ -275,8 +279,7 @@ private fun ConfirmStep(
         )
         NzFormSpacer(NoteZeroSpacing.m)
         NzInfoBanner(
-            text = "If you ever need a new recovery phrase, you can rotate the recovery kit " +
-                "in Settings using your master password.",
+            text = stringResource(R.string.setup_rotate_hint),
             tone = NzBannerTone.INFO,
         )
         NzBottomSpacer()

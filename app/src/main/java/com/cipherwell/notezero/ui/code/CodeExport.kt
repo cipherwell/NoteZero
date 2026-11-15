@@ -5,11 +5,16 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cipherwell.notezero.data.NoteRepository
+import com.cipherwell.notezero.data.VaultStatus
+import com.cipherwell.notezero.ui.locks.LockVisibility
 
 /** MIME type offered by SAF `CreateDocument` for an exported source file. */
 internal const val CODE_EXPORT_MIME_TYPE: String = "text/plain"
@@ -34,31 +39,58 @@ fun interface CodeExportTarget {
 }
 
 /**
+ * True only when the pending export may still be written: the vault is UNLOCKED **and**
+ * [itemId] is still in the index and visible to this session (not locked+unverified).
+ *
+ * The file picker is a separate activity and may stay open past the idle timeout, and
+ * `endExternalActivity()` can lock the vault as the result arrives. "Locked ⇒ no decrypted
+ * output" must therefore be re-checked at result time, exactly like
+ * [com.cipherwell.notezero.ui.attachments.AttachmentController.onExportTarget] does for
+ * attachments (audit finding F6). Pure function so the decision is unit-tested on the JVM.
+ */
+internal fun canWriteCodeExport(repository: NoteRepository, itemId: String): Boolean {
+    if (repository.status.value != VaultStatus.UNLOCKED) return false
+    val item = repository.items.value.firstOrNull { it.id == itemId } ?: return false
+    return !LockVisibility.isItemMasked(item, repository.verifiedLockedIds.value)
+}
+
+/**
  * Production export target: SAF `CreateDocument` bracketed with the repository's external
  * activity deferral (the picker is a separate activity; without the bracket the vault would
  * lock and lose the user's chosen location).
  *
  * The confirmed content is held in memory only until the picker returns; it is written to the
  * user-chosen `content://` URI, never into app storage. A cancelled/failed picker writes
- * nothing.
+ * nothing. The pending plaintext is also dropped as soon as the vault leaves UNLOCKED, and
+ * the result path re-checks the session before writing anything (audit F6).
  */
 @Composable
-internal fun rememberSafCodeExportTarget(repository: NoteRepository): CodeExportTarget {
+internal fun rememberSafCodeExportTarget(
+    repository: NoteRepository,
+    itemId: String,
+): CodeExportTarget {
     val context = LocalContext.current
     val pending: MutableState<String?> = remember { mutableStateOf(null) }
+    val status by repository.status.collectAsStateWithLifecycle()
+    // Drop the pending plaintext when the vault locks; the result callback re-checks the
+    // session anyway, because a stopped Activity pauses this observer while the picker is up.
+    LaunchedEffect(status) {
+        if (status != VaultStatus.UNLOCKED) pending.value = null
+    }
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument(CODE_EXPORT_MIME_TYPE),
         onResult = { uri: Uri? ->
             val content = pending.value
             pending.value = null
-            if (uri != null && content != null) {
+            if (uri != null && content != null && canWriteCodeExport(repository, itemId)) {
                 writePlaintextCopy(context.contentResolver, uri, content)
             }
             repository.endExternalActivity()
         },
     )
-    return remember(launcher, repository, context) {
+    return remember(launcher, repository, context, itemId) {
         CodeExportTarget { suggestedName, content ->
+            if (!canWriteCodeExport(repository, itemId)) return@CodeExportTarget
             pending.value = content
             repository.beginExternalActivity()
             runCatching { launcher.launch(sanitizeExportName(suggestedName)) }

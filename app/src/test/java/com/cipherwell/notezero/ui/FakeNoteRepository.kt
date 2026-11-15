@@ -175,7 +175,8 @@ class FakeNoteRepository(
         }
         if (phrase != recoveryPhrase) return UnlockResult.WRONG_RECOVERY_PHRASE
         password = String(newPassword)
-        recoveryPhrase = ROTATED_PHRASE
+        // Mirrors the real repository (decision #12): a reset re-wraps the SAME phrase under
+        // a fresh salt; it does not rotate it. Only rotateRecoveryPhrase replaces the phrase.
         setUnlocked()
         return UnlockResult.SUCCESS
     }

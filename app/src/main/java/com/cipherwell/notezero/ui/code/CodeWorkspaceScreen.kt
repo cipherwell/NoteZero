@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.code
 
+import com.cipherwell.notezero.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,6 +37,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -143,22 +146,34 @@ private fun CodeTreeContent(
                         onClick = { if (state.searchVisible) viewModel.closeSearch() else onBack() },
                         modifier = Modifier.testTag(CodeTags.BACK),
                     ) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back to notes")
+                        Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back_to_notes))
                     }
                 },
                 title = {
                     Column {
-                        Text("Code", style = NoteZeroType.Heading)
+                        val fileCountLabel = pluralStringResource(
+                            R.plurals.code_file_count,
+                            state.fileCount,
+                            state.fileCount,
+                        )
+                        val folderCountLabel = pluralStringResource(
+                            R.plurals.code_folder_count,
+                            state.folderCount,
+                            state.folderCount,
+                        )
+                        Text(stringResource(R.string.code_title), style = NoteZeroType.Heading)
                         Text(
-                            text = "${countLabel(state.fileCount, "file")} · " +
-                                "${countLabel(state.folderCount, "folder")} · encrypted",
+                            text = stringResource(
+                                R.string.code_header_counts,
+                                fileCountLabel,
+                                folderCountLabel,
+                            ),
                             style = NoteZeroType.Caption,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         if (state.lockedHiddenCount > 0) {
                             Text(
-                                text = "${state.lockedHiddenCount} locked item(s) hidden — " +
-                                    "verify in Notes",
+                                text = stringResource(R.string.code_locked_hidden, state.lockedHiddenCount),
                                 style = NoteZeroType.Caption,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.testTag(CodeTags.LOCKED_HIDDEN),
@@ -176,9 +191,9 @@ private fun CodeTreeContent(
                         Icon(
                             Icons.Filled.Search,
                             contentDescription = if (state.searchVisible) {
-                                "Close workspace search"
+                                stringResource(R.string.cd_code_close_workspace_search)
                             } else {
-                                "Search code files"
+                                stringResource(R.string.cd_code_search)
                             },
                         )
                     }
@@ -187,14 +202,14 @@ private fun CodeTreeContent(
                         modifier = Modifier
                             .heightIn(min = NoteZeroSpacing.minTarget)
                             .testTag(CodeTags.NEW_FOLDER),
-                    ) { Text("New folder") }
+                    ) { Text(stringResource(R.string.code_new_folder)) }
                     IconButton(
                         onClick = { openCreateFile(null) },
                         modifier = Modifier
                             .heightIn(min = NoteZeroSpacing.minTarget)
                             .testTag(CodeTags.NEW_FILE),
                     ) {
-                        Icon(Icons.Filled.Add, contentDescription = "New code file")
+                        Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.cd_code_new_file))
                     }
                 },
             )
@@ -218,8 +233,8 @@ private fun CodeTreeContent(
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when {
                     !state.isUnlocked -> CenteredMessage(
-                        title = "Vault is locked",
-                        subtitle = "Unlock the vault to open the code workspace.",
+                        title = stringResource(R.string.code_locked_title),
+                        subtitle = stringResource(R.string.code_locked_subtitle),
                     )
 
                     state.searchActive -> CodeSearchResults(
@@ -274,11 +289,11 @@ private fun CodeTreeContent(
 
     if (showNewFile) {
         CodeTextInputDialog(
-            title = "New code file",
-            label = "File name",
+            title = stringResource(R.string.code_new_file_title),
+            label = stringResource(R.string.code_file_name),
             initialValue = "",
-            placeholder = "untitled.kt",
-            confirmLabel = "Create",
+            placeholder = stringResource(R.string.code_untitled_placeholder),
+            confirmLabel = stringResource(R.string.common_create),
             validate = { raw ->
                 val name = CodeTree.normalizeNewFileName(raw)
                 CodeTree.validateName(name)
@@ -297,10 +312,10 @@ private fun CodeTreeContent(
 
     if (showNewFolder) {
         CodeTextInputDialog(
-            title = "New folder",
-            label = "Folder name",
+            title = stringResource(R.string.code_new_folder),
+            label = stringResource(R.string.common_folder_name),
             initialValue = "",
-            confirmLabel = "Create",
+            confirmLabel = stringResource(R.string.common_create),
             validate = { CodeTree.validateName(it) },
             onDismiss = { showNewFolder = false },
             onConfirm = { name ->
@@ -313,10 +328,10 @@ private fun CodeTreeContent(
     renameFileTarget?.let { item ->
         val target = item
         CodeTextInputDialog(
-            title = "Rename file",
-            label = "File name",
+            title = stringResource(R.string.code_rename_file_title),
+            label = stringResource(R.string.code_file_name),
             initialValue = target.title,
-            confirmLabel = "Rename",
+            confirmLabel = stringResource(R.string.common_rename),
             validate = { CodeTree.validateName(it) },
             onDismiss = { renameFileTarget = null },
             onConfirm = { name ->
@@ -329,10 +344,10 @@ private fun CodeTreeContent(
     renameFolderTarget?.let { folder ->
         val target = folder
         CodeTextInputDialog(
-            title = "Rename folder",
-            label = "Folder name",
+            title = stringResource(R.string.code_rename_folder_title),
+            label = stringResource(R.string.common_folder_name),
             initialValue = target.name,
-            confirmLabel = "Rename",
+            confirmLabel = stringResource(R.string.common_rename),
             validate = { CodeTree.validateName(it) },
             onDismiss = { renameFolderTarget = null },
             onConfirm = { name ->
@@ -357,9 +372,9 @@ private fun CodeTreeContent(
     deleteFileTarget?.let { item ->
         val target = item
         CodeConfirmDialog(
-            title = "Delete file?",
-            message = "\"${target.title}\" moves to the trash. Nothing is permanently deleted from this screen.",
-            confirmLabel = "Delete file",
+            title = stringResource(R.string.code_delete_file_title),
+            message = stringResource(R.string.code_delete_file_message, target.title),
+            confirmLabel = stringResource(R.string.code_delete_file),
             destructive = true,
             onDismiss = { deleteFileTarget = null },
             onConfirm = {
@@ -372,9 +387,9 @@ private fun CodeTreeContent(
     deleteFolderTarget?.let { folder ->
         val target = folder
         CodeConfirmDialog(
-            title = "Delete folder?",
-            message = "Files and subfolders inside move to the parent folder. Nothing is permanently deleted.",
-            confirmLabel = "Delete folder",
+            title = stringResource(R.string.code_delete_folder_title),
+            message = stringResource(R.string.code_delete_folder_message),
+            confirmLabel = stringResource(R.string.code_delete_folder),
             destructive = true,
             onDismiss = { deleteFolderTarget = null },
             onConfirm = {
@@ -384,10 +399,6 @@ private fun CodeTreeContent(
         )
     }
 }
-
-/** "1 file" / "2 files" — a count is never rendered with a stray plural. */
-internal fun countLabel(count: Int, singular: String): String =
-    "$count ${if (count == 1) singular else singular + "s"}"
 
 @Composable
 private fun EmptyCodeTree(
@@ -404,13 +415,13 @@ private fun EmptyCodeTree(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = "Your code vault",
+            text = stringResource(R.string.code_empty_title),
             style = NoteZeroType.Title,
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.size(NoteZeroSpacing.s))
         Text(
-            text = "Create a code file to start writing. Every keystroke is encrypted on this device.",
+            text = stringResource(R.string.code_empty_subtitle),
             style = NoteZeroType.Callout,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -423,12 +434,12 @@ private fun EmptyCodeTree(
             ) {
                 Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.size(NoteZeroSpacing.xs))
-                Text("New file", style = NoteZeroType.Callout)
+                Text(stringResource(R.string.code_new_file), style = NoteZeroType.Callout)
             }
             TextButton(
                 onClick = onCreateFolder,
                 modifier = Modifier.heightIn(min = NoteZeroSpacing.minTarget),
-            ) { Text("New folder", style = NoteZeroType.Callout) }
+            ) { Text(stringResource(R.string.code_new_folder), style = NoteZeroType.Callout) }
         }
     }
 }

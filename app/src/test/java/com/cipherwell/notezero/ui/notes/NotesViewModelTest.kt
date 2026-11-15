@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.notes
 
+import com.cipherwell.notezero.data.VaultStatus
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
@@ -334,5 +335,45 @@ class NotesViewModelTest {
         viewModel.deleteFolder(repository.folderById(folder.id)!!)
         advanceUntilIdle()
         assertNull(repository.folderById(folder.id))
+    }
+
+    // ---- auto-lock race (audit finding F10) ----------------------------------
+
+    @Test
+    fun `a mutation that loses the auto-lock race reports stale state instead of crashing`() =
+        runTest(dispatcher) {
+            val note = item("a", title = "Groceries")
+            repository.setItems(listOf(note))
+            val viewModel = NotesViewModel(repository)
+            advanceUntilIdle()
+            assertFalse(viewModel.sessionStale.value)
+
+            // The pre-check passes, then the repository mutex proves the vault already locked
+            // and throws IllegalStateException. That must not become an uncaught coroutine
+            // exception (the test dispatcher would fail the test) — it becomes a non-secret
+            // refresh flag.
+            repository.lockRaceOnNextPin = true
+            viewModel.togglePinned(note)
+            advanceUntilIdle()
+
+            assertTrue("the UI can show a refresh notice", viewModel.sessionStale.value)
+            assertEquals(VaultStatus.LOCKED, repository.status.value)
+        }
+
+    @Test
+    fun `stale state clears on the next unlocked session`() = runTest(dispatcher) {
+        val note = item("a", title = "Groceries")
+        repository.setItems(listOf(note))
+        val viewModel = NotesViewModel(repository)
+        advanceUntilIdle()
+
+        repository.lockRaceOnNextPin = true
+        viewModel.togglePinned(note)
+        advanceUntilIdle()
+        assertTrue(viewModel.sessionStale.value)
+
+        repository.setStatus(VaultStatus.UNLOCKED)
+        advanceUntilIdle()
+        assertFalse(viewModel.sessionStale.value)
     }
 }

@@ -486,4 +486,60 @@ class VaultViewModelTest {
         assertWiped(next)
     }
 
+    // ---- session-boundary hygiene (audit findings F2/F5) ---------------------
+
+    @Test
+    fun `rotated phrase is dropped on lock and cannot be re-shown without a new rotation`() =
+        runTest(dispatcher) {
+            val repository = unlockedVault()
+            val viewModel = createViewModel(repository)
+
+            viewModel.rotateRecoveryPhrase(FakeNoteRepository.STRONG_PASSWORD.toCharArray())
+            advanceUntilIdle()
+            assertEquals(FakeNoteRepository.ROTATED_PHRASE, viewModel.settings.value.rotatedPhrase)
+
+            // Background/screen-off lock: the phrase (and its acknowledgement) must not stay in
+            // the app-scoped ViewModel, or reopening Settings would reveal it without re-auth.
+            repository.forceStatus(VaultStatus.LOCKED)
+            advanceUntilIdle()
+
+            assertNull("the rotated phrase is dropped on lock", viewModel.settings.value.rotatedPhrase)
+            assertNull("the acknowledgement is dropped on lock", viewModel.settings.value.message)
+            assertFalse(viewModel.settings.value.isWorking)
+        }
+
+    @Test
+    fun `recovery reset reports that the phrase is unchanged and clears the notice on lock`() =
+        runTest(dispatcher) {
+            val repository = lockedVault()
+            val viewModel = createViewModel(repository)
+            val next = FakeNoteRepository.OTHER_STRONG_PASSWORD.toCharArray()
+
+            assertFalse(viewModel.recoveryResetNotice.value)
+            viewModel.resetWithRecoveryPhrase(FakeNoteRepository.DEFAULT_PHRASE, next)
+            advanceUntilIdle()
+
+            assertEquals(VaultStatus.UNLOCKED, repository.status.value)
+            // Decision #12: the reset re-wraps the SAME phrase, so the user must be told that,
+            // not that a new phrase was generated.
+            assertTrue("post-reset confirmation is raised", viewModel.recoveryResetNotice.value)
+            assertEquals(FakeNoteRepository.DEFAULT_PHRASE, repository.recoveryPhrase)
+
+            viewModel.dismissRecoveryResetNotice()
+            assertFalse(viewModel.recoveryResetNotice.value)
+
+            // A lock drops a pending notice: it belongs to the session that produced it.
+            repository.forceStatus(VaultStatus.LOCKED)
+            advanceUntilIdle()
+            // The ViewModel wipes the buffer handed to the first reset, so pass a fresh one.
+            viewModel.resetWithRecoveryPhrase(
+                FakeNoteRepository.DEFAULT_PHRASE,
+                FakeNoteRepository.OTHER_STRONG_PASSWORD.toCharArray(),
+            )
+            advanceUntilIdle()
+            assertTrue(viewModel.recoveryResetNotice.value)
+            repository.forceStatus(VaultStatus.LOCKED)
+            advanceUntilIdle()
+            assertFalse(viewModel.recoveryResetNotice.value)
+        }
 }

@@ -18,6 +18,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -26,7 +27,9 @@ import kotlinx.coroutines.launch
 // ---------------------------------------------------------------------------------
 // UI state models. All of them are free of secret material except
 // [SetupUiState.phrase] / [SettingsUiState.rotatedPhrase], which hold the freshly
-// generated recovery words only until the user acknowledges them.
+// generated recovery words only until the user acknowledges them — and never past a
+// lock: the status collector drops both on every session boundary (decision #12,
+// audit findings F2/F5).
 // ---------------------------------------------------------------------------------
 
 /** Combined vault/session state used by the app shell and settings. */
@@ -111,7 +114,11 @@ data class SettingsUiState(
     val isWorking: Boolean = false,
     val message: SettingsMessage? = null,
     val isError: Boolean = false,
-    /** New recovery words after a rotation; cleared as soon as they are acknowledged. */
+    /**
+     * New recovery words after an explicit rotation; cleared as soon as they are
+     * acknowledged **and** on every lock/background, so they are never re-shown from a
+     * previous session without a fresh rotate action (audit F5).
+     */
     val rotatedPhrase: List<String>? = null,
 ) {
     fun messageFor(m: SettingsMessage): String = when (m) {
@@ -193,6 +200,15 @@ class VaultViewModel(
     private val _settings = MutableStateFlow(SettingsUiState())
     val settings: StateFlow<SettingsUiState> = _settings
 
+    private val _recoveryResetNotice = MutableStateFlow(false)
+
+    /**
+     * One-shot, non-secret confirmation shown after a successful recovery reset: the 12-word
+     * phrase was **not** rotated, so the one the user already wrote down keeps working
+     * (decision #12). Dismissed by the user, and dropped on every lock.
+     */
+    val recoveryResetNotice: StateFlow<Boolean> = _recoveryResetNotice.asStateFlow()
+
     init {
         viewModelScope.launch {
             repository.status.collect { status ->
@@ -205,6 +221,12 @@ class VaultViewModel(
                     VaultStatus.LOCKED -> {
                         lockoutJob?.cancel()
                         _unlock.value = UnlockUiState()
+                        // A rotated phrase and its acknowledgement are session secrets: they
+                        // must not survive a lock/background, otherwise reopening Settings in
+                        // the same process would re-display them without re-authentication
+                        // (audit F5). Same for the post-reset notice.
+                        _settings.value = SettingsUiState()
+                        _recoveryResetNotice.value = false
                         // If the app locked mid-setup (backgrounded on the phrase screen),
                         // the phrase can no longer be recovered into the UI. The vault
                         // exists and is unlockable with the password; the kit can be
@@ -222,6 +244,8 @@ class VaultViewModel(
                         _unlock.value = UnlockUiState()
                         _setup.value = SetupUiState()
                         _recovery.value = RecoveryUiState()
+                        _settings.value = SettingsUiState()
+                        _recoveryResetNotice.value = false
                     }
                 }
             }
@@ -481,8 +505,14 @@ class VaultViewModel(
     }
 
     /**
-     * Recovery reset: re-wraps the VMK under [newPassword] and rotates the recovery kit.
-     * The new password buffer is wiped when the call returns.
+     * Recovery reset: re-wraps the VMK under [newPassword] and re-wraps the **same** 12-word
+     * phrase under a fresh salt — the phrase is *not* rotated (decision #12; the frozen
+     * repository interface returns no new phrase). Rotation is the explicit Settings action
+     * [rotateRecoveryPhrase], which shows the new phrase once.
+     *
+     * On success it raises [recoveryResetNotice] so the unlocked surface can confirm that the
+     * phrase the user already wrote down still works. The new password buffer is wiped when
+     * the call returns.
      */
     fun resetWithRecoveryPhrase(words: List<String>, newPassword: CharArray) {
         if (_recovery.value.isWorking) {
@@ -513,7 +543,12 @@ class VaultViewModel(
                 newPassword.fill('\u0000')
             }
             when (result) {
-                UnlockResult.SUCCESS -> _recovery.value = RecoveryUiState()
+                UnlockResult.SUCCESS -> {
+                    _recovery.value = RecoveryUiState()
+                    // The phrase is unchanged by a reset (decision #12): tell the user instead
+                    // of letting them believe a new one was generated (audit F2).
+                    _recoveryResetNotice.value = true
+                }
                 UnlockResult.WRONG_RECOVERY_PHRASE -> _recovery.update {
                     it.copy(
                         isWorking = false,
@@ -573,7 +608,11 @@ class VaultViewModel(
         }
     }
 
-    /** Rotates the recovery kit using the current password; the phrase stays in memory until acknowledged. */
+    /**
+     * Rotates the recovery kit using the current password; the new phrase stays in memory only
+     * until acknowledged (and is dropped on the next lock). This is the **only** action that
+     * replaces the phrase: a recovery reset re-wraps the existing one (decision #12).
+     */
     fun rotateRecoveryPhrase(currentPassword: CharArray) {
         if (!isUnlocked()) {
             currentPassword.fill('\u0000')
@@ -610,6 +649,11 @@ class VaultViewModel(
         _settings.update {
             it.copy(rotatedPhrase = null, message = SettingsMessage.RECOVERY_SAVED, isError = false)
         }
+    }
+
+    /** Dismisses the post-recovery-reset confirmation ("your phrase is unchanged"). */
+    fun dismissRecoveryResetNotice() {
+        _recoveryResetNotice.value = false
     }
 
     // ---- Biometric enrollment (two-phase; see data/NoteRepository) ----------

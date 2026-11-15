@@ -12,6 +12,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -42,8 +43,13 @@ enum class SaveStatus {
  * Draft state + autosave for a single note.
  *
  * Security: the decrypted title/body never leave this ViewModel's in-memory state; it is
- * never logged and is dropped with the ViewModel. Persistence only happens through
- * [NoteRepository.saveItem], which re-encrypts on the data layer.
+ * never logged. Persistence only happens through [NoteRepository.saveItem], which
+ * re-encrypts on the data layer. Because the Activity-scoped ViewModel outlives the screen,
+ * it cannot rely on being dropped: it watches [NoteRepository.status] and
+ * [NoteRepository.verifiedLockedIds] and wipes the draft, undo/redo history, conflict and
+ * find state the moment the vault is no longer UNLOCKED or the note loses its session
+ * verification (decision #15). A new session reloads the draft from the repository index,
+ * so nothing decrypted survives a lock (audit finding F1).
  *
  * Autosave: every edit restarts a [debounceMs] timer (~800 ms) that persists the draft.
  * Leaving the screen calls [saveOnLeave], which flushes immediately (force = true) so no
@@ -78,6 +84,12 @@ class EditorViewModel(
         val conflict: Boolean = false,
         val lastSavedAt: Long? = null,
         val successfulSaves: Int = 0,
+        /**
+         * True after the vault locked/re-armed while this (Activity-scoped) ViewModel was
+         * alive: every decrypted field above has been dropped and the screen must not render
+         * a draft. A new session reloads the note (see [loadDraft]).
+         */
+        val sessionCleared: Boolean = false,
     ) {
         val wordCount: Int get() = TextMetrics.wordCount(body)
         val characterCount: Int get() = TextMetrics.characterCount(body)
@@ -96,22 +108,70 @@ class EditorViewModel(
     private var baseBody: String = ""
 
     init {
+        viewModelScope.launch { loadDraft() }
         viewModelScope.launch {
-            val item = repository.items.first().firstOrNull { it.id == itemId }
-            if (item == null) {
-                _state.value = _state.value.copy(loading = false, missing = true)
-            } else {
-                baseTitle = item.title
-                baseBody = item.body
-                _state.value = EditorState(
-                    loading = false,
-                    title = item.title,
-                    body = item.body,
-                    kind = item.kind,
-                    lastSavedAt = item.updatedAt.takeIf { it > 0L },
-                )
+            // The ViewModel lives in the Activity's ViewModelStore, so "dropped with the
+            // ViewModel" would only happen on Activity destruction. Watch the session instead:
+            // a lock, a re-arm of the lock flag or any status change away from UNLOCKED wipes
+            // the decrypted draft immediately; a later unlock reloads it from the index.
+            combine(repository.status, repository.verifiedLockedIds) { status, verified ->
+                status to verified
+            }.collect { (status, verified) ->
+                val item = repository.items.value.firstOrNull { it.id == itemId }
+                val hidden = item?.locked == true && itemId !in verified
+                if (status != VaultStatus.UNLOCKED || hidden) {
+                    clearDecryptedState()
+                } else if (_state.value.sessionCleared) {
+                    loadDraft()
+                }
             }
         }
+    }
+
+    /** Loads the decrypted note from the repository index (init and post-session reload). */
+    private suspend fun loadDraft() {
+        val item = repository.items.value.firstOrNull { it.id == itemId }
+            ?: repository.items.first().firstOrNull { it.id == itemId }
+        if (item == null) {
+            _state.value = _state.value.copy(
+                loading = false,
+                missing = true,
+                sessionCleared = false,
+            )
+            return
+        }
+        baseTitle = item.title
+        baseBody = item.body
+        undoStack.clear()
+        redoStack.clear()
+        autosaveJob?.cancel()
+        _state.value = EditorState(
+            loading = false,
+            title = item.title,
+            body = item.body,
+            kind = item.kind,
+            lastSavedAt = item.updatedAt.takeIf { it > 0L },
+        )
+    }
+
+    /**
+     * Drops every decrypted value (title/body, undo/redo snapshots, conflict flag, base copy)
+     * and cancels the debounce. The screen renders a non-secret "session ended" placeholder
+     * until a new session reloads the note. Nothing here is persisted.
+     */
+    private fun clearDecryptedState() {
+        if (_state.value.sessionCleared) return
+        autosaveJob?.cancel()
+        autosaveJob = null
+        undoStack.clear()
+        redoStack.clear()
+        baseTitle = ""
+        baseBody = ""
+        _state.value = EditorState(
+            loading = false,
+            kind = _state.value.kind,
+            sessionCleared = true,
+        )
     }
 
     // ---- Editing -------------------------------------------------------------
@@ -128,7 +188,7 @@ class EditorViewModel(
 
     private fun mutate(title: String, body: String) {
         val current = _state.value
-        if (current.loading || current.missing) return
+        if (current.loading || current.missing || current.sessionCleared) return
         if (title == current.title && body == current.body) return
         pushUndo(Snapshot(current.title, current.body))
         redoStack.clear()
@@ -145,7 +205,7 @@ class EditorViewModel(
 
     fun undo() {
         val current = _state.value
-        if (current.loading || current.missing) return
+        if (current.loading || current.missing || current.sessionCleared) return
         val previous = undoStack.removeLastOrNull() ?: return
         redoStack.addLast(Snapshot(current.title, current.body))
         _state.value = current.copy(
@@ -161,7 +221,7 @@ class EditorViewModel(
 
     fun redo() {
         val current = _state.value
-        if (current.loading || current.missing) return
+        if (current.loading || current.missing || current.sessionCleared) return
         val next = redoStack.removeLastOrNull() ?: return
         pushUndo(Snapshot(current.title, current.body))
         _state.value = current.copy(
@@ -178,7 +238,7 @@ class EditorViewModel(
     /** Flips the [index]-th checklist item in the Markdown source (preview tap). */
     fun toggleChecklistItem(index: Int) {
         val current = _state.value
-        if (current.loading || current.missing) return
+        if (current.loading || current.missing || current.sessionCleared) return
         val updated = ChecklistMarkdown.toggle(current.body, index)
         if (updated != current.body) updateBody(updated)
     }
@@ -200,7 +260,7 @@ class EditorViewModel(
      */
     suspend fun flush(force: Boolean = false): Boolean = saveMutex.withLock {
         val current = _state.value
-        if (current.loading || current.missing) return@withLock false
+        if (current.loading || current.missing || current.sessionCleared) return@withLock false
         if (!current.dirty && !force) return@withLock true
         if (repository.status.value != VaultStatus.UNLOCKED) return@withLock false
 
@@ -235,6 +295,17 @@ class EditorViewModel(
             true
         } catch (cancelled: CancellationException) {
             throw cancelled
+        } catch (locked: IllegalStateException) {
+            // Auto-lock can win the race between the UNLOCKED check and the repository mutex
+            // (the VMK is wiped under it). That is not a retryable save error: drop the draft
+            // instead of leaving plaintext on screen or crashing (audit findings F1/F10).
+            if (repository.status.value != VaultStatus.UNLOCKED) {
+                clearDecryptedState()
+                false
+            } else {
+                _state.value = _state.value.copy(saveStatus = SaveStatus.ERROR, dirty = true)
+                false
+            }
         } catch (error: Exception) {
             _state.value = _state.value.copy(saveStatus = SaveStatus.ERROR, dirty = true)
             false
@@ -248,19 +319,23 @@ class EditorViewModel(
      */
     suspend fun saveOnLeave(): Boolean {
         autosaveJob?.cancel()
-        if (!_state.value.dirty) return true
+        val current = _state.value
+        if (current.sessionCleared) return false
+        if (!current.dirty) return true
         return flush(force = true)
     }
 
     /** Conflict resolution: keep the local draft and overwrite the repository copy. */
     fun overwriteWithLocalDraft() {
         autosaveJob?.cancel()
+        if (_state.value.sessionCleared) return
         viewModelScope.launch { flush(force = true) }
     }
 
     /** Conflict resolution: discard local edits and take the repository copy. */
     fun reloadLatest() {
         autosaveJob?.cancel()
+        if (_state.value.sessionCleared) return
         viewModelScope.launch {
             val item = repository.items.value.firstOrNull { it.id == itemId } ?: return@launch
             baseTitle = item.title

@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.attachments
 
+import com.cipherwell.notezero.R
 import android.graphics.Bitmap
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -40,6 +41,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
@@ -79,13 +81,18 @@ fun AttachmentViewerScreen(
     var loading by remember(attachment.id) { mutableStateOf(true) }
     var showExportWarning by remember(attachment.id) { mutableStateOf(false) }
     var exportNotice by remember(attachment.id) { mutableStateOf<String?>(null) }
+    // Resolve once: the SAF result callbacks below are plain lambdas, not composable scope.
+    val exportCancelledNotice = stringResource(R.string.attach_export_cancelled)
+    val exportWrittenNotice = stringResource(R.string.attach_export_written)
+    val exportFailedNotice = stringResource(R.string.attach_export_failed)
+    val exportLockedNotice = stringResource(R.string.attach_export_locked)
 
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument(exportMimeType(attachment.mimeType)),
     ) { uri ->
         if (uri == null) {
             controller.onExportPickerCancelled()
-            exportNotice = "Export cancelled."
+            exportNotice = exportCancelledNotice
         } else {
             controller.onExportTarget(
                 noteId = noteId,
@@ -95,9 +102,9 @@ fun AttachmentViewerScreen(
                 },
                 onFinished = { written ->
                     exportNotice = if (written) {
-                        "Decrypted copy written outside the vault."
+                        exportWrittenNotice
                     } else {
-                        "The decrypted copy could not be written."
+                        exportFailedNotice
                     }
                 },
             )
@@ -143,7 +150,7 @@ fun AttachmentViewerScreen(
                         .size(NoteZeroSpacing.minTarget)
                         .testTag("attachment_viewer_close"),
                 ) {
-                    Icon(Icons.Filled.Close, contentDescription = "Close attachment viewer")
+                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.cd_attach_close_viewer))
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -155,7 +162,11 @@ fun AttachmentViewerScreen(
                         modifier = Modifier.testTag("attachment_viewer_title"),
                     )
                     Text(
-                        text = "${attachment.mimeType} · ${AttachmentFormat.size(attachment.sizeBytes)}",
+                        text = stringResource(
+                            R.string.attach_viewer_meta,
+                            attachment.mimeType,
+                            AttachmentFormat.size(attachment.sizeBytes),
+                        ),
                         style = NoteZeroType.Caption,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -169,7 +180,7 @@ fun AttachmentViewerScreen(
                 ) {
                     Icon(
                         Icons.Filled.Share,
-                        contentDescription = "Export decrypted copy",
+                        contentDescription = stringResource(R.string.cd_attach_export),
                         tint = LocalNoteZeroColors.current.accentIcon,
                     )
                 }
@@ -204,15 +215,14 @@ fun AttachmentViewerScreen(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            text = "Preview unavailable — export a decrypted copy to open it.",
+                            text = stringResource(R.string.attach_preview_unavailable),
                             style = NoteZeroType.Callout,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
 
                     else -> Text(
-                        text = "This attachment could not be opened. Its bytes may be " +
-                            "corrupt, or the vault locked.",
+                        text = stringResource(R.string.attach_open_error),
                         style = NoteZeroType.Callout,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.testTag("attachment_viewer_error"),
@@ -257,12 +267,10 @@ fun AttachmentViewerScreen(
         AlertDialog(
             onDismissRequest = { showExportWarning = false },
             modifier = Modifier.testTag("attachment_export_warning"),
-            title = { Text("Write an UNENCRYPTED copy?", style = NoteZeroType.Heading) },
+            title = { Text(stringResource(R.string.attach_export_warning_title), style = NoteZeroType.Heading) },
             text = {
                 Text(
-                    text = "This writes an UNENCRYPTED copy outside the vault. Anyone with " +
-                        "access to that file — or to the location you choose — can read it, " +
-                        "and NoteZero cannot protect it once it leaves the vault.",
+                    text = stringResource(R.string.attach_export_warning_message),
                     style = NoteZeroType.Body,
                 )
             },
@@ -278,14 +286,14 @@ fun AttachmentViewerScreen(
                                 )
                             }.onFailure { controller.onExportPickerCancelled() }
                         } else {
-                            exportNotice = "The vault is locked. Unlock to export a copy."
+                            exportNotice = exportLockedNotice
                         }
                     },
                     modifier = Modifier
                         .heightIn(min = NoteZeroSpacing.minTarget)
                         .testTag("attachment_export_confirm"),
                 ) {
-                    Text("Choose location", style = NoteZeroType.Button)
+                    Text(stringResource(R.string.attach_choose_location), style = NoteZeroType.Button)
                 }
             },
             dismissButton = {
@@ -295,7 +303,7 @@ fun AttachmentViewerScreen(
                         .heightIn(min = NoteZeroSpacing.minTarget)
                         .testTag("attachment_export_cancel"),
                 ) {
-                    Text("Cancel", style = NoteZeroType.Button)
+                    Text(stringResource(R.string.common_cancel), style = NoteZeroType.Button)
                 }
             },
             containerColor = MaterialTheme.colorScheme.surfaceContainer,

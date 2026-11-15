@@ -16,6 +16,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -35,9 +36,12 @@ enum class CodeSaveStatus {
  * Draft state, autosave, find/replace and undo history for a single code file.
  *
  * Security: decrypted source and the file name never leave this ViewModel's in-memory
- * state; they are never logged, never copied to the clipboard and dropped with the
- * ViewModel. Persistence only happens through [NoteRepository.saveItem], which
- * re-encrypts the item in the data layer.
+ * state; they are never logged and never copied to the clipboard. Persistence only happens
+ * through [NoteRepository.saveItem], which re-encrypts the item in the data layer. The
+ * ViewModel is Activity-scoped (it outlives the screen), so it does not rely on being
+ * dropped: it observes [NoteRepository.status]/[NoteRepository.verifiedLockedIds] and wipes
+ * the source, the file name, undo/redo history and find state as soon as the vault is no
+ * longer UNLOCKED or the file loses its session verification (decision #15, audit F1).
  *
  * Autosave: every edit restarts a [debounceMs] (600 ms) timer. Leaving the editor calls
  * [saveOnLeave], which cancels the timer and flushes immediately so no keystroke is lost.
@@ -94,6 +98,12 @@ class CodeEditorViewModel(
         val navigationSeq: Int = 0,
         val lastSavedAt: Long? = null,
         val successfulSaves: Int = 0,
+        /**
+         * True after the vault locked/re-armed while this (Activity-scoped) ViewModel was
+         * alive: source, file name, selection and history were dropped. A new session
+         * reloads the file (see [loadDraft]).
+         */
+        val sessionCleared: Boolean = false,
     ) {
         val isMarkdown: Boolean get() = language == CodeLanguage.MARKDOWN
         val canFind: Boolean get() = findQuery.isNotEmpty()
@@ -126,47 +136,97 @@ class CodeEditorViewModel(
     private var baseBody: String = ""
 
     init {
+        viewModelScope.launch { loadDraft() }
         viewModelScope.launch {
-            val item = repository.items.first().firstOrNull { it.id == itemId }
-            if (item == null) {
-                _state.value = _state.value.copy(loading = false, missing = true)
-                return@launch
+            // The Activity-scoped ViewModel outlives the screen, so a lock must not wait for
+            // destruction: wipe the source/history the moment the session ends or the file is
+            // re-masked, then reload when a new session makes it visible again.
+            combine(repository.status, repository.verifiedLockedIds) { status, verified ->
+                status to verified
+            }.collect { (status, verified) ->
+                val item = repository.items.value.firstOrNull { it.id == itemId }
+                val hidden = item?.locked == true && itemId !in verified
+                if (status != VaultStatus.UNLOCKED || hidden) {
+                    clearDecryptedState()
+                } else if (_state.value.sessionCleared) {
+                    loadDraft()
+                }
             }
-            val bytes = utf8Size(item.body)
-            val language = Languages.fromFileName(item.title)
-            if (bytes > MAX_OPEN_BYTES) {
-                // Refuse to load megabyte files into memory; keep only non-secret metadata.
-                _state.value = State(
-                    loading = false,
-                    tooLarge = true,
-                    fileName = item.title,
-                    language = language,
-                    fontSizeSp = preferences.fontSizeSp,
-                    wordWrap = preferences.wordWrap,
-                    syntaxHighlighting = false,
-                )
-                return@launch
-            }
-            baseTitle = item.title
-            baseBody = item.body
+        }
+    }
+
+    /** Loads the decrypted file from the repository index (init and post-session reload). */
+    private suspend fun loadDraft() {
+        val item = repository.items.value.firstOrNull { it.id == itemId }
+            ?: repository.items.first().firstOrNull { it.id == itemId }
+        if (item == null) {
+            _state.value = _state.value.copy(loading = false, missing = true, sessionCleared = false)
+            return
+        }
+        val bytes = utf8Size(item.body)
+        val language = Languages.fromFileName(item.title)
+        if (bytes > MAX_OPEN_BYTES) {
+            // Refuse to load megabyte files into memory; keep only non-secret metadata. The
+            // file name is shown because the workspace already renders it for this session.
+            autosaveJob?.cancel()
             undoStack.clear()
             redoStack.clear()
             undoChars = 0
             redoChars = 0
-            _state.value = withInitialLine(
-                loaded = State(
-                    loading = false,
-                    fileName = item.title,
-                    body = item.body,
-                    language = language,
-                    fontSizeSp = preferences.fontSizeSp,
-                    wordWrap = preferences.wordWrap,
-                    syntaxHighlighting = bytes <= MAX_HIGHLIGHT_BYTES,
-                    lastSavedAt = item.updatedAt.takeIf { it > 0L },
-                ),
-                body = item.body,
+            _state.value = State(
+                loading = false,
+                tooLarge = true,
+                fileName = item.title,
+                language = language,
+                fontSizeSp = preferences.fontSizeSp,
+                wordWrap = preferences.wordWrap,
+                syntaxHighlighting = false,
             )
+            return
         }
+        baseTitle = item.title
+        baseBody = item.body
+        undoStack.clear()
+        redoStack.clear()
+        undoChars = 0
+        redoChars = 0
+        _state.value = withInitialLine(
+            loaded = State(
+                loading = false,
+                fileName = item.title,
+                body = item.body,
+                language = language,
+                fontSizeSp = preferences.fontSizeSp,
+                wordWrap = preferences.wordWrap,
+                syntaxHighlighting = bytes <= MAX_HIGHLIGHT_BYTES,
+                lastSavedAt = item.updatedAt.takeIf { it > 0L },
+            ),
+            body = item.body,
+        )
+    }
+
+    /**
+     * Drops every decrypted value (source, file name, cursor/selection, find/replace state,
+     * undo/redo snapshots, base copy) and cancels the debounce. Only non-secret editor
+     * preferences survive; the screen renders a placeholder until a new session reloads.
+     */
+    private fun clearDecryptedState() {
+        if (_state.value.sessionCleared) return
+        autosaveJob?.cancel()
+        autosaveJob = null
+        undoStack.clear()
+        redoStack.clear()
+        undoChars = 0
+        redoChars = 0
+        baseTitle = ""
+        baseBody = ""
+        _state.value = State(
+            loading = false,
+            sessionCleared = true,
+            fontSizeSp = _state.value.fontSizeSp,
+            wordWrap = _state.value.wordWrap,
+            syntaxHighlighting = false,
+        )
     }
 
     /** Places the caret at the requested 1-based line when opening from a search hit. */
@@ -187,7 +247,7 @@ class CodeEditorViewModel(
      */
     fun onTextChanged(text: String, selectionStart: Int, selectionEnd: Int) {
         val current = _state.value
-        if (current.loading || current.missing || current.tooLarge) return
+        if (current.loading || current.missing || current.tooLarge || current.sessionCleared) return
         val old = current.body
         val start = selectionStart.coerceIn(0, text.length)
         val end = selectionEnd.coerceIn(start, text.length)
@@ -231,7 +291,7 @@ class CodeEditorViewModel(
     /** Selection/cursor-only update (no text mutation, no dirty flag). */
     fun onSelectionChanged(selectionStart: Int, selectionEnd: Int) {
         val current = _state.value
-        if (current.loading || current.missing || current.tooLarge) return
+        if (current.loading || current.missing || current.tooLarge || current.sessionCleared) return
         moveCursor(
             selectionStart.coerceIn(0, current.body.length),
             selectionEnd.coerceIn(0, current.body.length),
@@ -240,7 +300,7 @@ class CodeEditorViewModel(
 
     fun undo() {
         val current = _state.value
-        if (current.loading || current.missing || current.tooLarge) return
+        if (current.loading || current.missing || current.tooLarge || current.sessionCleared) return
         val previous = undoStack.removeLastOrNull() ?: return
         undoChars -= previous.body.length
         pushRedo(Snapshot(current.body, current.cursor, current.selectionEnd))
@@ -250,7 +310,7 @@ class CodeEditorViewModel(
 
     fun redo() {
         val current = _state.value
-        if (current.loading || current.missing || current.tooLarge) return
+        if (current.loading || current.missing || current.tooLarge || current.sessionCleared) return
         val next = redoStack.removeLastOrNull() ?: return
         redoChars -= next.body.length
         pushUndo(Snapshot(current.body, current.cursor, current.selectionEnd))
@@ -380,7 +440,7 @@ class CodeEditorViewModel(
     /** Jumps to a 1-based line number; returns false when the line is out of range. */
     fun goToLine(line: Int): Boolean {
         val current = _state.value
-        if (current.loading || current.missing || current.tooLarge) return false
+        if (current.loading || current.missing || current.tooLarge || current.sessionCleared) return false
         if (line < 1) return false
         val zeroBased = line - 1
         val index = LineIndex.of(current.body)
@@ -411,7 +471,7 @@ class CodeEditorViewModel(
      */
     private fun shiftIndent(outdent: Boolean) {
         val current = _state.value
-        if (current.loading || current.missing || current.tooLarge) return
+        if (current.loading || current.missing || current.tooLarge || current.sessionCleared) return
         val selection = TextRange(current.cursor, current.selectionEnd).normalized()
         val result = CodeEditing.indentSelection(
             text = current.body,
@@ -433,7 +493,7 @@ class CodeEditorViewModel(
      */
     fun copySelectionOrAll(): String {
         val current = _state.value
-        if (current.loading || current.missing || current.tooLarge) return ""
+        if (current.loading || current.missing || current.tooLarge || current.sessionCleared) return ""
         val body = current.body
         val range = TextRange(current.cursor, current.selectionEnd).normalized().clampedTo(body.length)
         return if (range.isEmpty()) body else body.substring(range.start, range.end)
@@ -456,7 +516,7 @@ class CodeEditorViewModel(
      */
     suspend fun flush(force: Boolean = false): Boolean = saveMutex.withLock {
         val current = _state.value
-        if (current.loading || current.missing || current.tooLarge) return@withLock false
+        if (current.loading || current.missing || current.tooLarge || current.sessionCleared) return@withLock false
         if (!current.dirty && !force) return@withLock true
         if (repository.status.value != VaultStatus.UNLOCKED) return@withLock false
 
@@ -490,6 +550,17 @@ class CodeEditorViewModel(
             true
         } catch (cancelled: CancellationException) {
             throw cancelled
+        } catch (locked: IllegalStateException) {
+            // Auto-lock can win the race between the UNLOCKED check and the repository
+            // mutex; the VMK is gone, so the source must be dropped rather than kept as a
+            // "retryable" error (audit findings F1/F10). A generic save failure stays ERROR.
+            if (repository.status.value != VaultStatus.UNLOCKED) {
+                clearDecryptedState()
+                false
+            } else {
+                _state.value = _state.value.copy(saveStatus = CodeSaveStatus.ERROR, dirty = true)
+                false
+            }
         } catch (_: Exception) {
             _state.value = _state.value.copy(saveStatus = CodeSaveStatus.ERROR, dirty = true)
             false
@@ -503,7 +574,7 @@ class CodeEditorViewModel(
     suspend fun saveOnLeave(): Boolean {
         autosaveJob?.cancel()
         val current = _state.value
-        if (current.loading || current.missing || current.tooLarge) return true
+        if (current.loading || current.missing || current.tooLarge || current.sessionCleared) return true
         if (!current.dirty) return true
         return flush(force = true)
     }
@@ -511,12 +582,14 @@ class CodeEditorViewModel(
     /** Conflict resolution: keep the local draft and overwrite the stored copy. */
     fun overwriteWithLocalDraft() {
         autosaveJob?.cancel()
+        if (_state.value.sessionCleared) return
         viewModelScope.launch { flush(force = true) }
     }
 
     /** Conflict resolution: discard local edits and reload the stored copy. */
     fun reloadLatest() {
         autosaveJob?.cancel()
+        if (_state.value.sessionCleared) return
         viewModelScope.launch {
             val item = repository.items.value.firstOrNull { it.id == itemId } ?: return@launch
             val bytes = utf8Size(item.body)

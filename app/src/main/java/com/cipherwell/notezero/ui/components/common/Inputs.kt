@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.components.common
 
+import com.cipherwell.notezero.R
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -34,6 +35,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.res.stringResource
 import com.cipherwell.notezero.ui.theme.LocalNoteZeroColors
 import com.cipherwell.notezero.ui.theme.NoteZeroSpacing
 import com.cipherwell.notezero.ui.theme.NoteZeroType
@@ -137,7 +139,7 @@ fun SecureTextField(
                 modifier = Modifier.heightIn(min = NoteZeroSpacing.minTarget),
             ) {
                 Text(
-                    text = if (revealed) "Hide" else "Show",
+                    text = if (revealed) stringResource(R.string.common_hide) else stringResource(R.string.common_show),
                     style = NoteZeroType.Caption,
                     color = LocalNoteZeroColors.current.accentText,
                 )

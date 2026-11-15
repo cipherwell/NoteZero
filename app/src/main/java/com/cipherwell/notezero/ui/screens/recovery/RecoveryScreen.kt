@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.screens.recovery
 
+import com.cipherwell.notezero.R
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import com.cipherwell.notezero.ui.RecoveryFailure
 import com.cipherwell.notezero.ui.RecoveryStep
@@ -43,9 +45,11 @@ import com.cipherwell.notezero.ui.theme.NoteZeroSpacing
 /**
  * Phrase-only recovery for a locked vault.
  *
- * Step 1 validates the 12-word checksum through the repository, step 2 re-wraps the
- * vault key under a new master password and rotates the recovery kit. The phrase and
- * the new password live only in this composable / a wiped CharArray.
+ * Step 1 validates the 12-word checksum through the repository, step 2 re-wraps the vault
+ * key under a new master password. The recovery phrase is **not** rotated: the same phrase
+ * is re-wrapped under a fresh salt, so the words the user already wrote down keep working
+ * (decision #12, audit finding F2). Rotating to a new phrase is the explicit Settings action.
+ * The phrase and the new password live only in this composable / a wiped CharArray.
  */
 @Composable
 fun RecoveryScreen(
@@ -75,7 +79,7 @@ fun RecoveryScreen(
             )
         }
         if (recovery.isWorking) {
-            NzLoadingOverlay(label = "Checking your recovery phrase…")
+            NzLoadingOverlay(label = stringResource(R.string.recovery_loading))
         }
     }
 }
@@ -88,14 +92,13 @@ private fun PhraseStep(
     onBack: () -> Unit,
 ) {
     val errorText: String? = when {
-        recovery.invalidPhrase -> "That phrase is not valid. Check the spelling, the order and " +
-            "that all 12 words are filled in."
+        recovery.invalidPhrase -> stringResource(R.string.recovery_error_invalid)
         recovery.failure == RecoveryFailure.WRONG_PHRASE ->
-            "That phrase does not unlock this vault. Check the words and their order."
+            stringResource(R.string.recovery_error_wrong_phrase)
         recovery.failure == RecoveryFailure.CORRUPT_VAULT ->
-            "This vault could not be read. The recovery phrase may not match it."
+            stringResource(R.string.recovery_error_corrupt)
         recovery.failure == RecoveryFailure.FAILED ->
-            "Could not reset the vault. Nothing was changed — try again."
+            stringResource(R.string.recovery_error_failed)
         else -> null
     }
     Column(
@@ -109,8 +112,8 @@ private fun PhraseStep(
         NzBackButton(onClick = onBack)
         Spacer(Modifier.height(NoteZeroSpacing.m))
         NzLargeTitle(
-            title = "Use your recovery phrase",
-            subtitle = "Enter the 12 words of your recovery kit, in order.",
+            title = stringResource(R.string.recovery_heading),
+            subtitle = stringResource(R.string.recovery_subtitle),
         )
         NzFormSpacer(NoteZeroSpacing.xxl)
         words.chunked(2).forEachIndexed { rowIndex, pair ->
@@ -120,7 +123,7 @@ private fun PhraseStep(
                     WordTextField(
                         value = words[position],
                         onValueChange = { words[position] = it },
-                        label = "Word ${position + 1}",
+                        label = stringResource(R.string.recovery_word_label, position + 1),
                         modifier = Modifier
                             .weight(1f)
                             .testTag("recovery_word_$position"),
@@ -142,7 +145,7 @@ private fun PhraseStep(
         }
         NzFormSpacer(NoteZeroSpacing.xl)
         NzPrimaryButton(
-            text = "Continue",
+            text = stringResource(R.string.recovery_continue),
             onClick = { onSubmitPhrase(words.toList()) },
             modifier = Modifier
                 .fillMaxWidth()
@@ -152,7 +155,7 @@ private fun PhraseStep(
         )
         NzFormSpacer(NoteZeroSpacing.m)
         NzTextButton(
-            text = "Back to unlock",
+            text = stringResource(R.string.recovery_back_to_unlock),
             onClick = onBack,
             modifier = Modifier
                 .fillMaxWidth()
@@ -169,17 +172,18 @@ private fun NewPasswordStep(
     onSubmitNewPassword: (words: List<String>, newPassword: CharArray) -> Unit,
     onBackToPhrase: () -> Unit,
 ) {
-    var password by rememberSaveable { mutableStateOf("") }
-    var confirmation by rememberSaveable { mutableStateOf("") }
+    // New master password: plain `remember`, never saved instance state (audit F3).
+    var password by remember { mutableStateOf("") }
+    var confirmation by remember { mutableStateOf("") }
     var mismatch by rememberSaveable { mutableStateOf(false) }
     val errorText: String? = when {
-        mismatch -> "The two passwords do not match."
+        mismatch -> stringResource(R.string.recovery_error_mismatch)
         recovery.passwordRule != null ->
-            "The password is missing: ${PasswordPolicy.label(recovery.passwordRule)}."
+            stringResource(R.string.recovery_error_rule_missing, PasswordPolicy.label(recovery.passwordRule))
         recovery.failure == RecoveryFailure.CORRUPT_VAULT ->
-            "This vault could not be read. Nothing was changed."
+            stringResource(R.string.recovery_error_corrupt_password)
         recovery.failure == RecoveryFailure.FAILED ->
-            "Could not reset the vault. Nothing was changed — try again."
+            stringResource(R.string.recovery_error_failed)
         else -> null
     }
     Column(
@@ -193,9 +197,8 @@ private fun NewPasswordStep(
         NzBackButton(onClick = onBackToPhrase)
         Spacer(Modifier.height(NoteZeroSpacing.m))
         NzLargeTitle(
-            title = "Choose a new password",
-            subtitle = "Your notes stay encrypted as they are. Only the key wrappers change, " +
-                "and a new recovery phrase is generated.",
+            title = stringResource(R.string.recovery_new_password_title),
+            subtitle = stringResource(R.string.recovery_new_password_subtitle),
         )
         NzFormSpacer(NoteZeroSpacing.xxl)
         SecureTextField(
@@ -204,7 +207,7 @@ private fun NewPasswordStep(
                 password = it
                 mismatch = false
             },
-            label = "New master password",
+            label = stringResource(R.string.recovery_new_password_label),
             modifier = Modifier.testTag("recovery_new_password"),
             isError = errorText != null,
             imeAction = ImeAction.Next,
@@ -216,7 +219,7 @@ private fun NewPasswordStep(
                 confirmation = it
                 mismatch = false
             },
-            label = "Confirm new password",
+            label = stringResource(R.string.recovery_confirm_password_label),
             modifier = Modifier.testTag("recovery_confirm_password"),
             isError = mismatch,
         )
@@ -232,7 +235,7 @@ private fun NewPasswordStep(
         }
         NzFormSpacer(NoteZeroSpacing.xl)
         NzPrimaryButton(
-            text = "Reset vault",
+            text = stringResource(R.string.recovery_reset),
             onClick = {
                 if (PasswordPolicy.matches(password, confirmation)) {
                     onSubmitNewPassword(words.toList(), password.toCharArray())
@@ -248,7 +251,7 @@ private fun NewPasswordStep(
         )
         NzFormSpacer(NoteZeroSpacing.m)
         NzTextButton(
-            text = "Back to phrase",
+            text = stringResource(R.string.recovery_back_to_phrase),
             onClick = onBackToPhrase,
             modifier = Modifier
                 .fillMaxWidth()

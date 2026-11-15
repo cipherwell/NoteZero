@@ -153,7 +153,13 @@ interface NoteRepository {
 
     suspend fun changePassword(current: CharArray, next: CharArray): Boolean
 
-    /** Reset by recovery phrase: unwraps the VMK, re-wraps under [newPassword], rotates the kit. */
+    /**
+     * Reset by recovery phrase: unwraps the VMK with [phrase] and re-wraps it under
+     * [newPassword]. The recovery phrase itself is **not** rotated — it is re-wrapped under a
+     * fresh salt and keeps working, because the frozen interface returns no new phrase and a
+     * silently replaced phrase would strand the user's written kit (decision #12). Phrase
+     * rotation is the separate [rotateRecoveryPhrase] action.
+     */
     suspend fun resetWithRecoveryPhrase(phrase: List<String>, newPassword: CharArray): UnlockResult
 
     /** Rotates the recovery kit (requires the current password); returns the new phrase ONCE. */

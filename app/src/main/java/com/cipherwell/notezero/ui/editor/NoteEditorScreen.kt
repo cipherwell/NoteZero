@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.editor
 
+import com.cipherwell.notezero.R
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -132,8 +134,11 @@ fun NoteEditorScreen(
         scope.launch {
             viewModel.saveOnLeave()
             val current = viewModel.state.value
-            if (!current.loading && !current.missing && current.title.isBlank() && current.body.isBlank()) {
+            if (!current.loading && !current.missing && !current.sessionCleared &&
+                current.title.isBlank() && current.body.isBlank()
+            ) {
                 // Never leave a brand-new empty note behind after quick capture is abandoned.
+                // A cleared session is not "empty": the vault is locked and must not be touched.
                 repository.trashItem(itemId)
             }
             onClose()
@@ -152,7 +157,7 @@ fun NoteEditorScreen(
                         onClick = { leave() },
                         modifier = Modifier.testTag("editor_back"),
                     ) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back to notes")
+                        Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back_to_notes))
                     }
                 },
                 title = {
@@ -173,11 +178,11 @@ fun NoteEditorScreen(
                         onClick = { menuOpen = true },
                         modifier = Modifier.testTag("editor_more"),
                     ) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "Editor actions")
+                        Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.cd_editor_actions))
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
-                            text = { Text("Undo", style = NoteZeroType.Callout) },
+                            text = { Text(stringResource(R.string.common_undo), style = NoteZeroType.Callout) },
                             enabled = state.canUndo,
                             onClick = {
                                 menuOpen = false
@@ -185,7 +190,7 @@ fun NoteEditorScreen(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("Redo", style = NoteZeroType.Callout) },
+                            text = { Text(stringResource(R.string.common_redo), style = NoteZeroType.Callout) },
                             enabled = state.canRedo,
                             onClick = {
                                 menuOpen = false
@@ -196,9 +201,9 @@ fun NoteEditorScreen(
                             text = {
                                 Text(
                                     text = if (monospace || state.kind == ItemKind.CODE_FILE) {
-                                        "Use proportional font"
+                                        stringResource(R.string.editor_font_proportional)
                                     } else {
-                                        "Use monospace font"
+                                        stringResource(R.string.editor_font_monospace)
                                     },
                                     style = NoteZeroType.Callout,
                                 )
@@ -232,7 +237,23 @@ fun NoteEditorScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = "This note is no longer available.",
+                        text = stringResource(R.string.editor_note_unavailable),
+                        style = NoteZeroType.Body,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                state.sessionCleared -> Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("editor_session_cleared"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    // Non-secret placeholder: the vault locked/re-armed while this editor was
+                    // alive, so the draft, undo history and conflict state were dropped. A new
+                    // session reloads the note; nothing decrypted is on screen (audit F1).
+                    Text(
+                        text = stringResource(R.string.common_session_cleared),
                         style = NoteZeroType.Body,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -242,7 +263,7 @@ fun NoteEditorScreen(
                     OutlinedTextField(
                         value = state.title,
                         onValueChange = viewModel::updateTitle,
-                        placeholder = { Text("Title", style = NoteZeroType.Heading) },
+                        placeholder = { Text(stringResource(R.string.common_title), style = NoteZeroType.Heading) },
                         singleLine = true,
                         textStyle = NoteZeroType.Heading,
                         modifier = Modifier
@@ -268,18 +289,18 @@ fun NoteEditorScreen(
                         FilterChip(
                             selected = !previewMode,
                             onClick = { previewMode = false },
-                            label = { Text("Edit", style = NoteZeroType.Caption) },
+                            label = { Text(stringResource(R.string.common_edit), style = NoteZeroType.Caption) },
                             modifier = Modifier.testTag("editor_edit_toggle"),
                         )
                         FilterChip(
                             selected = previewMode,
                             onClick = { previewMode = true },
-                            label = { Text("Preview", style = NoteZeroType.Caption) },
+                            label = { Text(stringResource(R.string.common_preview), style = NoteZeroType.Caption) },
                             modifier = Modifier.testTag("editor_preview_toggle"),
                         )
                         Spacer(Modifier.weight(1f))
                         Text(
-                            text = "${state.wordCount} words · ${state.characterCount} chars",
+                            text = stringResource(R.string.editor_count, state.wordCount, state.characterCount),
                             style = NoteZeroType.Caption,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.testTag("editor_count"),
@@ -327,7 +348,7 @@ fun NoteEditorScreen(
                             },
                             placeholder = {
                                 Text(
-                                    "Write in Markdown. Type - [ ] for a checklist.",
+                                    stringResource(R.string.editor_body_placeholder),
                                     style = NoteZeroType.Callout,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -373,7 +394,7 @@ private fun ConflictBanner(
     ) {
         Column(modifier = Modifier.padding(NoteZeroSpacing.m)) {
             Text(
-                text = "This note changed elsewhere.",
+                text = stringResource(R.string.editor_conflict_title),
                 style = NoteZeroType.Callout,
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
@@ -384,24 +405,26 @@ private fun ConflictBanner(
                 TextButton(
                     onClick = onKeepMine,
                     modifier = Modifier.testTag("conflict_keep_mine"),
-                ) { Text("Keep my edits") }
+                ) { Text(stringResource(R.string.common_keep_my_edits)) }
                 Spacer(Modifier.width(NoteZeroSpacing.s))
                 TextButton(
                     onClick = onReload,
                     modifier = Modifier.testTag("conflict_reload"),
-                ) { Text("Reload latest") }
+                ) { Text(stringResource(R.string.common_reload_latest)) }
             }
         }
     }
 }
 
+@Composable
 private fun saveStateLabel(state: EditorViewModel.EditorState): String = when {
-    state.loading -> "Loading…"
-    state.missing -> "Note unavailable"
-    state.conflict -> "Conflict — unsaved edits"
-    state.saveStatus == SaveStatus.SAVING -> "Saving…"
-    state.saveStatus == SaveStatus.ERROR -> "Save failed — retrying on next edit"
-    state.dirty -> "Unsaved changes"
-    state.saveStatus == SaveStatus.SAVED -> "Saved"
-    else -> "Saved"
+    state.loading -> stringResource(R.string.common_loading)
+    state.sessionCleared -> stringResource(R.string.common_session_cleared_short)
+    state.missing -> stringResource(R.string.editor_save_missing)
+    state.conflict -> stringResource(R.string.common_conflict)
+    state.saveStatus == SaveStatus.SAVING -> stringResource(R.string.common_saving)
+    state.saveStatus == SaveStatus.ERROR -> stringResource(R.string.editor_save_error)
+    state.dirty -> stringResource(R.string.common_unsaved_changes)
+    state.saveStatus == SaveStatus.SAVED -> stringResource(R.string.common_saved)
+    else -> stringResource(R.string.common_saved)
 }

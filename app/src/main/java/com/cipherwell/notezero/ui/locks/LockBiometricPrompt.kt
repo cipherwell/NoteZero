@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import com.cipherwell.notezero.R
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -84,9 +85,11 @@ class AndroidLockBiometricPrompt(private val activity: Activity) : LockBiometric
         }
         // Presence-only: authenticate without a CryptoObject (no key is unlocked here).
         BiometricPrompt.Builder(activity)
-            .setTitle("Reveal locked content")
-            .setSubtitle("Confirm it's you to show this locked item")
-            .setNegativeButton("Use password", executor) { _, _ -> finishOnce(false) }
+            .setTitle(activity.getString(R.string.lock_biometric_title))
+            .setSubtitle(activity.getString(R.string.lock_biometric_subtitle))
+            .setNegativeButton(activity.getString(R.string.common_biometric_use_password), executor) { _, _ ->
+                finishOnce(false)
+            }
             .build()
             .authenticate(CancellationSignal(), executor, callback)
     }

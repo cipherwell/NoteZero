@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.ui.components.common
 
+import com.cipherwell.notezero.R
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -29,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -55,11 +57,12 @@ fun NzPrimaryButton(
     loading: Boolean = false,
 ) {
     val colors = LocalNoteZeroColors.current
+    val workingLabel = stringResource(R.string.common_working)
     Button(
         onClick = onClick,
         modifier = modifier
             .heightIn(min = NoteZeroSpacing.controlHeight)
-            .semantics { if (loading) stateDescription = "Working" },
+            .semantics { if (loading) stateDescription = workingLabel },
         enabled = enabled && !loading,
         shape = NoteZeroShapes.pill,
         colors = ButtonDefaults.buttonColors(
@@ -180,7 +183,7 @@ fun NzIconButton(
 fun NzBackButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     NzIconButton(
         icon = Icons.AutoMirrored.Filled.ArrowBack,
-        contentDescription = "Back",
+        contentDescription = stringResource(R.string.cd_back),
         onClick = onClick,
         modifier = modifier,
     )

@@ -10,13 +10,15 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 [VaultZero](https://github.com/cipherwell/Vault-Zero) with an independent package
 (`com.cipherwell.notezero`), independent signing key and independent threat model.
 
-> Status: **Phases 1–4 complete, Phase 5 in progress** — 2026-11-15.
-> Security core, notes MVP, encrypted SAF backup/restore, the code editor (workspace
+> Status: **Phase 5 hardening** — 2026-11-15.
+> Security core, notes MVP, encrypted SAF backup/restore, code editor (workspace
 > search/copy/export/indent), encrypted attachments and **locked notes/folders** are in;
-> builds green, **740 unit tests + 10 device tests**, signed release verified, and
-> **release APKs are byte-for-byte reproducible**. What ships now and what is deliberately
-> next: [docs/VERIFICATION-2026-11-15.md](docs/VERIFICATION-2026-11-15.md).
-> Delivery phases: [SPEC.md](SPEC.md).
+> an independent security audit found **no HIGH/CRITICAL issues** and its findings are
+> remediated. Builds green, **764 unit tests + 10 device tests**, UI is
+> translation-ready, and **signed APK + AAB release builds are byte-for-byte reproducible**.
+> What ships now, evidence and the remaining Phase-5 tail:
+> [docs/VERIFICATION-2026-11-15.md](docs/VERIFICATION-2026-11-15.md). Delivery phases:
+> [SPEC.md](SPEC.md).
 
 
 ## What exists today
@@ -39,7 +41,7 @@ Screenshots are real emulator captures from the instrumented E2E run (debug buil
 
 ## Verified end to end (2026-11-15)
 
-- 740 unit tests / 0 failures (59 classes); 10 instrumented tests on a real emulator.
+- 764 unit tests / 0 failures (60 classes); 10 instrumented tests on a real emulator.
 - Real Android crypto: setup → BIP-39 phrase → lock/unlock; **password change leaves note
   ciphertext byte-identical**; recovery reset invalidates the old password; a raw SQLite scan
   of the database files (main + WAL + SHM) finds no plaintext title/body/phrase — including a
@@ -66,7 +68,11 @@ Screenshots are real emulator captures from the instrumented E2E run (debug buil
   verification.
 - **Reproducible release builds**: `scripts/verify-reproducible.sh` rebuilds the same commit
   twice in different directories with a pinned `SOURCE_DATE_EPOCH` and no build cache; the
-  signed APKs are byte-identical (methodology and limits: docs/REPRODUCIBLE-BUILDS.md).
+  signed **APK and AAB are both byte-identical** (methodology/limits:
+  docs/REPRODUCIBLE-BUILDS.md), and CI enforces the unsigned check on every push.
+- **Audited**: independent adversarial audit of crypto/storage/session/offline surface found
+  **0 HIGH / 0 CRITICAL**; 2 MEDIUM + 8 LOW findings all remediated (report:
+  docs/AUDIT-2026-11-15-phase5.md). All UI strings are in Android resources (translation-ready).
 - FLAG_SECURE default-on proof; release APK permission dump: only `USE_BIOMETRIC` (+
   androidx.core's signature-level receiver guard) — no network, camera, location or storage.
 - Signed release verified with the independent NoteZero upload key; unsigned-release fallback
@@ -134,11 +140,19 @@ Full instructions (including signed release builds and this machine's exact setu
 | [docs/EDITOR-SPEC.md](docs/EDITOR-SPEC.md) | Code editor languages, tokens, editing behaviour, performance |
 | [docs/CONTRACTS-PHASE4.md](docs/CONTRACTS-PHASE4.md) | Attachment storage + attachments UI + code-polish contracts |
 | [docs/CONTRACTS-PHASE5.md](docs/CONTRACTS-PHASE5.md) | Locked notes/folders + reproducibility increment contracts |
-| [docs/REPRODUCIBLE-BUILDS.md](docs/REPRODUCIBLE-BUILDS.md) | Verified reproducible APK builds, pinned toolchain, limits |
+| [docs/REPRODUCIBLE-BUILDS.md](docs/REPRODUCIBLE-BUILDS.md) | Verified reproducible APK+AAB builds, pinned toolchain, limits |
+| [docs/AUDIT-2026-11-15-phase5.md](docs/AUDIT-2026-11-15-phase5.md) | Adversarial security audit + per-finding remediation log |
+| [docs/STRINGS.md](docs/STRINGS.md) | String-resource conventions and deliberate inline exceptions |
+| [PRIVACY.md](PRIVACY.md) | Privacy policy (no collection, no network) |
 | [docs/ATTACHMENTS.md](docs/ATTACHMENTS.md) | Encrypted attachment blob format, limits, AAD, lifecycle, threat notes |
 | [docs/VERIFICATION-2026-11-15.md](docs/VERIFICATION-2026-11-15.md) | Phase-1 evidence: builds, 290 unit tests, device E2E, signing, FLAG_SECURE |
 | [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | Dependency policy/inventory (offline-safe only) |
 | [docs/RELEASING.md](docs/RELEASING.md) | Release checklist, F-Droid eligibility |
+
+## Privacy
+
+No accounts, no telemetry, no network permission. See [PRIVACY.md](PRIVACY.md) for the full
+privacy statement.
 
 ## License
 

@@ -26,6 +26,8 @@ the SPEC's security bar ("same bar as VaultZero", zero-knowledge, offline-only).
 | A9 | Metadata: vault existence, approximate item count, timestamps of access | Low–medium | Vault lifetime |
 | A10 | Integrity of all of the above (no silent tampering) | High | Vault lifetime |
 | A11 | Locked-content visibility (which records are locked; the plaintext of a locked record once re-authenticated) | Medium — a handoff/shoulder-surfing barrier, not a crypto boundary | While unlocked; verification is per-session |
+| A12 | Attachment blob plaintext/ciphertext (`filesDir/attachments/<id>.nzb`, `NZAT` v1: `iv‖AES-256-GCM ct‖tag` under the VMK, AAD bound to note+attachment id) | High — arbitrary user files (documents, images) | Vault lifetime; trash keeps blobs, delete-forever/empty-trash removes them |
+| A13 | Attachment ref metadata (random id, display name, MIME, plaintext size, createdAt, SHA-256) — stored **inside** the v2 item envelope, never in a plaintext column | Medium — the display name/MIME are content | Same as the owning item |
 
 Non-assets (explicitly not protected): public app code, the BIP-39 wordlist itself, the
 app's package name, store listing.
@@ -40,9 +42,13 @@ app's package name, store listing.
    screen in practice (Keystore refuses auth-gated keys otherwise on most devices).
 3. The user's master password has not been reused elsewhere, and the recovery phrase is
    stored offline by the user.
-4. Compile-time decisions `allowScreenshots=false` and no network permissions are
-   enforced by the build (Lead-owned files); this document describes the runtime crypto
-   that remains even if those are misconfigured.
+4. Compile-time decisions are enforced by the build (Lead-owned `app/build.gradle.kts`):
+   the **release** variant hardcodes `ALLOW_SCREENSHOTS = false` and `DEV_DISABLE_AUTO_LOCK
+   = false`, and the opt-in `-PallowScreenshots` / `-PdevDisableAutoLock` flags exist only
+   on the **debug** variant (audit F4/D3). A release build therefore cannot turn off
+   FLAG_SECURE or the background/idle lock, and no network permission is compiled in. This
+   document still describes only the runtime crypto that remains if those controls were
+   misconfigured.
 5. The app process is not actively debugged by an attacker with `run-as`/root at the
    moment the vault is unlocked (see §3.1 — accepted, documented residual risk).
 
@@ -128,6 +134,17 @@ any client library.
 
 ---
 
+### 3.9 Attachments (shipped in Phase 4/5; full detail in `docs/ATTACHMENTS.md` §9)
+
+| Attack | Mitigation | Residual |
+|---|---|---|
+| Swap/substitute a blob between notes, attachment ids or vaults | Per-blob AES-256-GCM under the VMK with AAD `CryptoAad.attachment(noteId, attachmentId)`; a moved blob fails authentication and is counted/skipped (`AttachmentBlob.decode`, tests: `AttachmentBlobTest`) | An attacker with the VMK can rewrite content; AAD still binds it to the id (no cross-note substitution) |
+| Roll back a blob to an older valid ciphertext | Each ref stores the SHA-256 and exact plaintext size; both are re-checked on every read (`attachmentBytesLocked`) | A rollback to the *same* bytes with the same AAD+size+SHA is byte-identical content and is not detected (documented ATTACHMENTS §9) |
+| Force huge allocations with a hostile blob/large file | 10 MiB per file enforced while streaming (`readAtMost` never buffers the over-limit byte), 100/note, 512 MiB vault quota, 64 MiB backup stream cap; the reader re-checks size/SHA before exposing bytes | Peak heap on backup import/export is several times the stream cap; OOM is now caught at the repository boundary (returns `false`/`null`) instead of crashing (audit F9) |
+| Path traversal through a crafted attachment id | Ids are generated randomly and re-validated (`[A-Za-z0-9_-]{1,64}`) before any file path is built; no user-supplied path reaches the filesystem | A crafted backup can carry ids that are rejected (skipped+counted) |
+| Restore duplicates / ref growth | Import dedupes by attachment id, re-encrypts under the local VMK and only then commits the ref; a failed import rolls the blob back | Orphan blobs from a crashed restore are swept on unlock unless a row failed to decode |
+| Read a blob's name/size/MIME from disk | Ref metadata lives inside the item envelope; blob files carry only magic/version/ciphertext with a random name | Existence/count/approximate size/mtime are visible (A9) |
+
 ## 4. In scope vs out of scope
 
 **In scope (this model covers, Phase 1):** at-rest encryption of notes/metadata; password
@@ -138,9 +155,13 @@ guarantees; screenshots/clipboard of secrets; fail-closed parsing of corrupted d
 **Out of scope for Phase 1:** compromised OS/firmware with kernel or TEE compromise;
 physical attacks (cold boot, chip-off, evil maid), power/EM side channels; malicious
 accessibility services; camera-based observation; coercion/"$5 wrench"; multi-user or
-shared-device vaults; attachments and drawing (Phase 4 — their own threat model must be
-added before shipping, including encrypted blobs and size limits); code editor LSP/AI
-(none exists by design); cloud sync (none exists by design).
+shared-device vaults; drawing/handwriting (still out of scope); code editor LSP/AI (none
+exists by design); cloud sync (none exists by design).
+
+**Attachments are no longer an unscoped Phase-4 item**: blob storage, quotas, AAD binding,
+SHA-256-on-read, path-traversal guards and backup restore shipped in Phase 4/5. Their asset
+(A12/A13), adversary rows (§3.9) and residual risks are part of this model, with the
+detailed per-blob design in `docs/ATTACHMENTS.md` §9 (audit D4).
 
 ---
 
@@ -161,6 +182,9 @@ added before shipping, including encrypted blobs and size limits); code editor L
 | Lock state is content, invisible at rest | `ItemCodec` v3 / `FolderCodec` v2 trailing lock byte inside the AEAD envelope; no lock column | `LockedItemsRepositoryTest.lockFlagLivesOnlyInsideTheAuthenticatedEnvelope`, `LockedPayloadCodecTest` |
 | Lock verifications never outlive the session | memory-only `verifiedLockedIds`; cleared by `lock()`/`close()`/background lock/session start; `markLockVerified` ignored while locked | `LockedItemsRepositoryTest.verificationsClearOnLockUnlockAndCloseAndAreNeverPersisted`, `backgroundLockClearsVerificationsButPickerDeferralDoesNot` |
 | Lock re-auth cannot be brute-forced cheaply | rate limiter on the injected clock (growing 1–4 s delay, 30 s cooldown after 5), constant-time VMK comparison, wiped `CharArray` | `LockedItemsRepositoryTest.verifyMasterPassword*` |
+| Decrypted editor content does not outlive the session | `EditorViewModel`/`CodeEditorViewModel` (Activity-scoped) observe `status` + `verifiedLockedIds` and wipe the draft, file name, undo/redo stacks and find state on lock or re-arm; a new session reloads from the index | `EditorViewModelTest.lock while the editor is open drops the draft and the undo history`, `CodeEditorViewModelTest.lock while the code editor is open drops the source and the undo history` |
+| Auto-lock cannot crash the UI | UI mutation coroutines convert the `IllegalStateException` of a lost lock race into non-secret refresh/cleared state | `NotesViewModelTest.a mutation that loses the auto-lock race…`, `CodeWorkspaceViewModelTest.a file mutation that loses the auto-lock race…` |
+| Locked code files cannot be opened through the editor | `CodeEditorScreen` gate before the ViewModel (defence in depth behind the workspace filter) | `CodeEditorLockedGateTest` |
 
 ---
 

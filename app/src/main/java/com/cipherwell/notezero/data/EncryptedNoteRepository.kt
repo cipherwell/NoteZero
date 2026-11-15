@@ -510,6 +510,13 @@ class EncryptedNoteRepository(
                         return@withLock UnlockResult.CORRUPT_VAULT
                     }
                     markVaultPresent()
+                    // Every session boundary starts unverified and with a clean re-auth
+                    // limiter, exactly like unlock()/setupVault(): reset may be invoked while
+                    // already unlocked, so a stale verification or rate-limit block must never
+                    // cross into the fresh session. Clear before publishing UNLOCKED because
+                    // markLockVerified() is a no-op while the vault is not unlocked.
+                    clearLockVerificationsInternal()
+                    resetVerificationRateLimit()
                     _status.value = VaultStatus.UNLOCKED
                     armAutoLock()
                     UnlockResult.SUCCESS
@@ -628,6 +635,10 @@ class EncryptedNoteRepository(
             mutex.withLock {
                 if (vmk != null) {
                     wipeVmkLocked()
+                    // Tearing down a live session re-masks every verified id and clears the
+                    // re-auth limiter; a stale set must not outlive the VMK it belongs to.
+                    clearLockVerificationsInternal()
+                    resetVerificationRateLimit()
                     itemsById.clear()
                     foldersById.clear()
                     publishIndexLocked()
@@ -651,6 +662,10 @@ class EncryptedNoteRepository(
                     handedOff = true
                     loadIndexLocked(candidate)
                     markVaultPresent()
+                    // A biometric unlock is a session boundary: start unverified with a clean
+                    // limiter, exactly like unlock()/setupVault() (decision #15).
+                    clearLockVerificationsInternal()
+                    resetVerificationRateLimit()
                     _status.value = VaultStatus.UNLOCKED
                     armAutoLock()
                     UnlockResult.SUCCESS
@@ -1136,6 +1151,12 @@ class EncryptedNoteRepository(
                         )
                     }
                     true
+                } catch (oom: OutOfMemoryError) {
+                    // Export peak heap is several times the 64 MiB stream cap (payload +
+                    // sealed copy + attachment blobs). Fail cleanly with `false` and no partial
+                    // file instead of letting the Error reach the UI and kill the process
+                    // (audit finding F9).
+                    false
                 } catch (e: Exception) {
                     false
                 } finally {
@@ -1158,6 +1179,11 @@ class EncryptedNoteRepository(
                     } finally {
                         if (opened.ownsSourceVmk) NoteCrypto.wipe(opened.sourceVmk)
                     }
+                } catch (oom: OutOfMemoryError) {
+                    // Structural limits bound allocations, but the decoded record graph can
+                    // still exhaust a small heap. Return null (invalid/unreadable file) instead
+                    // of crashing the app (audit finding F9).
+                    null
                 } catch (e: Exception) {
                     null
                 } finally {
