@@ -3,6 +3,59 @@
 All notable changes to NoteZero are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [Unreleased] — Phase 4 complete: drawing canvas, note export, tables, quick capture (2026-11-15, increment 6)
+
+### Added
+
+**Drawing canvas (encrypted attachment)**
+- Drawing surface (Compose Canvas, full-screen dialog) reachable from the attachment add menu
+  (`attachment_add_drawing`): freehand finger/stylus strokes, 7 theme-derived inks, 3 stroke
+  widths, bounded undo, clear, cancel, save.
+- Save renders in memory to a white page (long edge ≤ 2048 px), encodes PNG, and imports it
+  through the existing encrypted attachment pipeline (`image/png`, 10 MiB cap; the renderer
+  halves resolution if the encoded PNG would exceed the cap). No plaintext file or cache on
+  disk, no new permission; the drawing behaves like any other image attachment (thumbnail,
+  viewer, delete, export).
+
+**Note export (Markdown / HTML, explicit plaintext action)**
+- Row-menu export action → format choice → explicit "writes an UNENCRYPTED copy outside the
+  vault" warning → SAF `CreateDocument` only. Suggested sanitised `.md`/`.html` filename;
+  non-secret status/error states; no clipboard/share; pending plaintext dropped on lock.
+- New pure `model/NoteExport`: Markdown and fully escaped HTML renderer (headings, paragraphs,
+  inline bold/italic/code/link/strike, bullets/numbered, disabled checkboxes, fenced code,
+  quotes, rules, tables). HTML escapes all text/attributes and drops `javascript:`/`data:`/
+  `vbscript:` link targets (labels stay as text), with unit tests for injection cases.
+
+**Markdown tables editing**
+- `editor_insert_table` action + dialog (1–20 rows/cols, header toggle) inserts a GFM table at
+  the real caret/selection; overflow actions add/remove a row or column for the table under the
+  caret. Pure `MarkdownTableEdit` helpers (clamping, delimiter handling, escaped pipes) are
+  unit-tested; block preview rendering unchanged.
+
+**Quick capture (launcher shortcut)**
+- Static "New note" launcher shortcut (`com.cipherwell.notezero.SHORTCUT_NEW_NOTE`). The
+  request survives a locked vault: `MainActivity` → `AppRoot` → notes creates the note after
+  unlock through the normal encrypted repository path and opens the editor. Unit-tested
+  (`QuickCaptureTest`) and covered by the device E2E.
+
+### Verified (measured)
+
+- **866 unit tests / 0 failures** (72 classes; +102 over increment 5): drawing 41,
+  note export/tables/quick capture 59, plus updated editor/notes suites.
+- **10 instrumented tests OK**: `VaultFlowE2ETest` now also covers insert-table dialog →
+  persisted markdown table, drawing canvas open/cancel (no attachment created), and the
+  quick-capture shortcut launched while locked → unlock → new note created. New screenshots
+  `14-table-insert`, `15-drawing-canvas`, `16-quick-capture`.
+- Reproducibility re-verified for the release commit (signed APK + AAB byte-identical; hashes
+  in VERIFICATION §11 / `releases/SHA256SUMS`); FLAG_SECURE (screencap 0 bytes) and the
+  permission surface re-checked.
+
+### Still open
+
+- Camera scan (would add the CAMERA permission; deliberately last), home-screen widgets,
+  PDF export, encrypted per-note version history, translations, and the F-Droid window
+  (2027-02-15).
+
 ## [Unreleased] — Phase 5: audit remediation, strings, reproducible APK+AAB (2026-11-15, increment 5)
 
 ### Added

@@ -77,3 +77,95 @@ behaviour and its security invariants.
 No sleeps: controller tests drive `StandardTestDispatcher` virtual time; Robolectric tests
 use `UnconfinedTestDispatcher` for the controller and `waitUntil` only for the background
 bitmap decode.
+
+## Drawing canvas (Phase 6, contract A)
+
+A hand-drawn page is just another encrypted image attachment: it is drawn fully in memory,
+rendered to a white PNG, imported through the **same** `NoteRepository.importAttachment`
+path as a picked photo, and from then on behaves exactly like one (thumbnail in the strip,
+full-screen viewer, delete gate, UNENCRYPTED-copy export gate).
+
+### Components
+
+| Component | File | Responsibility |
+|---|---|---|
+| `DrawingSketch` / `DrawingPoint` / `DrawingStroke` | `ui/attachments/DrawingSketch.kt` | Pure, immutable stroke model. Coordinates are normalised to the 0..1 page, so the preview and the PNG agree at any pixel size; ink and pen width are value enums. Bounded: 128 strokes, 2048 samples/stroke, 32768 samples total. |
+| `DrawingFormat` | `ui/attachments/DrawingFormat.kt` | Pure page geometry (3:4 portrait, long edge clamped to 2048 px) and the deterministic `drawing-<yyyyMMdd-HHmmss>.png` display name (Locale.US, explicit time zone). |
+| `DrawingPalette` | `ui/attachments/DrawingPalette.kt` | Ink/paper colours derived from `ui/theme` tokens (no hex literals). Paper is white in both app themes because the saved PNG is white; the two gap hues are HSV derivations of the same palette. |
+| `DrawingRenderer` | `ui/attachments/DrawingRenderer.kt` | The only Android-aware part of the save path: `Bitmap` → white page → strokes → PNG bytes. Re-renders at half resolution if the PNG would exceed the 10 MiB attachment cap; never writes or logs. |
+| `DrawingCanvasScreen` | `ui/attachments/DrawingCanvasScreen.kt` | Full-screen dialog: pointer-driven canvas (finger or stylus), 7 inks, 3 pen widths, undo, clear, cancel, save. The in-progress stroke is part of the preview. |
+| `AttachmentController.importDrawing` | `ui/attachments/AttachmentController.kt` | In-memory import: wraps the PNG in an `AttachmentSource` with `image/png`, reuses every `importSource` guard (note exists, per-note count, 10 MiB declared-size pre-check, vault quota, lock) and zeroes the array once the repository has read it. |
+| `AttachmentStrip` | `ui/attachments/AttachmentStrip.kt` | Third add-menu entry "Drawing" (`attachment_add_drawing`) below Photo/File; hosts the canvas dialog and pushes the saved bytes through the controller. |
+
+### Flow
+
+1. Add button → menu → **Drawing**. No system picker is launched, so no
+   `beginExternalActivity` bracket is armed (there is nothing external to return from).
+2. The canvas dialog appears over the editor. Pointer samples go into `DrawingSketch`
+   (`start`/`extend`/`finish`); the preview and the eventual PNG paint the same model.
+3. **Save** encodes the page off the main thread (`Dispatchers.Default`), closes the dialog
+   and calls `controller.importDrawing(noteId, png)`. **Cancel** closes without importing.
+4. `importDrawing` runs the same guards as a picked file and, on success, the strip shows
+   the new chip/thumbnail and the status returns to the count. Undo, clear, delete, view and
+   export are the existing attachment behaviours.
+
+### Security invariants (drawing path)
+
+1. **No plaintext on disk.** The bitmap and the PNG are heap objects only: no file, no
+   cache directory, no `Context`, no `Bitmap.compress` destination outside a
+   `ByteArrayOutputStream`.
+2. **Same encrypted pipeline.** The drawing is imported with
+   `repository.importAttachment(noteId, name, "image/png", ByteArrayInputStream)`; the data
+   layer encrypts it, enforces the 10 MiB / per-note count / vault quota limits and stores
+   the same AAD-bound blob as any other attachment.
+3. **Bounded memory.** Page ≤ 2048 px on the long edge, ≤ 128 strokes, ≤ 32768 samples; the
+   renderer re-encodes smaller rather than exceed the per-file cap, and returns null (with
+   the non-secret `drawing_save_failed` message) rather than save an oversized image.
+4. **Wiped after import.** `importDrawing` streams the array through a
+   `ByteArrayInputStream` that zeroes the backing array on close, so the rendered plaintext
+   page does not linger after the repository has read it.
+5. **No logging, no new permissions, no new dependencies.** Names, strokes and bytes are
+   never logged; the canvas needs no camera/storage permission and only the Compose/Material
+   libraries already in the build.
+6. **Accessibility.** 48dp targets for cancel/save/undo/clear/every ink and width swatch,
+   content descriptions for all swatches and the canvas, `selected` semantics on the active
+   ink/width (a check glyph shows the selection without relying on colour alone).
+
+### Tags and strings
+
+| Tag | Meaning |
+|---|---|
+| `attachment_add_drawing` | Third add-menu entry (label `attach_drawing` = "Drawing") |
+| `drawing_dialog` | Full-screen canvas dialog |
+| `drawing_canvas` | The white drawing page (pointer input + `cd_drawing_canvas`) |
+| `drawing_cancel` / `drawing_save` | Header actions (`common_cancel`, `drawing_save`) |
+| `drawing_undo` / `drawing_clear` | Footer actions (`common_undo`, `drawing_clear`) |
+| `drawing_ink_<black\|grey\|red\|orange\|green\|blue\|purple>` | Ink swatch; content description `cd_drawing_ink_*` |
+| `drawing_width_<thin\|medium\|bold>` | Pen width swatch; content description `cd_drawing_width_*` |
+| `drawing_save_error` | Non-secret "could not render/save" line (only on failure) |
+
+New strings: `attach_drawing`, `drawing_save`, `drawing_clear`, `drawing_canvas_hint`,
+`drawing_save_failed`, `cd_drawing_canvas`, `cd_drawing_ink_*`, `cd_drawing_width_*`;
+Undo/Cancel reuse `common_undo`/`common_cancel`. `docs/STRINGS.md` needs the `drawing_`
+prefix added to its owner table (Lead-owned file).
+
+### Tests
+
+- `DrawingSketchTest` — pure model: add/extend/finish, clamping, sub-sample filtering, tap
+  dots, undo (including an in-progress stroke), clear, tool selection, all three bounds.
+- `DrawingFormatTest` — page geometry/aspect/clamps, deterministic locale-independent file
+  name, PNG MIME.
+- `DrawingRendererTest` — Robolectric: real PNG signature and decoded page dimensions, dot
+  strokes, empty sketch renders nothing, every ink/width renders, a full page stays under
+  the 10 MiB cap.
+- `DrawingImportTest` — controller + `FakeAttachmentRepository`, virtual time: exactly one
+  import with `image/png` and a timestamped name, no picker bracket, array wiped after
+  import, empty/locked/oversized/missing-note/quota paths.
+- `DrawingCanvasTest` — Robolectric Compose: menu entry (and its position below Photo/File),
+  canvas + controls + content descriptions + selection state + 48dp targets, cancel imports
+  nothing, a stroke enables save/undo/clear, save imports exactly one PNG and the drawing
+  joins the strip.
+
+No sleeps: pure/controller tests use virtual time, Compose tests use `waitForIdle` plus
+bounded `waitUntil` polling of a Compose-visible outcome for the background PNG encode and
+the strip commit (the same pattern as the thumbnail decode).

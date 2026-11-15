@@ -367,3 +367,61 @@ handling, recovery-reset session boundary).
 - Cross-toolchain reproducibility verification with F-Droid's build image.
 - Remaining INFO items I1/I5 and the dialog-text `rememberSaveable` note (low impact,
   documented in the audit).
+
+---
+
+## 11. Increment 6 (same day): Phase-4 completion — drawing, export, tables, quick capture
+
+### Build, tests & signing (release state)
+
+| Command | Result |
+|---|---|
+| `./gradlew :app:testDebugUnitTest` | **BUILD SUCCESSFUL — 866 tests, 0 failures, 0 errors, 0 skipped (72 classes)** |
+| `./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -PallowScreenshots=true` | **BUILD SUCCESSFUL** |
+| `adb shell am instrument -w com.cipherwell.notezero.test/…AndroidJUnitRunner` | **OK (10 tests)** incl. the extended E2E flow |
+| `./scripts/verify-reproducible.sh` (signed APK) | **RESULT: REPRODUCIBLE** — both builds `04ba7e180981df9a8724d8c9518126d3d40f5db8d6f74dde65a14300b982c71f` |
+| `./scripts/verify-reproducible.sh --artifact aab` | **RESULT: REPRODUCIBLE** — both builds `b0f0280ee1e9806ba9bc74d2bd9a7ea058ed442e8dc17b9573515261f0f90898` |
+| published `releases/notezero-0.1.0-release.apk` | `04ba7e180981df9a8724d8c9518126d3d40f5db8d6f74dde65a14300b982c71f` |
+| published `releases/notezero-0.1.0-release.aab` | `b0f0280ee1e9806ba9bc74d2bd9a7ea058ed442e8dc17b9573515261f0f90898` |
+| `apksigner verify --print-certs` | `CN=Cipherwell, O=Cipherwell, OU=NoteZero`, SHA-256 `FA:CA:DD:67:…:92:78` |
+| normal debug build + `adb exec-out screencap -p` | **0-byte capture** → FLAG_SECURE active |
+| `aapt2 dump permissions` on the release APK | `USE_BIOMETRIC` only (+ androidx.core signature-level receiver guard) |
+| `./scripts/check-offline.sh --gradle` | exit 0 |
+
+### Test areas (866 / 72 classes)
+
+data 124 · code engine 139 · ui code 117 · ui attachments 88 · ui notes 82 · ui editor 69 ·
+crypto 61 · model 61 · other UI 65 · backup/settings 37 · ui locks 18 · security 5.
++102 over increment 5: drawing 41 (sketch/format/renderer/import/canvas), note export 18,
+tables 20, export flows 21, quick capture 2.
+
+### Device E2E additions
+
+`VaultFlowE2ETest` now also proves:
+1. **Markdown tables**: open the insert-table dialog (screenshot `14-table-insert`), insert a
+   GFM table, later assert the persisted note body contains the table separator row;
+2. **Drawing canvas**: open it from the attachment add menu (screenshot `15-drawing-canvas`),
+   cancel, and assert no attachment was created;
+3. **Quick capture**: launch `MainActivity` with `com.cipherwell.notezero.SHORTCUT_NEW_NOTE`
+   while the vault is locked → unlock screen → unlock → the pending request opens a new-note
+   editor (screenshot `16-quick-capture`) → title typed, back, note persists through the
+   encrypted repository.
+
+17 real-emulator screenshots are committed under `docs/screenshots/` (00…16).
+
+### Notes
+
+- Drawing renders are bounded (long edge ≤ 2048 px) and re-rendered at lower resolution if the
+  encoded PNG would exceed the 10 MiB attachment cap; bytes are imported through the normal
+  encrypted attachment pipeline and never cached as plaintext.
+- Note export is the only plaintext-egress path added; it is SAF-only, behind an explicit
+  warning, and the HTML renderer escapes everything and drops `javascript:`/`data:` link
+  targets (DECISIONS #18).
+- Quick capture never bypasses the vault: the request is honoured only after unlock and the
+  note is created through the encrypted repository.
+
+### Still open
+
+- Camera scan (adds the CAMERA permission; deliberately last), home-screen widgets, PDF export,
+  encrypted per-note version history, translations, and the F-Droid submission window
+  (2027-02-15).

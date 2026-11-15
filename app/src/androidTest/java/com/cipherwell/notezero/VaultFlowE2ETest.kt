@@ -77,6 +77,7 @@ class VaultFlowE2ETest {
         const val EDITOR_NOTE_TITLE = "Second note from editor"
         const val SECOND_BODY = "# Preview\n- [ ] tap me\n\n> quote\n\n| a | b |\n|---|---|\n| 1 | 2 |"
         const val CODE_FILE_NAME = "hello.kt"
+        const val QUICK_CAPTURE_TITLE = "Quick capture note"
         const val CODE_SECRET_MARKER = "CodeE2E_secret"
         const val CODE_BODY =
             "fun main() {\n    val secret = \"$CODE_SECRET_MARKER\"\n    println(secret)\n}"
@@ -195,6 +196,25 @@ class VaultFlowE2ETest {
             compose.onNodeWithTag("editor_body").performTextInput(SECOND_BODY)
             compose.waitForIdle()
             saveScreenshot("02-editor-edit")
+
+            // ---- 6a2. Tables helper: insert a markdown table at the cursor ------------
+            compose.waitForTag("editor_insert_table", 10_000)
+            compose.waitForIdle()
+            compose.onNodeWithTag("editor_insert_table").performClick()
+            compose.waitForTag("table_insert_dialog", 15_000)
+            saveNodeScreenshot("14-table-insert", "table_insert_dialog")
+            compose.onNodeWithTag("table_confirm").performClick()
+            compose.waitForTag("editor_body", 10_000)
+
+            // ---- 6a3. Drawing canvas: open and cancel (no attachment expected) ---------
+            compose.onNodeWithTag("attachment_add").performClick()
+            compose.waitForTag("attachment_add_drawing", 10_000)
+            compose.onNodeWithTag("attachment_add_drawing").performClick()
+            compose.waitForTag("drawing_dialog", 15_000)
+            saveNodeScreenshot("15-drawing-canvas", "drawing_dialog")
+            compose.onNodeWithTag("drawing_cancel").performClick()
+            compose.waitForIdle()
+
             // Render the parsed block preview (headings, checklist, quote, table).
             compose.onNodeWithTag("editor_preview_toggle").performClick()
             compose.waitForIdle()
@@ -297,6 +317,14 @@ class VaultFlowE2ETest {
         val editorItem = repository.items.value.firstOrNull { it.title == EDITOR_NOTE_TITLE }
         assertTrue("note created in the editor must persist", editorItem != null)
         assertTrue(editorItem!!.body.contains("tap me"))
+        assertTrue(
+            "the inserted markdown table must persist in the note body",
+            editorItem.body.contains("| ---"),
+        )
+        assertTrue(
+            "cancelling the drawing canvas must not create an attachment",
+            editorItem.attachments.isEmpty(),
+        )
         val lockedItem = repository.items.value.firstOrNull { it.title == EDITOR_NOTE_TITLE }
         assertTrue("locked note must still carry the encrypted lock flag", lockedItem != null && lockedItem.locked)
         assertTrue(
@@ -315,6 +343,35 @@ class VaultFlowE2ETest {
         assertFalse("editor plaintext title leaked into the database", afterUiDisk.contains(EDITOR_NOTE_TITLE))
         assertFalse("code file plaintext title leaked into the database", afterUiDisk.contains(CODE_FILE_NAME))
         assertFalse("code file plaintext body leaked into the database", afterUiDisk.contains(CODE_SECRET_MARKER))
+
+        // ---- 8. Quick capture shortcut while locked: unlock then a note is created -------
+        runBlocking { repository.lock() }
+        val shortcutIntent = android.content.Intent(context, MainActivity::class.java)
+            .setAction("com.cipherwell.notezero.SHORTCUT_NEW_NOTE")
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        val quick = ActivityScenario.launch<MainActivity>(shortcutIntent)
+        try {
+            compose.waitForTag("unlock_screen", 20_000)
+            compose.onNodeWithTag("unlock_password").performClick()
+            compose.onNodeWithTag("unlock_password").performTextInput(String(firstPassword))
+            compose.onNodeWithTag("unlock_button").performClick()
+            compose.waitForTag("editor_title", 25_000)
+            saveScreenshot("16-quick-capture")
+            compose.onNodeWithTag("editor_title").performClick()
+            compose.onNodeWithTag("editor_title").performTextInput(QUICK_CAPTURE_TITLE)
+            compose.onNodeWithTag("editor_back").performClick()
+            compose.waitForTag("notes_list", 20_000)
+            compose.waitUntil(15_000) {
+                compose.onAllNodesWithText(QUICK_CAPTURE_TITLE, substring = true)
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            assertTrue(
+                "quick capture must persist the note through the encrypted repository",
+                repository.items.value.any { it.title == QUICK_CAPTURE_TITLE },
+            )
+        } finally {
+            quick.close()
+        }
     }
 
     // ---- helpers ------------------------------------------------------------------------

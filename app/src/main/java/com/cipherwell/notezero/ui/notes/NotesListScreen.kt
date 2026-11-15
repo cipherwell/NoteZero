@@ -41,6 +41,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -97,10 +98,24 @@ fun NotesListScreen(
     onOpenCode: () -> Unit = {},
     /** Injectable only for tests; production uses the device presence prompt. */
     biometricPrompt: LockBiometricPrompt? = null,
+    /** Injectable only for tests; production uses the SAF `CreateDocument` target. */
+    noteExportTarget: NoteExportTarget? = null,
+    /** Quick-capture request (launcher shortcut): create and open a new note once. */
+    startNewNote: Boolean = false,
+    onStartNewNoteConsumed: () -> Unit = {},
 ) {
     val viewModel: NotesViewModel = viewModel(factory = NotesViewModelFactory(repository))
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var editorItemId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // Quick capture (launcher shortcut / pending request after unlock): create the note only
+    // through the normal unlocked repository path, then open the editor.
+    LaunchedEffect(startNewNote) {
+        if (!startNewNote) return@LaunchedEffect
+        val created = viewModel.createNote(folderId = null)
+        onStartNewNoteConsumed()
+        if (created != null) editorItemId = created.id
+    }
     // One re-auth flow for the whole list: masked rows and folder entries share it, and
     // it never stores content, only the pending target id until the repository verifies.
     val reauth = rememberLockReauthController(repository, biometricPrompt)
@@ -123,6 +138,7 @@ fun NotesListScreen(
         onOpenCode = onOpenCode,
         onOpenEditor = { editorItemId = it },
         onOpenSettings = onOpenSettings,
+        exportTarget = noteExportTarget ?: rememberSafNoteExportTarget(repository),
     )
 }
 
@@ -135,15 +151,19 @@ private fun NotesListContent(
     onOpenEditor: (String) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenCode: () -> Unit,
+    exportTarget: NoteExportTarget,
 ) {
     var renameTarget by remember { mutableStateOf<Item?>(null) }
     var moveTarget by remember { mutableStateOf<Item?>(null) }
+    var exportItem by remember { mutableStateOf<Item?>(null) }
+    var exportFormat by remember { mutableStateOf<NoteExportFormat?>(null) }
     var renameFolderTarget by remember { mutableStateOf<Folder?>(null) }
     var deleteFolderTarget by remember { mutableStateOf<Folder?>(null) }
     var newFolderParent by remember { mutableStateOf<String?>(null) }
     var showNewFolderDialog by remember { mutableStateOf(false) }
     var confirmEmptyTrash by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val exportStatus by viewModel.exportStatus.collectAsStateWithLifecycle()
 
     val isTrash = state.section == NotesSection.TRASH
     val codeWorkspaceLabel = stringResource(R.string.cd_notes_code_workspace)
@@ -189,6 +209,7 @@ private fun NotesListContent(
                         else -> viewModel.setItemLocked(row.item, false)
                     }
                 },
+                onExport = { exportItem = row.item },
             )
         }
     }
@@ -196,57 +217,65 @@ private fun NotesListContent(
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            LargeTopAppBar(
-                title = { Text(text = titleFor(state), style = NoteZeroType.LargeTitle) },
-                navigationIcon = {
-                    if (isTrash) {
-                        IconButton(
-                            onClick = { viewModel.leaveTrash() },
-                            modifier = Modifier.testTag("notes_back"),
-                        ) {
-                            Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back_to_notes))
+            Column {
+                LargeTopAppBar(
+                    title = { Text(text = titleFor(state), style = NoteZeroType.LargeTitle) },
+                    navigationIcon = {
+                        if (isTrash) {
+                            IconButton(
+                                onClick = { viewModel.leaveTrash() },
+                                modifier = Modifier.testTag("notes_back"),
+                            ) {
+                                Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back_to_notes))
+                            }
+                        } else if (state.section == NotesSection.FOLDERS && state.currentFolderId != null) {
+                            IconButton(
+                                onClick = { viewModel.closeFolder() },
+                                modifier = Modifier.testTag("notes_back"),
+                            ) {
+                                Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back_to_parent_folder))
+                            }
                         }
-                    } else if (state.section == NotesSection.FOLDERS && state.currentFolderId != null) {
-                        IconButton(
-                            onClick = { viewModel.closeFolder() },
-                            modifier = Modifier.testTag("notes_back"),
-                        ) {
-                            Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back_to_parent_folder))
+                    },
+                    actions = {
+                        if (isTrash) {
+                            TextButton(
+                                onClick = { confirmEmptyTrash = true },
+                                modifier = Modifier.testTag("trash_empty_button"),
+                            ) { Text(stringResource(R.string.notes_empty_trash)) }
+                        } else {
+                            IconButton(
+                                onClick = onOpenCode,
+                                modifier = Modifier
+                                    .testTag("nav_code")
+                                    .semantics { contentDescription = codeWorkspaceLabel },
+                            ) {
+                                Text(
+                                    text = "</>",
+                                    style = NoteZeroType.Caption.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            IconButton(
+                                onClick = { viewModel.showTrash() },
+                                modifier = Modifier.testTag("trash_button"),
+                            ) {
+                                Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.cd_notes_trash))
+                            }
                         }
-                    }
-                },
-                actions = {
-                    if (isTrash) {
-                        TextButton(
-                            onClick = { confirmEmptyTrash = true },
-                            modifier = Modifier.testTag("trash_empty_button"),
-                        ) { Text(stringResource(R.string.notes_empty_trash)) }
-                    } else {
-                        IconButton(
-                            onClick = onOpenCode,
-                            modifier = Modifier
-                                .testTag("nav_code")
-                                .semantics { contentDescription = codeWorkspaceLabel },
-                        ) {
-                            Text(
-                                text = "</>",
-                                style = NoteZeroType.Caption.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        IconButton(
-                            onClick = { viewModel.showTrash() },
-                            modifier = Modifier.testTag("trash_button"),
-                        ) {
-                            Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.cd_notes_trash))
-                        }
-                    }
-                },
-                scrollBehavior = scrollBehavior,
-            )
+                    },
+                    scrollBehavior = scrollBehavior,
+                )
+                // Non-secret export status/error line: it sits under the app bar so it
+                // never covers note rows and disappears when dismissed.
+                NoteExportStatusBar(
+                    status = exportStatus,
+                    onDismiss = viewModel::dismissExportStatus,
+                )
+            }
         },
         floatingActionButton = {
             if (!isTrash) {
@@ -590,6 +619,31 @@ private fun NotesListContent(
                 confirmEmptyTrash = false
             },
         )
+    }
+
+    // Export: format choice first, then the explicit UNENCRYPTED-copy warning. SAF is only
+    // launched after `note_export_confirm`; cancelling either dialog writes nothing.
+    val pendingExportItem = exportItem
+    if (pendingExportItem != null) {
+        val pendingFormat = exportFormat
+        if (pendingFormat == null) {
+            NoteExportFormatDialog(
+                onDismiss = { exportItem = null },
+                onSelect = { format -> exportFormat = format },
+            )
+        } else {
+            NoteExportWarningDialog(
+                onDismiss = {
+                    exportItem = null
+                    exportFormat = null
+                },
+                onConfirm = {
+                    exportItem = null
+                    exportFormat = null
+                    viewModel.exportNote(pendingExportItem, pendingFormat, exportTarget)
+                },
+            )
+        }
     }
 
     // Master-password fallback for locked notes/folders (biometric prompt is tried first).

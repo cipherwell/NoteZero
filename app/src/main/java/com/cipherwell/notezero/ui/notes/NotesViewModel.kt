@@ -8,6 +8,8 @@ import com.cipherwell.notezero.data.VaultStatus
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
+import com.cipherwell.notezero.model.NoteExport
+import com.cipherwell.notezero.ui.locks.LockVisibility
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -70,6 +72,16 @@ class NotesViewModel(
      * unlocked session. Audit finding F10.
      */
     val sessionStale: StateFlow<Boolean> = _sessionStale.asStateFlow()
+
+    private val _exportStatus = MutableStateFlow(NoteExportStatus())
+    private var exportSequence = 0L
+
+    /**
+     * Non-secret status of the last note-export attempt (written / cancelled / failed /
+     * locked / unavailable). Shown by the notes screen; never carries content, a title or
+     * a file name. The [NoteExportStatus.sequence] lets the same message repeat.
+     */
+    val exportStatus: StateFlow<NoteExportStatus> = _exportStatus.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -208,6 +220,58 @@ class NotesViewModel(
 
     /** Re-arms every locked note/folder ("Re-arm locked notes now" / settings action). */
     fun rearmLocks() = mutate { repository.clearLockVerifications() }
+
+    // ---- Note export (Markdown / HTML, unencrypted copy) ---------------------
+
+    /**
+     * Converts the *current* repository copy of [item] to [format] and hands it to the
+     * SAF [target]. The warning dialog is the caller's gate: this method only runs after
+     * the user explicitly confirmed the unencrypted-copy warning.
+     *
+     * Re-checks the session here (not just in the UI): a masked locked note or a locked
+     * vault exports nothing and reports a non-secret status. Conversion happens in memory;
+     * the content is not stored on [exportStatus] and never logged.
+     */
+    fun exportNote(item: Item, format: NoteExportFormat, target: NoteExportTarget) {
+        if (!isUnlocked()) {
+            publishExportOutcome(NoteExportOutcome.LOCKED)
+            return
+        }
+        val current = repository.items.value.firstOrNull { it.id == item.id }
+        if (current == null) {
+            publishExportOutcome(NoteExportOutcome.UNAVAILABLE)
+            return
+        }
+        if (LockVisibility.isItemMasked(current, repository.verifiedLockedIds.value)) {
+            // A masked note's text must never reach the converter, even if a stale row
+            // still holds the real title/body in memory.
+            publishExportOutcome(NoteExportOutcome.LOCKED)
+            return
+        }
+        val content = when (format) {
+            NoteExportFormat.MARKDOWN -> NoteExport.toMarkdown(current.title, current.body)
+            NoteExportFormat.HTML -> NoteExport.toHtml(current.title, current.body)
+        }
+        val request = NoteExportRequest(
+            itemId = current.id,
+            format = format,
+            suggestedName = sanitizeNoteExportName(current.title, format.extension),
+            content = content,
+        )
+        target.requestExport(request) { result ->
+            publishExportOutcome(result.toOutcome())
+        }
+    }
+
+    /** Dismisses the current non-secret export status (no content involved). */
+    fun dismissExportStatus() {
+        _exportStatus.value = NoteExportStatus()
+    }
+
+    private fun publishExportOutcome(outcome: NoteExportOutcome) {
+        exportSequence += 1
+        _exportStatus.value = NoteExportStatus(outcome = outcome, sequence = exportSequence)
+    }
 
     // ---- Internals -----------------------------------------------------------
 

@@ -271,6 +271,13 @@
     <string name="attach_export_locked">The vault is locked. Unlock to export a copy.</string>
     <string name="attach_choose_location">Choose location</string>
 
+    <!-- Drawing canvas (Phase 6): a hand-drawn page saved as an encrypted PNG attachment. -->
+    <string name="attach_drawing">Drawing</string>
+    <string name="drawing_save">Save</string>
+    <string name="drawing_clear">Clear</string>
+    <string name="drawing_canvas_hint">Draw with a finger or stylus</string>
+    <string name="drawing_save_failed">The drawing could not be rendered, so nothing was saved. Try again.</string>
+
     <!-- ==================== Code workspace ==================== -->
     <string name="code_title">Code</string>
     <string name="code_header_counts">%1$s · %2$s · encrypted</string>
@@ -372,6 +379,19 @@
     <string name="cd_attach_delete">Delete attachment</string>
     <string name="cd_attach_close_viewer">Close attachment viewer</string>
     <string name="cd_attach_export">Export decrypted copy</string>
+
+    <!-- Drawing canvas: colour swatches, pen widths and the page itself. -->
+    <string name="cd_drawing_canvas">Drawing canvas</string>
+    <string name="cd_drawing_ink_black">Black ink</string>
+    <string name="cd_drawing_ink_grey">Grey ink</string>
+    <string name="cd_drawing_ink_red">Red ink</string>
+    <string name="cd_drawing_ink_orange">Orange ink</string>
+    <string name="cd_drawing_ink_green">Green ink</string>
+    <string name="cd_drawing_ink_blue">Blue ink</string>
+    <string name="cd_drawing_ink_purple">Purple ink</string>
+    <string name="cd_drawing_width_thin">Thin stroke</string>
+    <string name="cd_drawing_width_medium">Medium stroke</string>
+    <string name="cd_drawing_width_bold">Bold stroke</string>
     <string name="cd_notes_code_workspace">Code workspace</string>
     <string name="cd_notes_trash">Trash</string>
     <string name="cd_notes_clear_search">Clear search</string>
@@ -383,4 +403,34 @@
     <string name="cd_notes_note_actions">Note actions</string>
     <string name="cd_notes_folder_actions">Folder actions</string>
     <string name="cd_notes_delete_forever">Delete forever</string>
+
+    <!-- ==================== Note export (unencrypted Markdown/HTML copy) ==================== -->
+    <string name="note_export_action">Export note</string>
+    <string name="note_export_format_title">Export note</string>
+    <string name="note_export_format_message">Choose a format for the unencrypted copy.</string>
+    <string name="note_export_markdown">Markdown (.md)</string>
+    <string name="note_export_html">HTML (.html)</string>
+    <string name="note_export_warning_title">Write an UNENCRYPTED copy?</string>
+    <string name="note_export_warning_message">This writes an UNENCRYPTED copy of this note outside the vault, where other apps, cloud backups and anyone with access to that file can read it. The encrypted note in your vault stays unchanged.</string>
+    <string name="note_export_confirm">Export unencrypted copy</string>
+    <string name="note_export_cancel">Cancel</string>
+    <string name="note_export_status_saved">Unencrypted copy written outside the vault.</string>
+    <string name="note_export_status_cancelled">Export cancelled. Nothing was written.</string>
+    <string name="note_export_status_failed">The copy could not be written. Nothing in your vault changed.</string>
+    <string name="note_export_status_locked">The vault is locked or this note is hidden. Unlock and try again.</string>
+    <string name="note_export_status_unavailable">This note is not available to export.</string>
+
+    <!-- ==================== Markdown tables (insert / edit) ==================== -->
+    <string name="editor_insert_table">Insert table</string>
+    <string name="table_insert_title">Insert table</string>
+    <string name="table_rows_label">Rows</string>
+    <string name="table_cols_label">Columns</string>
+    <string name="table_header_label">Include header row</string>
+    <string name="table_header_cell">Column %1$d</string>
+    <string name="table_confirm">Insert</string>
+    <string name="table_invalid">Rows and columns must be between 1 and 20.</string>
+    <string name="editor_table_add_row">Add table row</string>
+    <string name="editor_table_remove_row">Remove table row</string>
+    <string name="editor_table_add_column">Add table column</string>
+    <string name="editor_table_remove_column">Remove table column</string>
 </resources>

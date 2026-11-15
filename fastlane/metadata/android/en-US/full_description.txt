@@ -6,7 +6,10 @@ Features:
 - Notes with Markdown editing and rich block preview: headings, lists, checklists, code blocks, quotes and tables
 - Folders, tags, pins, favourites, search, trash and undo
 - Lock individual notes and folders; locked content is hidden until you re-authenticate with biometrics or your master password
-- Encrypted attachments: import images (system photo picker) or files (SAF); thumbnails stay in memory only
+- Encrypted attachments: import images (system photo picker), files (SAF) or hand-drawn sketches (in-app drawing canvas); thumbnails stay in memory only
+- Draw sketches with finger or stylus; drawings are stored as encrypted PNG attachments, never as plaintext files
+- Markdown tables with an insert-table dialog and row/column editing, plus Markdown/HTML export behind an explicit plaintext warning
+- Quick capture: a "New note" launcher shortcut works even while the vault is locked — the note is created only after you unlock
 - A local code editor: file tree, syntax highlighting for Kotlin/Java/JS/TS/Python/JSON/XML/Markdown/Shell, line numbers, find/replace, go-to-line, undo/redo, workspace-wide search, font size and wrap
 - Encrypted backup export/import through the system file picker, duplicate-safe and password-protected if you choose
 - Auto-lock on background/screen-off, screen-capture protection, sensitive clipboard flags

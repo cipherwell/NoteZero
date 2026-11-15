@@ -148,3 +148,11 @@ pass), 33 `cd_*` accessibility labels and one `translatable="false"` value;
 `res/values/plurals.xml` has 6 `<plurals>` entries. `new_note`, `search_notes` and
 `recovery_title` are pre-existing seeded keys kept for compatibility; they are not
 referenced by the current UI.
+
+### Drawing canvas (increment 6)
+
+`drawing_save`, `drawing_clear`, `drawing_canvas_hint`, `drawing_save_failed`, `attach_drawing`
+plus `cd_drawing_canvas`, `cd_drawing_ink_{black,grey,red,orange,green,blue,purple}` and
+`cd_drawing_width_{thin,medium,bold}` live in `res/values/strings.xml` with the `drawing_`
+prefix. Stroke colours/tools are symbols + resource labels only; the canvas itself is
+rendered content, never persisted as plaintext.

@@ -10,15 +10,16 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 [VaultZero](https://github.com/cipherwell/Vault-Zero) with an independent package
 (`com.cipherwell.notezero`), independent signing key and independent threat model.
 
-> Status: **Phase 5 hardening** — 2026-11-15.
+> Status: **Phase 4 complete, Phase 5 hardening** — 2026-11-15.
 > Security core, notes MVP, encrypted SAF backup/restore, code editor (workspace
-> search/copy/export/indent), encrypted attachments and **locked notes/folders** are in;
-> an independent security audit found **no HIGH/CRITICAL issues** and its findings are
-> remediated. Builds green, **764 unit tests + 10 device tests**, UI is
-> translation-ready, and **signed APK + AAB release builds are byte-for-byte reproducible**.
-> What ships now, evidence and the remaining Phase-5 tail:
-> [docs/VERIFICATION-2026-11-15.md](docs/VERIFICATION-2026-11-15.md). Delivery phases:
-> [SPEC.md](SPEC.md).
+> search/copy/export/indent), encrypted attachments (images/files/**drawings**),
+> **locked notes/folders**, **Markdown/HTML note export**, **table editing** and
+> **quick-capture launcher shortcut** are in; an independent security audit found
+> **no HIGH/CRITICAL issues** and its findings are remediated. Builds green,
+> **866 unit tests + 10 device tests**, UI is translation-ready, and **signed APK + AAB
+> release builds are byte-for-byte reproducible**. What ships now, evidence and the
+> remaining Phase-5 tail: [docs/VERIFICATION-2026-11-15.md](docs/VERIFICATION-2026-11-15.md).
+> Delivery phases: [SPEC.md](SPEC.md).
 
 
 ## What exists today
@@ -32,6 +33,8 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 | ![Backup](docs/screenshots/05-settings-backup.png) | ![Code workspace](docs/screenshots/06-code-workspace-empty.png) | ![Code editor](docs/screenshots/07-code-editor-kotlin.png) |
 | **Encrypted attachments in the editor** | **Workspace-wide search** | **Search result opens at the line** |
 | ![Attachments](docs/screenshots/02-editor-edit.png) | ![Search](docs/screenshots/09-code-workspace-search.png) | ![Search result](docs/screenshots/10-code-editor-search-result.png) |
+| **Insert markdown table** | **Drawing canvas (encrypted PNG)** | **Quick capture shortcut** |
+| ![Table](docs/screenshots/14-table-insert.png) | ![Drawing](docs/screenshots/15-drawing-canvas.png) | ![Quick capture](docs/screenshots/16-quick-capture.png) |
 | **Locked note masked in the list** | **Re-auth with master password** | **Revealed after verification** |
 | ![Locked](docs/screenshots/11-locked-note-masked.png) | ![Re-auth](docs/screenshots/12-reauth-dialog.png) | ![Revealed](docs/screenshots/13-locked-note-revealed.png) |
 
@@ -41,7 +44,7 @@ Screenshots are real emulator captures from the instrumented E2E run (debug buil
 
 ## Verified end to end (2026-11-15)
 
-- 764 unit tests / 0 failures (60 classes); 10 instrumented tests on a real emulator.
+- 866 unit tests / 0 failures (72 classes); 10 instrumented tests on a real emulator.
 - Real Android crypto: setup → BIP-39 phrase → lock/unlock; **password change leaves note
   ciphertext byte-identical**; recovery reset invalidates the old password; a raw SQLite scan
   of the database files (main + WAL + SHM) finds no plaintext title/body/phrase — including a
@@ -73,6 +76,11 @@ Screenshots are real emulator captures from the instrumented E2E run (debug buil
 - **Audited**: independent adversarial audit of crypto/storage/session/offline surface found
   **0 HIGH / 0 CRITICAL**; 2 MEDIUM + 8 LOW findings all remediated (report:
   docs/AUDIT-2026-11-15-phase5.md). All UI strings are in Android resources (translation-ready).
+- **Drawing canvas**: in-memory PNG drawings imported as encrypted attachments (no plaintext
+  cache, same 10 MiB pipeline). **Note export**: explicit-warning SAF Markdown/HTML export with
+  a fully escaped HTML renderer. **Tables**: insert-table dialog + row/column edits on the
+  Markdown table under the caret. **Quick capture**: launcher shortcut that survives a locked
+  vault and creates the note only after unlock, through the encrypted repository.
 - FLAG_SECURE default-on proof; release APK permission dump: only `USE_BIOMETRIC` (+
   androidx.core's signature-level receiver guard) — no network, camera, location or storage.
 - Signed release verified with the independent NoteZero upload key; unsigned-release fallback
@@ -140,6 +148,7 @@ Full instructions (including signed release builds and this machine's exact setu
 | [docs/EDITOR-SPEC.md](docs/EDITOR-SPEC.md) | Code editor languages, tokens, editing behaviour, performance |
 | [docs/CONTRACTS-PHASE4.md](docs/CONTRACTS-PHASE4.md) | Attachment storage + attachments UI + code-polish contracts |
 | [docs/CONTRACTS-PHASE5.md](docs/CONTRACTS-PHASE5.md) | Locked notes/folders + reproducibility increment contracts |
+| [docs/CONTRACTS-PHASE6.md](docs/CONTRACTS-PHASE6.md) | Drawing, note export, tables, quick-capture increment contracts |
 | [docs/REPRODUCIBLE-BUILDS.md](docs/REPRODUCIBLE-BUILDS.md) | Verified reproducible APK+AAB builds, pinned toolchain, limits |
 | [docs/AUDIT-2026-11-15-phase5.md](docs/AUDIT-2026-11-15-phase5.md) | Adversarial security audit + per-finding remediation log |
 | [docs/STRINGS.md](docs/STRINGS.md) | String-resource conventions and deliberate inline exceptions |

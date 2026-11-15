@@ -54,14 +54,23 @@ import com.cipherwell.notezero.ui.theme.NoteZeroTheme
  * provider (`NoteZeroApp.repository`), never from a composable constructor.
  */
 @Composable
-fun AppRoot(repository: NoteRepository) {
+fun AppRoot(
+    repository: NoteRepository,
+    newNoteRequest: Boolean = false,
+    onNewNoteRequestConsumed: () -> Unit = {},
+) {
     val availability = rememberBiometricAvailability()
     val viewModel: VaultViewModel = viewModel(
         factory = remember(repository, availability) {
             VaultViewModel.Factory(repository, availability)
         },
     )
-    AppRoot(repository = repository, viewModel = viewModel)
+    AppRoot(
+        repository = repository,
+        viewModel = viewModel,
+        newNoteRequest = newNoteRequest,
+        onNewNoteRequestConsumed = onNewNoteRequestConsumed,
+    )
 }
 
 /**
@@ -69,7 +78,12 @@ fun AppRoot(repository: NoteRepository) {
  * repository / biometric availability). Used by the Robolectric Compose tests.
  */
 @Composable
-fun AppRoot(repository: NoteRepository, viewModel: VaultViewModel) {
+fun AppRoot(
+    repository: NoteRepository,
+    viewModel: VaultViewModel,
+    newNoteRequest: Boolean = false,
+    onNewNoteRequestConsumed: () -> Unit = {},
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val setup by viewModel.setup.collectAsStateWithLifecycle()
     val unlock by viewModel.unlock.collectAsStateWithLifecycle()
@@ -77,6 +91,9 @@ fun AppRoot(repository: NoteRepository, viewModel: VaultViewModel) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val recoveryResetNotice by viewModel.recoveryResetNotice.collectAsStateWithLifecycle()
     val biometricController = rememberBiometricController(viewModel)
+    // Quick capture survives a locked vault: the request is honoured after unlock.
+    var pendingNewNote by rememberSaveable { mutableStateOf(newNoteRequest) }
+    LaunchedEffect(newNoteRequest) { if (newNoteRequest) pendingNewNote = true }
 
     var wasUnlocked by rememberSaveable { mutableStateOf(false) }
     var lockedRoute by rememberSaveable { mutableStateOf(ROUTE_UNLOCK) }
@@ -205,6 +222,11 @@ fun AppRoot(repository: NoteRepository, viewModel: VaultViewModel) {
                                     repository = repository,
                                     onOpenSettings = { unlockedRoute = ROUTE_SETTINGS },
                                     onOpenCode = { unlockedRoute = ROUTE_CODE },
+                                    startNewNote = pendingNewNote,
+                                    onStartNewNoteConsumed = {
+                                        pendingNewNote = false
+                                        onNewNoteRequestConsumed()
+                                    },
                                 )
                             }
                         }

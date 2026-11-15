@@ -34,6 +34,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +46,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -129,6 +132,30 @@ fun NoteEditorScreen(
 
     var previewMode by rememberSaveable { mutableStateOf(false) }
     var monospace by rememberSaveable { mutableStateOf(false) }
+    var showTableDialog by rememberSaveable { mutableStateOf(false) }
+
+    // The body field keeps its own TextFieldValue so the table helpers can insert/edit at
+    // the real cursor (a plain String value would always append at the end). External body
+    // changes (load, undo/redo, checklist taps in preview, conflict reload) re-sync the
+    // text while keeping the cursor inside the new text.
+    var bodyField by remember { mutableStateOf(TextFieldValue(state.body, TextRange(state.body.length))) }
+    LaunchedEffect(state.body) {
+        if (bodyField.text != state.body) {
+            val cursor = if (bodyField.text.isEmpty()) {
+                state.body.length
+            } else {
+                bodyField.selection.start.coerceIn(0, state.body.length)
+            }
+            bodyField = TextFieldValue(state.body, TextRange(cursor))
+        }
+    }
+
+    fun applyTableResult(result: MarkdownTableEdit.Result?) {
+        if (result == null) return
+        val cursor = result.cursor.coerceIn(0, result.text.length)
+        bodyField = TextFieldValue(result.text, TextRange(cursor))
+        viewModel.updateBody(result.text)
+    }
 
     fun leave() {
         scope.launch {
@@ -174,6 +201,17 @@ fun NoteEditorScreen(
                 },
                 actions = {
                     var menuOpen by remember { mutableStateOf(false) }
+                    // Direct, always-reachable table action (the overflow also exposes the
+                    // row/column edits for the table under the caret).
+                    TextButton(
+                        onClick = { showTableDialog = true },
+                        enabled = !previewMode && !state.loading && !state.sessionCleared,
+                        modifier = Modifier
+                            .heightIn(min = NoteZeroSpacing.minTarget)
+                            .testTag("editor_insert_table"),
+                    ) {
+                        Text(stringResource(R.string.editor_insert_table), style = NoteZeroType.Caption)
+                    }
                     IconButton(
                         onClick = { menuOpen = true },
                         modifier = Modifier.testTag("editor_more"),
@@ -212,6 +250,45 @@ fun NoteEditorScreen(
                             onClick = {
                                 menuOpen = false
                                 monospace = !monospace
+                            },
+                        )
+                        // Table row/column helpers operate on the table under the caret; they
+                        // are unavailable in preview mode and when the caret is outside one.
+                        val tableAtCaret = MarkdownTableEdit.tableAt(bodyField.text, bodyField.selection.start)
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.editor_table_add_row), style = NoteZeroType.Callout) },
+                            enabled = !previewMode && tableAtCaret != null,
+                            modifier = Modifier.testTag("editor_table_add_row"),
+                            onClick = {
+                                menuOpen = false
+                                applyTableResult(MarkdownTableEdit.addRow(bodyField.text, bodyField.selection.start))
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.editor_table_remove_row), style = NoteZeroType.Callout) },
+                            enabled = !previewMode && tableAtCaret?.cursorOnHeaderOrDelimiter == false,
+                            modifier = Modifier.testTag("editor_table_remove_row"),
+                            onClick = {
+                                menuOpen = false
+                                applyTableResult(MarkdownTableEdit.removeRow(bodyField.text, bodyField.selection.start))
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.editor_table_add_column), style = NoteZeroType.Callout) },
+                            enabled = !previewMode && tableAtCaret != null,
+                            modifier = Modifier.testTag("editor_table_add_column"),
+                            onClick = {
+                                menuOpen = false
+                                applyTableResult(MarkdownTableEdit.addColumn(bodyField.text, bodyField.selection.start))
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.editor_table_remove_column), style = NoteZeroType.Callout) },
+                            enabled = !previewMode && (tableAtCaret?.columnCount ?: 0) > 1,
+                            modifier = Modifier.testTag("editor_table_remove_column"),
+                            onClick = {
+                                menuOpen = false
+                                applyTableResult(MarkdownTableEdit.removeColumn(bodyField.text, bodyField.selection.start))
                             },
                         )
                     }
@@ -335,8 +412,11 @@ fun NoteEditorScreen(
                         )
                     } else {
                         TextField(
-                            value = state.body,
-                            onValueChange = viewModel::updateBody,
+                            value = bodyField,
+                            onValueChange = { value ->
+                                bodyField = value
+                                viewModel.updateBody(value.text)
+                            },
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxWidth()
@@ -374,6 +454,25 @@ fun NoteEditorScreen(
             noteId = itemId,
             attachment = openAttachment,
             onClose = { viewingAttachment = null },
+        )
+    }
+
+    if (showTableDialog) {
+        TableInsertDialog(
+            onDismiss = { showTableDialog = false },
+            onConfirm = { rows, cols, headers ->
+                showTableDialog = false
+                applyTableResult(
+                    MarkdownTableEdit.insertTable(
+                        text = bodyField.text,
+                        selectionStart = bodyField.selection.start,
+                        selectionEnd = bodyField.selection.end,
+                        rows = rows,
+                        cols = cols,
+                        headers = headers,
+                    ),
+                )
+            },
         )
     }
     } // end of the editor's overlay Box

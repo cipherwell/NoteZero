@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.io.OutputStream
 
@@ -185,6 +186,39 @@ class AttachmentController(
                 source = it,
             )
         }
+    }
+
+    // =========================================================================
+    // Drawing import (in-memory PNG, no picker)
+    // =========================================================================
+
+    /**
+     * Imports PNG bytes rendered by the drawing canvas through the same encrypted path as a
+     * picked file — with no system picker and no external-activity bracket, because no other
+     * activity is launched.
+     *
+     * The bytes are handed over exactly once ([AttachmentSource.open] is lazy) and the
+     * backing array is zeroed as soon as the import closes the stream, so the rendered
+     * plaintext page does not outlive the operation. Nothing is written to disk at any point.
+     * The 10 MiB cap, the per-note count and the vault quota are the same local pre-checks
+     * [importSource] applies (the declared size is the rendered array's size), and the data
+     * layer remains authoritative while reading.
+     */
+    fun importDrawing(noteId: String, pngBytes: ByteArray) {
+        if (pngBytes.isEmpty()) {
+            // A renderer that produced nothing must never create an empty attachment.
+            _state.value = AttachmentUiState.Error(AttachmentErrorKind.IO)
+            return
+        }
+        importSource(
+            noteId,
+            AttachmentSource(
+                displayName = DrawingFormat.fileName(System.currentTimeMillis()),
+                mimeType = DrawingFormat.MIME_TYPE,
+                declaredSizeBytes = pngBytes.size.toLong(),
+                open = { WipingByteArrayInputStream(pngBytes) },
+            ),
+        )
     }
 
     // =========================================================================
@@ -370,3 +404,17 @@ internal fun AttachmentError.toUiKind(): AttachmentErrorKind = when (this) {
     AttachmentError.IO -> AttachmentErrorKind.IO
     AttachmentError.INTEGRITY -> AttachmentErrorKind.INTEGRITY
 }
+
+/**
+ * In-memory PNG stream for [AttachmentController.importDrawing]. Closing it zeroes the
+ * backing array so the rendered plaintext page does not linger in the heap after the
+ * repository has read it; the array is caller-owned and never used again.
+ */
+private class WipingByteArrayInputStream(private val backing: ByteArray) :
+    ByteArrayInputStream(backing) {
+    override fun close() {
+        super.close()
+        backing.fill(0)
+    }
+}
+

@@ -71,6 +71,10 @@ import kotlinx.coroutines.withContext
  * a type badge, name and size. Every action goes through [AttachmentController], which
  * brackets the system pickers with the repository's external-activity deferral.
  *
+ * The third add-menu entry opens [DrawingCanvasScreen]: a hand-drawn page is rendered to an
+ * in-memory PNG and imported through the same encrypted pipeline (no picker, no bracket, no
+ * file), so it then behaves exactly like a picked image.
+ *
  * Accessibility: 48dp targets, image thumbnails carry the display name as their content
  * description, and errors are announced politely (the text itself carries the meaning,
  * never colour alone).
@@ -87,6 +91,7 @@ fun AttachmentStrip(
     val context = LocalContext.current
     var menuOpen by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<AttachmentRef?>(null) }
+    var drawingOpen by remember(noteId) { mutableStateOf(false) }
 
     val photoLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
@@ -170,6 +175,16 @@ fun AttachmentStrip(
                                 runCatching { fileLauncher.launch(arrayOf("*/*")) }
                                     .onFailure { controller.onPickerCancelled() }
                             }
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.attach_drawing), style = NoteZeroType.Callout) },
+                        modifier = Modifier.testTag("attachment_add_drawing"),
+                        onClick = {
+                            menuOpen = false
+                            // No system picker, so no external-activity bracket: the page is
+                            // drawn and encrypted entirely in this process.
+                            drawingOpen = true
                         },
                     )
                 }
@@ -256,6 +271,20 @@ fun AttachmentStrip(
             },
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             shape = NoteZeroShapes.sheet,
+        )
+    }
+
+    if (drawingOpen) {
+        DrawingCanvasScreen(
+            onCancel = { drawingOpen = false },
+            onSave = { pngBytes ->
+                // Hand the rendered page to the encrypted pipeline BEFORE closing the canvas:
+                // the import is the only plaintext consumer, and closing first would make the
+                // dialog disappear while the bytes were still uncommitted.
+                // The controller zeroes the array once the repository has read it.
+                controller.importDrawing(noteId, pngBytes)
+                drawingOpen = false
+            },
         )
     }
 }

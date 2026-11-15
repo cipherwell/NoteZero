@@ -239,6 +239,7 @@ fun NoteRow(
     onMove: () -> Unit,
     onTrash: () -> Unit,
     onLockToggle: () -> Unit,
+    onExport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val item = row.item
@@ -357,6 +358,7 @@ fun NoteRow(
                     onMove = { menuOpen = false; onMove() },
                     onTrash = { menuOpen = false; onTrash() },
                     onLockToggle = { menuOpen = false; onLockToggle() },
+                    onExport = { menuOpen = false; onExport() },
                 )
             }
         }
@@ -375,6 +377,7 @@ private fun NoteContextMenu(
     onMove: () -> Unit,
     onTrash: () -> Unit,
     onLockToggle: () -> Unit,
+    onExport: () -> Unit,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         // Content actions are unavailable while masked: renaming a mask would write the
@@ -410,6 +413,13 @@ private fun NoteContextMenu(
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.notes_move_to_folder), style = NoteZeroType.Callout) },
                 onClick = onMove,
+            )
+            // Export writes decrypted content outside the vault; it is only offered for
+            // content this session may actually see (masked notes have no export action).
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.note_export_action), style = NoteZeroType.Callout) },
+                onClick = onExport,
+                modifier = Modifier.testTag("note_export_action"),
             )
         }
         DropdownMenuItem(

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher shortcut labels. Kept in a separate file from the main string table so the
+     quick-capture feature can evolve without merge churn in strings.xml. -->
+<resources>
+    <string name="shortcut_new_note_short">New note</string>
+    <string name="shortcut_new_note_long">Create a new encrypted note</string>
+    <string name="shortcut_new_note_disabled">Unlock NoteZero first</string>
+</resources>
