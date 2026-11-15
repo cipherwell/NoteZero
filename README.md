@@ -10,11 +10,12 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 [VaultZero](https://github.com/cipherwell/Vault-Zero) with an independent package
 (`com.cipherwell.notezero`), independent signing key and independent threat model.
 
-> Status: **Phase 2 complete + Phase 3 started** — 2026-11-15.
-> Security core, notes MVP, encrypted SAF backup/restore and the code editor are in;
-> builds green, **533 unit tests + 10 device tests**, signed release verified.
-> What ships now and what is deliberately next:
-> [docs/VERIFICATION-2026-11-15.md](docs/VERIFICATION-2026-11-15.md). Delivery phases: [SPEC.md](SPEC.md).
+> Status: **Phases 1–3 complete, Phase 4 started** — 2026-11-15.
+> Security core, notes MVP, encrypted SAF backup/restore, the code editor (with workspace
+> search/copy/export/indent) and **encrypted attachments** are in; builds green,
+> **663 unit tests + 10 device tests**, signed release verified. What ships now and what is
+> deliberately next: [docs/VERIFICATION-2026-11-15.md](docs/VERIFICATION-2026-11-15.md).
+> Delivery phases: [SPEC.md](SPEC.md).
 
 
 ## What exists today
@@ -26,6 +27,8 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 | ![Editor](docs/screenshots/02-editor-edit.png) | ![Preview](docs/screenshots/03-editor-preview.png) | ![Notes 2](docs/screenshots/04-notes-list-two-notes.png) |
 | **Encrypted backup (SAF)** | **Code workspace (file tree)** | **Kotlin editor (syntax highlighting)** |
 | ![Backup](docs/screenshots/05-settings-backup.png) | ![Code workspace](docs/screenshots/06-code-workspace-empty.png) | ![Code editor](docs/screenshots/07-code-editor-kotlin.png) |
+| **Encrypted attachments in the editor** | **Workspace-wide search** | **Search result opens at the line** |
+| ![Attachments](docs/screenshots/02-editor-edit.png) | ![Search](docs/screenshots/09-code-workspace-search.png) | ![Search result](docs/screenshots/10-code-editor-search-result.png) |
 
 Screenshots are real emulator captures from the instrumented E2E run (debug build with
 `-PallowScreenshots=true`; normal builds set FLAG_SECURE, which makes `screencap` return a
@@ -33,7 +36,7 @@ Screenshots are real emulator captures from the instrumented E2E run (debug buil
 
 ## Verified end to end (2026-11-15)
 
-- 533 unit tests / 0 failures (43 classes); 10 instrumented tests on a real emulator.
+- 663 unit tests / 0 failures (51 classes); 10 instrumented tests on a real emulator.
 - Real Android crypto: setup → BIP-39 phrase → lock/unlock; **password change leaves note
   ciphertext byte-identical**; recovery reset invalidates the old password; a raw SQLite scan
   of the database files (main + WAL + SHM) finds no plaintext title/body/phrase — including a
@@ -44,7 +47,14 @@ Screenshots are real emulator captures from the instrumented E2E run (debug buil
   or 12-word phrase for cross-vault restores.
 - Code editor: pure-Kotlin lexers for Kotlin/Java/JS/TS/Python/JSON/XML/Markdown/Shell
   (200 KB in ~3–8 ms measured), file tree, line numbers, syntax colours, auto-indent,
-  bracket matching, find/replace, go-to-line, undo/redo, font size/wrap, 600 ms autosave.
+  bracket matching, find/replace, go-to-line, undo/redo, font size/wrap, 600 ms autosave,
+  workspace-wide search that opens a file at the matched line, sensitive-flagged copy and an
+  explicit-warning decrypted export.
+- Attachments: images and files imported through the Photo Picker / SAF, encrypted at rest in
+  app-private storage as AES-256-GCM blobs (`NZAT` v1) under the vault VMK with AAD bound to
+  note id + attachment id, SHA-256 verified on read, 10 MiB/file, 100/note, 512 MiB quota;
+  in-memory thumbnails only (no plaintext cache); decrypted export only behind an explicit
+  "writes an UNENCRYPTED copy" confirmation. Backups (v2) carry the attachment bytes.
 - FLAG_SECURE default-on proof; release APK permission dump: only `USE_BIOMETRIC` (+
   androidx.core's signature-level receiver guard) — no network, camera, location or storage.
 - Signed release verified with the independent NoteZero upload key; unsigned-release fallback
@@ -110,6 +120,8 @@ Full instructions (including signed release builds and this machine's exact setu
 | [docs/TESTING.md](docs/TESTING.md) | Test strategy and commands, measured baseline |
 | [docs/CONTRACTS-PHASE3.md](docs/CONTRACTS-PHASE3.md) | Phase-2/3 increment contracts (backup UI, editor engine/UI) |
 | [docs/EDITOR-SPEC.md](docs/EDITOR-SPEC.md) | Code editor languages, tokens, editing behaviour, performance |
+| [docs/CONTRACTS-PHASE4.md](docs/CONTRACTS-PHASE4.md) | Attachment storage + attachments UI + code-polish contracts |
+| [docs/ATTACHMENTS.md](docs/ATTACHMENTS.md) | Encrypted attachment blob format, limits, AAD, lifecycle, threat notes |
 | [docs/VERIFICATION-2026-11-15.md](docs/VERIFICATION-2026-11-15.md) | Phase-1 evidence: builds, 290 unit tests, device E2E, signing, FLAG_SECURE |
 | [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | Dependency policy/inventory (offline-safe only) |
 | [docs/RELEASING.md](docs/RELEASING.md) | Release checklist, F-Droid eligibility |

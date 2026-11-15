@@ -241,6 +241,19 @@ class VaultFlowE2ETest {
                 compose.onAllNodesWithText(CODE_FILE_NAME, substring = true).fetchSemanticsNodes().isNotEmpty()
             }
             saveScreenshot("08-code-workspace-file")
+
+            // ---- 6d. Workspace-wide search: find the secret marker, open at match -------
+            compose.onNodeWithTag("code_search_toggle").performClick()
+            compose.waitForTag("code_search_query", 15_000)
+            compose.onNodeWithTag("code_search_query").performClick()
+            compose.onNodeWithTag("code_search_query").performTextInput(CODE_SECRET_MARKER)
+            compose.waitForTag("code_search_result_row", 20_000)
+            saveScreenshot("09-code-workspace-search")
+            compose.onAllNodesWithTag("code_search_result_row")[0].performClick()
+            compose.waitForTag("code_editor", 20_000)
+            saveScreenshot("10-code-editor-search-result")
+            compose.onNodeWithTag("code_back").performClick()
+            compose.waitForTag("code_workspace", 20_000)
         } finally {
             scenario.close()
         }

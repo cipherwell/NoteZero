@@ -1,8 +1,9 @@
 # NoteZero — architecture
 
-**Status:** Phase 1 (bootstrap / security core) implementation. This document is owned by
-the data layer and describes the shipped architecture; crypto details live in
-[CRYPTO-SPEC.md](CRYPTO-SPEC.md) and the threat model in [THREAT-MODEL.md](THREAT-MODEL.md).
+**Status:** Phase 1–3 shipped; Phase 4 adds encrypted attachments to the data layer. This
+document is owned by the data layer and describes the shipped architecture; crypto details
+live in [CRYPTO-SPEC.md](CRYPTO-SPEC.md), the threat model in
+[THREAT-MODEL.md](THREAT-MODEL.md) and attachment storage in [ATTACHMENTS.md](ATTACHMENTS.md).
 
 NoteZero is an offline-only, zero-knowledge Android notes + code editor. There is exactly one
 process, one vault per device, no accounts, no network permission, and no code path that
@@ -29,11 +30,14 @@ com.cipherwell.notezero
 │   ├── Entities.kt             ItemEntity / FolderEntity / VaultMetaEntity (redacted columns)
 │   ├── Daos.kt                 ItemDao / FolderDao / VaultMetaDao (structural queries only)
 │   ├── BinaryCodec.kt          bounds-checked big-endian reader/writer for envelope payloads
-│   ├── ItemCodec.kt            versioned item payload (inside the AEAD envelope)
+│   ├── ItemCodec.kt            versioned item payload (v2: attachment refs; v1 still decoded)
 │   ├── FolderCodec.kt          versioned folder payload (inside the AEAD envelope)
+│   ├── AttachmentBlob.kt       `NZAT` on-disk blob format: AEAD + bounded stream reader (pure JVM)
+│   ├── EncryptedNoteRepository.kt also owns the attachment store in
+│   │                           `filesDir/attachments/<id>.nzb`, quota, lifecycle, backup v2
 │   └── VaultPreferences.kt     DataStore: non-secret UI prefs only (theme, auto-lock minutes)
 ├── backup/
-│   └── BackupFormat.kt         stream-based, authenticated backup envelope (pure JVM)
+│   └── BackupFormat.kt         stream-based, authenticated backup envelope (v2; reads v1)
 └── ui/                         Compose UI (shell + notes/editor + theme tokens)
     ├── backup/                 SAF backup UI: BackupFlowController (unit-testable state
     │                           machine + external-activity bracket), BackupFlowViewModel
@@ -87,6 +91,13 @@ needs Android (Context, Room, DataStore, Keystore).
    accidental exception dump prints ids/counts only.
 7. **Deterministic, testable time.** All timestamps come from an injectable `clock`, which
    makes autosave versioning, duplicate detection and auto-lock deterministic in tests.
+8. **Attachments never leak plaintext.** Attachment bytes are AES-256-GCM `NZAT` blobs in
+   `filesDir/attachments/<id>.nzb` under the VMK, AAD-bound to `(noteId, attachmentId)`; the
+   item envelope carries only the (also encrypted) ref metadata. Reads verify AEAD + size +
+   SHA-256 and fail closed counted; imports enforce 10 MiB/file / 100-per-note / 512 MiB
+   quota while streaming and are atomic (temp+rename, ref only after the blob). Trash keeps
+   blobs, delete-forever/empty-trash removes them, and an unlock-time sweep removes only
+   unreferenced blobs after a fully clean index load. See [ATTACHMENTS.md](ATTACHMENTS.md).
 
 ## 3. Runtime data flow
 
@@ -103,6 +114,10 @@ unlock(password) ───────────────────► de
                                       (skip+count corrupt) → publish index → UNLOCKED
 ```
 
+- **Attachment blob flow:** `importAttachment` reads the source up to 10 MiB, encrypts to a
+  temp `.nzb`, renames it, then persists the ref inside the item envelope; `attachmentBytes`
+  decrypts + verifies (AEAD, size, SHA-256) in memory and never caches; `exportAttachment` is
+  the only plaintext write path and only after an explicit user confirmation.
 - **In-memory index** = `LinkedHashMap<String, Item>` + `LinkedHashMap<String, Folder>`,
   published as immutable lists sorted deterministically (items: `updatedAt` desc, id;
   folders: `sortOrder`, name, id). The UI applies `ItemQueries.sort/filter` on top for
@@ -181,7 +196,14 @@ Import requires an unlocked target vault (it re-encrypts all imported items unde
 VMK and the local AAD), verifies/authenticates the whole file before the first write, then
 writes every new row in one Room transaction. Duplicate policy is item-id + `updatedAt`
 equal ⇒ counted as duplicate; same id with different `updatedAt` ⇒ conflict, never
-overwritten (counted as skipped). Full wire format: [BACKUP-FORMAT.md](BACKUP-FORMAT.md).
+overwritten (counted as skipped). 
+
+**Format v2** also carries the attachment blobs: each blob is decrypted with the source VMK,
+SHA-256/size verified against its ref, re-encrypted under the local VMK and written via temp
+files that are renamed only after the DB transaction commits. Blobs dedupe by attachment id;
+missing/invalid blobs are counted as `attachmentsSkipped` and never fail the note. Format v1
+files still import (zero attachment counts). The writer always emits v2. Full wire format:
+[BACKUP-FORMAT.md](BACKUP-FORMAT.md); attachment semantics: [ATTACHMENTS.md](ATTACHMENTS.md).
 
 The UI flow lives in `ui/backup/` and `ui/screens/settings/` (Settings → "Data & backup"):
 export opens SAF `CreateDocument` (MIME `application/octet-stream`, suggested name
@@ -215,6 +237,8 @@ pick the file again. See [BACKUP-FORMAT.md](BACKUP-FORMAT.md) §8.
 | Backup envelope | `data/BackupFormatTest` — real AES-GCM, modes, header binding, tamper/truncation | plain JUnit |
 | Backup UI flow | `ui.backup/BackupFlowControllerTest` — export/import state machine, credential cap, lock resume; `ui.backup/BackupSectionContentTest` — every state rendering | plain JUnit + Robolectric Compose |
 | External-activity lock | `data/ExternalActivityLockTest` — picker background deferral, end-while-background, idle-timeout backstop | Robolectric + in-memory Room, real crypto |
+| Attachment blob format | `data/AttachmentBlobTest` — `NZAT` layout, AAD binding, tamper/truncation, bounded stream reader, SHA-256 vectors | plain JUnit (pure JVM) |
+| Attachment storage | `data/EncryptedNoteRepositoryAttachmentsTest` — round trip, at-rest plaintext scan, size/count/quota, AAD swaps, tamper+SHA/size mismatch, trash-vs-delete lifecycle, orphan sweep (+corrupt-row guard), locked fail-closed, export, backup v2 same/cross-vault, v1 fixture, missing-blob skip | Robolectric + in-memory Room, real crypto |
 | Repository end-to-end | `data/EncryptedNoteRepositoryTest` — setup/unlock/lock, recovery, AAD swaps, CRUD/folders, auto-lock, redaction, backup import/export | Robolectric + in-memory/on-disk Room, real crypto |
 
 The repository test injects a `NoteZeroDatabase`, a `VaultPreferences` built on an isolated
@@ -264,6 +288,17 @@ iterations (`10_000`) so the suite stays fast; production defaults remain 600 00
   wiped; the 12-word phrase arrives as `List<String>` (immutable, JVM-interned strings in
   some cases), so the repository cannot wipe it — the recovery UI owns that lifetime and
   must not persist/hoard it.
+- **Attachment refs are repository-owned.** `saveItem` preserves the stored attachment list;
+  only `importAttachment`/`deleteAttachment`/backup restore mutate it. This makes editor
+  autosave races safe (a stale copy can neither add nor drop a ref) at the cost of the UI
+  never being able to edit refs directly — documented in [ATTACHMENTS.md](ATTACHMENTS.md) §3.
+- **Per-note count and vault quota share `AttachmentError.QUOTA_EXCEEDED`** because the
+  frozen error enum has no separate "too many" kind; the UI message differentiates by the
+  documented limits (100 per note / 512 MiB vault).
+- **The v2 backup keeps the existing 64 MiB file cap** (`MAX_BACKUP_BYTES`) so the OOM guard
+  stays intact; attachment bytes count toward it and an over-cap vault fails the export
+  cleanly (no partial file, nothing silently dropped). Chunked/streamed backups are the
+  follow-up if the 512 MiB attachment quota is ever fully used.
 - **Trash retention is policy, not a background job:** `ItemQueries.DEFAULT_TRASH_RETENTION_DAYS`
   (30), `trashExpiry`, `isTrashExpired`, `expiredTrashIds` are provided for the notes UI /
   a future WorkManager job; the repository only exposes `emptyTrash()`.

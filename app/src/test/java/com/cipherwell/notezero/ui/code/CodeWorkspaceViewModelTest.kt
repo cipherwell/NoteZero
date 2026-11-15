@@ -233,4 +233,128 @@ class CodeWorkspaceViewModelTest {
         assertFalse(state.isEmpty)
         assertEquals(listOf("docs"), state.moveTargets.map { it.folder.id })
     }
+
+    // ---- Workspace search ----------------------------------------------------
+
+    @Test
+    fun `search toggle opens the bar and a query returns hits with line and column`() = runTest(dispatcher) {
+        repository.seedCodeFile(
+            id = "f1",
+            title = "Main.kt",
+            body = "fun main() {\n    val needle = 1\n}",
+        )
+        repository.seedCodeFile(id = "f2", title = "Other.kt", body = "val other = 2")
+        val model = viewModel()
+        advanceUntilIdle()
+
+        assertFalse(model.uiState.value.searchVisible)
+        model.toggleSearch()
+        advanceUntilIdle()
+        assertTrue(model.uiState.value.searchVisible)
+        assertFalse("no query yet, the tree stays visible", model.uiState.value.searchActive)
+
+        model.setSearchQuery("needle")
+        advanceUntilIdle()
+        val state = model.uiState.value
+        assertTrue(state.searchActive)
+        assertEquals(1, state.searchResults.size)
+        val hit = state.searchResults.single()
+        assertEquals("f1", hit.itemId)
+        assertEquals("Main.kt", hit.fileName)
+        assertEquals(2, hit.line)
+        assertEquals(9, hit.column)
+        assertEquals("val needle = 1", hit.snippet)
+        // Search never mutates the vault.
+        assertEquals(0, repository.saveCount)
+    }
+
+    @Test
+    fun `search case toggle switches between insensitive and sensitive hits`() = runTest(dispatcher) {
+        repository.seedCodeFile(id = "f1", title = "Main.kt", body = "Needle\nneedle")
+        val model = viewModel()
+        advanceUntilIdle()
+        model.toggleSearch()
+        model.setSearchQuery("Needle")
+        advanceUntilIdle()
+        assertEquals(2, model.uiState.value.searchResults.size)
+        assertFalse(model.uiState.value.searchCaseSensitive)
+
+        model.toggleSearchCaseSensitive()
+        advanceUntilIdle()
+        assertTrue(model.uiState.value.searchCaseSensitive)
+        assertEquals(1, model.uiState.value.searchResults.size)
+        assertEquals(1, model.uiState.value.searchResults.single().line)
+    }
+
+    @Test
+    fun `closing search discards the query and results`() = runTest(dispatcher) {
+        repository.seedCodeFile(id = "f1", title = "Main.kt", body = "target")
+        val model = viewModel()
+        advanceUntilIdle()
+        model.toggleSearch()
+        model.setSearchQuery("target")
+        advanceUntilIdle()
+        assertEquals(1, model.uiState.value.searchResults.size)
+
+        model.closeSearch()
+        advanceUntilIdle()
+        val state = model.uiState.value
+        assertFalse(state.searchVisible)
+        assertEquals("", state.searchQuery)
+        assertTrue(state.searchResults.isEmpty())
+        assertFalse(state.searchActive)
+
+        // The toggle is a close action while the bar is open.
+        model.toggleSearch()
+        advanceUntilIdle()
+        assertTrue(model.uiState.value.searchVisible)
+        model.toggleSearch()
+        advanceUntilIdle()
+        assertFalse(model.uiState.value.searchVisible)
+    }
+
+    @Test
+    fun `search results follow item updates, skip trashed files and stay bounded`() = runTest(dispatcher) {
+        val trashed = repository.seedCodeFile(id = "t1", title = "Gone.kt", body = "target", trashed = true)
+        repository.seedCodeFile(id = "f1", title = "Main.kt", body = "target")
+        val model = viewModel()
+        advanceUntilIdle()
+        model.toggleSearch()
+        model.setSearchQuery("target")
+        advanceUntilIdle()
+        assertEquals(1, model.uiState.value.searchResults.size)
+        assertEquals("f1", model.uiState.value.searchResults.single().itemId)
+
+        // A decrypted-index update is reflected without re-opening the screen.
+        repository.setItems(
+            repository.items.value.map { item ->
+                if (item.id == trashed.id) item.copy(trashed = false) else item
+            } + com.cipherwell.notezero.model.Item(
+                id = "f2",
+                kind = ItemKind.CODE_FILE,
+                title = "Second.kt",
+                body = "target\ntarget",
+            ),
+        )
+        advanceUntilIdle()
+        assertEquals(4, model.uiState.value.searchResults.size)
+    }
+
+    @Test
+    fun `locked vault exposes no search results`() = runTest(dispatcher) {
+        repository.seedCodeFile(id = "f1", title = "Main.kt", body = "target")
+        val model = viewModel()
+        advanceUntilIdle()
+        model.toggleSearch()
+        model.setSearchQuery("target")
+        advanceUntilIdle()
+        assertEquals(1, model.uiState.value.searchResults.size)
+
+        repository.setStatus(VaultStatus.LOCKED)
+        advanceUntilIdle()
+        val state = model.uiState.value
+        assertFalse(state.isUnlocked)
+        assertTrue(state.searchResults.isEmpty())
+        assertEquals("target", state.searchQuery)
+    }
 }

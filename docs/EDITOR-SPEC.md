@@ -219,7 +219,7 @@ thread for large documents anyway.
 
 ## 8. Test evidence
 
-`app/src/test/java/com/cipherwell/notezero/code/` — 126 pure-JVM JUnit tests, 0 failures:
+`app/src/test/java/com/cipherwell/notezero/code/` — 139 pure-JVM JUnit tests, 0 failures:
 
 | Class | Tests | Covers |
 |---|---|---|
@@ -229,6 +229,7 @@ thread for large documents anyway.
 | `LexerPerformanceTest` | 3 | 200 KB Kotlin / JS / XML under the asserted bound |
 | `LineIndexTest` | 8 | empty text, trailing newline, CRLF, clamping, mismatched text argument |
 | `CodeEditingTest` | 37 | indentUnit/autoIndent (braces, Python `:`, XML tags, blank lines, tabs, CRLF), indent/outdent selection mapping incl. clamping bug, bracket matching (nesting, strings, comments, both cursor conventions), find/replace literal + case modes + limit, go-to-line clamp, TextRange helpers |
+| `CodeSearchTest` | 13 | title/body hits, 1-based line/column, snippets, multi-line order, case toggle, limit (`0`/negative), trashed + non-code skipped, CRLF/trailing-newline, long-line windowing, tabs, hostile input never throwing |
 
 No test is `assertTrue(true)`: every assertion checks a concrete token span/type, edited text,
 selection mapping or measured number.
@@ -253,3 +254,128 @@ selection mapping or measured number.
   colons); the UI may ignore the suggestion in that rare case.
 - Theme colours are not part of this package: they live in `ui/code/CodeSyntaxPalette` and are
   derived from `MaterialTheme`, so no hex literals leak out of `ui/theme`.
+
+## 10. Polish extensions (Phase 4, `docs/CONTRACTS-PHASE4.md` §C)
+
+Owner: `code-polish`. Additive to the frozen Phase 3 engine: no existing signature changed and
+no new dependency. All new pure logic lives in `code/CodeSearch.kt`; everything else is
+`ui/code/**`.
+
+### 10.1 Workspace search (`code/CodeSearch.kt`)
+
+```kotlin
+data class CodeSearchMatch(
+    val itemId: String,
+    val fileName: String,
+    val line: Int,     // 1-based
+    val column: Int,   // 1-based UTF-16 code units within the line, tabs = 1
+    val snippet: String,
+)
+
+object CodeSearch {
+    const val DEFAULT_LIMIT: Int = 200
+    const val MAX_SNIPPET_CHARS: Int = 160
+    fun search(items: List<Item>, query: String, caseSensitive: Boolean, limit: Int = DEFAULT_LIMIT): List<CodeSearchMatch>
+}
+```
+
+- Searches **file names (titles) and bodies** of `ItemKind.CODE_FILE` items only; trashed
+  items and notes are never searched. Matching is literal (never a regex/pattern) and reuses
+  `CodeEditing.findMatches`, so case-insensitivity is `regionMatches(ignoreCase = true)`.
+- A name hit is reported as line 1 with its column inside the name and the name as snippet; it
+  appears before that same file's body hits. Body hits are ascending, non-overlapping.
+- `line`/`column` feed the editor's existing 1-based `goToLine` unchanged. Line numbers come
+  from `LineIndex`, so CRLF counts as one break, a trailing `\n` adds an empty last line, and
+  the column excludes the terminator.
+- Snippet = trimmed line content around the hit, `\r` replaced by spaces, never containing
+  `\n`, at most `MAX_SNIPPET_CHARS` (+ one ellipsis on each cut edge). Lines longer than that
+  are windowed so the hit always stays visible; a surrogate pair is never split.
+- Bounded and side-effect free: empty query, `limit <= 0` or an empty item list returns empty;
+  at most `limit` hits; one `LineIndex` per file and one literal scan per name/body (no regex,
+  no I/O, no logging). **Never throws** — a defensive `catch (Exception)` returns the hits
+  accumulated so far, so hostile restored content cannot take the workspace down.
+
+`ui/code/CodeWorkspaceViewModel` owns only the non-secret search chrome
+(`searchVisible`, `searchQuery`, `searchCaseSensitive`) and derives `searchResults` inside its
+existing `combine`, so an item update (autosave, rename, unlock/lock) refreshes results with no
+extra subscription. A blank query keeps the tree visible (`searchActive = false`); locking the
+vault empties the results while the query string survives until the bar is closed.
+
+### 10.2 Search UI (`CodeWorkspaceScreen`, `CodeSearchBar.kt`)
+
+- Top-bar toggle `code_search_toggle`; the search surface shows `code_search_query` (mono,
+  single line), `code_search_case` (Aa chip), a close icon and `code_search_status`
+  ("N matches" / "No matches" / "Type to search"; never echoes the query).
+- While a query is active the tree is replaced by `code_search_results` with one
+  `code_search_result_row` per hit (file name, `line:column`, snippet). Tapping a row opens the
+  file at that line. The back arrow closes the search bar first, then leaves the workspace.
+- No `rememberSaveable` for search state: closing the bar discards query and results, so
+  decrypted snippets never outlive the visible surface.
+
+### 10.3 Open-at-line
+
+`CodeEditorScreen(repository, itemId, onBack, initialLine: Int? = null, openToken: Int = 0,
+exportTarget: …)`; `CodeEditorViewModel`/Factory take `initialLine` (1-based). The draft is
+loaded with the caret on that line when the file opens; `openToken` bumped on every workspace
+open re-applies a new target line even though the per-file ViewModel survives, via a
+`LaunchedEffect` once the draft is no longer loading. `State.navigationSeq` is bumped by
+`goToLine`/open-at-line and consumed once by `CodeEditorField`, which scrolls the caret line
+into view (never on ordinary typing/scrolling). Out-of-range lines are ignored.
+
+### 10.4 Copy / export (memory, clipboard or the user's own file only)
+
+- `code_copy`: `CodeEditorViewModel.copySelectionOrAll()` returns the normalized selection,
+  else the whole draft, else `""` (nothing loaded). The UI writes it through
+  `ui/components/common/SensitiveClipboard`, which marks the clip with
+  `ClipDescription.EXTRA_IS_SENSITIVE` (backported extra below API 33). No file is written and
+  nothing is logged. The ViewModel itself has no Android clipboard imports.
+- `code_export`: explicit gate first — `code_export_confirm` / `code_export_cancel` in the
+  "Export an UNENCRYPTED copy?" dialog (`code_export_dialog`) — then SAF
+  `ActivityResultContracts.CreateDocument("text/plain")` with the sanitized current file name
+  (`sanitizeExportName`: path separators/control characters → `_`, blank → `code.txt`).
+  The whole current draft is written UTF-8 to the user-chosen `content://` URI (`wt`, with a
+  plain-write fallback); a cancelled picker writes nothing. The launch is bracketed with
+  `NoteRepository.beginExternalActivity()`/`endExternalActivity()` (decision #13) so the picker
+  does not lock the vault, and a missing SAF handler settles the bracket without exporting.
+  This is the only plaintext-to-disk path in the code editor and it requires the confirmation.
+- Both live in a dedicated second action row under the main toolbar (`EditorActionBar`) so the
+  find/font/wrap/preview controls keep their positions and E2E taps.
+
+### 10.5 Multi-line indent
+
+- `code_indent_increase` / `code_indent_decrease` call
+  `CodeEditorViewModel.indentSelection()` / `outdentSelection()`, which delegate to the frozen
+  `CodeEditing.indentSelection(text, selection, outdent, useTabs = false, tabWidth = 4)` and
+  apply the returned text **and mapped selection** through the normal edit path (undo snapshot,
+  dirty flag, 600 ms autosave, find-match refresh). An empty selection indents the caret's line;
+  an outdent that changes nothing is a no-op (no undo entry, no dirty flag, no save).
+- `Tab` / `Shift+Tab` are intercepted in `CodeEditorField` with
+  `Modifier.onPreviewKeyEvent` (KeyDown only) and forwarded to the same two actions, so Tab
+  indents instead of moving focus. The auto-indent on Enter is untouched.
+- Indentation is spaces (4) as before; the engine still supports tabs for future preferences.
+
+### 10.6 Test evidence (this increment)
+
+`app/src/test/java/com/cipherwell/notezero/code/` — `CodeSearchTest` 13 tests.
+`app/src/test/java/com/cipherwell/notezero/ui/code/` — 100 Robolectric/JUnit tests, 0 failures:
+`CodeEditorScreenTest` 15 (adds clipboard sensitive flag + selection copy, export
+confirm/cancel gate, toolbar indent/outdent mutation, Tab indent, initial line),
+`CodeWorkspaceScreenTest` 16 (search bar/results/case/name hits/no hits/back-closes),
+`CodeEditorViewModelTest` 34 (adds initialLine, navigationSeq, indent/outdent mappings, copy
+payload), `CodeWorkspaceViewModelTest` 17 (search state + results/lock/bounds),
+plus `CodeTreeTest` 10, `CodeEditorPrefsTest` 5, `CodeExportTest` 3.
+
+Run: `JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:testDebugUnitTest --tests
+"com.cipherwell.notezero.code.*" --tests "com.cipherwell.notezero.ui.code.*" --console=plain`
+(no sleeps; ViewModel tests use `StandardTestDispatcher` virtual time, UI tests use the Compose
+test clock only).
+
+### 10.7 Known limitations
+
+- Search runs on the flow-collection (main) dispatcher against the decrypted in-memory index;
+  the `limit` (200) and the literal scan keep it well under a frame for the MVP corpus, but a
+  megabyte-scale vault would warrant moving it to a background dispatcher.
+- The search bar does not request focus automatically (avoids keyboard churn); the user taps
+  the field.
+- `Tab`/`Shift+Tab` require a hardware/IME key event; soft keyboards have no Tab key, so the
+  toolbar action row is the touch path.

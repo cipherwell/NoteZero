@@ -149,6 +149,48 @@ fun CodeConfirmDialog(
 }
 
 /**
+ * Explicit gate for the "Export decrypted copy" action: the user must acknowledge that the
+ * copy is written UNENCRYPTED outside the vault before the SAF picker is launched.
+ *
+ * The dedicated [CodeTags.EXPORT_CONFIRM]/[CodeTags.EXPORT_CANCEL] tags are contract-stable —
+ * they are deliberately not the shared dialog tags, because this warning is a security gate.
+ */
+@Composable
+fun CodeExportConfirmDialog(
+    fileName: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.testTag(CodeTags.EXPORT_DIALOG),
+        title = { Text("Export an UNENCRYPTED copy?", style = NoteZeroType.Heading) },
+        text = {
+            Text(
+                text = "This writes a plaintext copy of \"$fileName\" outside the vault, where " +
+                    "other apps, cloud backups and anyone with the file can read it. The " +
+                    "encrypted vault copy stays unchanged.",
+                style = NoteZeroType.Callout,
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                modifier = Modifier.testTag(CodeTags.EXPORT_CONFIRM),
+            ) {
+                Text("Export unencrypted copy", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.testTag(CodeTags.EXPORT_CANCEL),
+            ) { Text("Cancel") }
+        },
+    )
+}
+
+/**
  * Folder picker for moving a code file. "Vault root" moves the file out of any folder;
  * rows are indented by tree depth.
  */

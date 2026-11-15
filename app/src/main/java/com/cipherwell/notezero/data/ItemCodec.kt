@@ -1,5 +1,7 @@
 package com.cipherwell.notezero.data
 
+import com.cipherwell.notezero.crypto.Encoding
+import com.cipherwell.notezero.model.AttachmentRef
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
 
@@ -7,15 +9,16 @@ import com.cipherwell.notezero.model.ItemKind
  * Versioned binary payload stored **inside** the AES-256-GCM item envelope.
  *
  * Everything that is content (title, body, tags, folder reference, pinned/favourite/trash
- * flags, edit version) lives here, i.e. inside the ciphertext; the Room row only carries
- * structural columns. The item id and [ItemKind] are duplicated here deliberately: the
- * AAD binds the row's id/kind and this payload carries them too, so a row whose plaintext
- * structural columns were tampered with is detected as corrupt instead of surfaced.
+ * flags, edit version, attachment references) lives here, i.e. inside the ciphertext; the
+ * Room row only carries structural columns. The item id and [ItemKind] are duplicated here
+ * deliberately: the AAD binds the row's id/kind and this payload carries them too, so a row
+ * whose plaintext structural columns were tampered with is detected as corrupt instead of
+ * surfaced.
  *
  * Encoding (all integers big-endian):
  * ```
  * magic        4 bytes  "NZIT"
- * envelope     1 byte   1
+ * envelope     1 byte   1 or 2 (2 is written; 1 is still decoded for existing vaults)
  * kind         1 byte   ItemKind ordinal
  * flags        1 byte   bit0 folderId present, bit1 pinned, bit2 favourite, bit3 trashed
  * createdAt    8 bytes  i64 epoch millis
@@ -27,14 +30,31 @@ import com.cipherwell.notezero.model.ItemKind
  * tagCount     2 bytes  u16 (<= MAX_TAGS)
  *   tagLen     2 bytes  u16 each, then tag UTF-8 bytes
  * folderIdLen  2 bytes  u16 when flag bit0 is set, then folder id UTF-8 bytes
+ * -- envelope version 2 appends the attachment list: --
+ * attachCount  2 bytes  u16 (<= AttachmentLimits.MAX_ATTACHMENTS_PER_NOTE)
+ *   idLen      2 bytes  u16 (1..MAX_ATTACHMENT_ID_BYTES) + id UTF-8
+ *   nameLen    4 bytes  u32 (1..MAX_ATTACHMENT_NAME_BYTES) + display name UTF-8
+ *   mimeLen    2 bytes  u16 (1..MAX_ATTACHMENT_MIME_BYTES) + mime type UTF-8
+ *   size       8 bytes  i64 (0..AttachmentLimits.MAX_ATTACHMENT_BYTES)
+ *   createdAt  8 bytes  i64 epoch millis (>= 0)
+ *   sha256    32 bytes  raw SHA-256 (lowercase hex in the model)
  * ```
+ * A version-1 payload has no attachment bytes after the folder id; it decodes to an item
+ * with an empty attachment list (no re-encryption/migration is needed: the next save
+ * writes version 2).
+ *
  * Decoding fails closed: [decode] returns null on unknown magic/version/flags, truncation,
- * oversized fields or trailing bytes. It never throws and never allocates more than
- * [MAX_PAYLOAD_BYTES].
+ * oversized fields, bad attachment metadata or trailing bytes. It never throws and never
+ * allocates more than [MAX_PAYLOAD_BYTES].
  */
 object ItemCodec {
 
-    const val ENVELOPE_VERSION: Int = 1
+    /** Version written by this implementation. */
+    const val ENVELOPE_VERSION: Int = 2
+
+    /** Oldest payload version still accepted (pre-attachments vaults). */
+    const val MIN_DECODE_VERSION: Int = 1
+
     const val MAX_PAYLOAD_BYTES: Int = MAX_DECODED_PAYLOAD_BYTES
     const val MAX_TITLE_BYTES: Int = 8 * 1024
     const val MAX_BODY_BYTES: Int = 16 * 1024 * 1024
@@ -42,6 +62,14 @@ object ItemCodec {
     const val MAX_FOLDER_ID_BYTES: Int = 128
     const val MAX_TAGS: Int = 256
     const val MAX_TAG_BYTES: Int = 512
+
+    const val MAX_ATTACHMENT_NAME_BYTES: Int = 1024
+    const val MAX_ATTACHMENT_MIME_BYTES: Int = 256
+    const val SHA256_HEX_CHARS: Int = 64
+    const val SHA256_RAW_BYTES: Int = 32
+
+    /** Attachment count limit of one item payload (same value as the repository limit). */
+    const val MAX_ATTACHMENTS_PER_ITEM: Int = AttachmentLimits.MAX_ATTACHMENTS_PER_NOTE
 
     private const val MAGIC: Long = 0x4E5A4954L // "NZIT"
     private const val FLAG_FOLDER = 0x01
@@ -60,6 +88,7 @@ object ItemCodec {
         require(item.tags.size <= MAX_TAGS) { "too many tags" }
         val folderId = item.folderId?.toByteArray(Charsets.UTF_8)
         require(folderId == null || folderId.size <= MAX_FOLDER_ID_BYTES) { "folder id exceeds limit" }
+        require(item.attachments.size <= MAX_ATTACHMENTS_PER_ITEM) { "too many attachments" }
 
         var flags = 0
         if (folderId != null) flags = flags or FLAG_FOLDER
@@ -67,7 +96,12 @@ object ItemCodec {
         if (item.favorite) flags = flags or FLAG_FAVORITE
         if (item.trashed) flags = flags or FLAG_TRASHED
 
-        return BinaryWriter(title.size + body.size + 256).apply {
+        val attachmentBytes = item.attachments.sumOf { attachment ->
+            attachment.id.toByteArray(Charsets.UTF_8).size +
+                attachment.displayName.toByteArray(Charsets.UTF_8).size +
+                attachment.mimeType.toByteArray(Charsets.UTF_8).size + 64
+        }
+        return BinaryWriter(title.size + body.size + attachmentBytes + 256).apply {
             u32(MAGIC)
             u8(ENVELOPE_VERSION)
             u8(item.kind.ordinal)
@@ -83,6 +117,33 @@ object ItemCodec {
             u16(item.tags.size)
             for (tag in item.tags) lenPrefixedU16(tag.toByteArray(Charsets.UTF_8), MAX_TAG_BYTES)
             if (folderId != null) lenPrefixedU16(folderId, MAX_FOLDER_ID_BYTES)
+            u16(item.attachments.size)
+            for (attachment in item.attachments) {
+                val attachmentId = attachment.id.toByteArray(Charsets.UTF_8)
+                require(attachmentId.isNotEmpty() && attachmentId.size <= MAX_ID_BYTES) {
+                    "invalid attachment id"
+                }
+                val name = attachment.displayName.toByteArray(Charsets.UTF_8)
+                require(name.isNotEmpty() && name.size <= MAX_ATTACHMENT_NAME_BYTES) {
+                    "attachment name exceeds limit"
+                }
+                val mime = attachment.mimeType.toByteArray(Charsets.UTF_8)
+                require(mime.isNotEmpty() && mime.size <= MAX_ATTACHMENT_MIME_BYTES) {
+                    "attachment mime type exceeds limit"
+                }
+                require(attachment.sizeBytes in 0..AttachmentLimits.MAX_ATTACHMENT_BYTES) {
+                    "attachment size out of range"
+                }
+                require(attachment.createdAt >= 0L) { "attachment createdAt out of range" }
+                val sha256 = decodeSha256Hex(attachment.sha256)
+                    ?: throw IllegalArgumentException("invalid attachment sha256")
+                lenPrefixedU16(attachmentId, MAX_ID_BYTES)
+                lenPrefixedU32(name, MAX_ATTACHMENT_NAME_BYTES)
+                lenPrefixedU16(mime, MAX_ATTACHMENT_MIME_BYTES)
+                u64(attachment.sizeBytes)
+                u64(attachment.createdAt)
+                bytes(sha256)
+            }
         }.toByteArray()
     }
 
@@ -91,7 +152,8 @@ object ItemCodec {
         return try {
             val reader = BinaryReader(payload, MAX_PAYLOAD_BYTES)
             if (reader.u32() != MAGIC) return null
-            if (reader.u8() != ENVELOPE_VERSION) return null
+            val envelopeVersion = reader.u8()
+            if (envelopeVersion !in MIN_DECODE_VERSION..ENVELOPE_VERSION) return null
             val kindOrdinal = reader.u8()
             val kind = ItemKind.entries.getOrNull(kindOrdinal) ?: return null
             val flags = reader.u8()
@@ -112,6 +174,36 @@ object ItemCodec {
             } else {
                 null
             }
+            val attachments = if (envelopeVersion >= 2) {
+                val attachmentCount = reader.u16()
+                if (attachmentCount > MAX_ATTACHMENTS_PER_ITEM) return null
+                val list = ArrayList<AttachmentRef>(attachmentCount)
+                repeat(attachmentCount) {
+                    val attachmentId = reader.utf8LenPrefixedU16(MAX_ID_BYTES)
+                    if (attachmentId.isEmpty()) return null
+                    val displayName = reader.utf8LenPrefixedU32(MAX_ATTACHMENT_NAME_BYTES)
+                    if (displayName.isEmpty()) return null
+                    val mimeType = reader.utf8LenPrefixedU16(MAX_ATTACHMENT_MIME_BYTES)
+                    if (mimeType.isEmpty()) return null
+                    val sizeBytes = reader.u64()
+                    if (sizeBytes < 0L || sizeBytes > AttachmentLimits.MAX_ATTACHMENT_BYTES) return null
+                    val attachmentCreatedAt = reader.u64()
+                    if (attachmentCreatedAt < 0L) return null
+                    list.add(
+                        AttachmentRef(
+                            id = attachmentId,
+                            displayName = displayName,
+                            mimeType = mimeType,
+                            sizeBytes = sizeBytes,
+                            createdAt = attachmentCreatedAt,
+                            sha256 = Encoding.toHex(reader.bytes(SHA256_RAW_BYTES)),
+                        ),
+                    )
+                }
+                list
+            } else {
+                emptyList()
+            }
             reader.requireFullyConsumed()
             Item(
                 id = id,
@@ -126,9 +218,17 @@ object ItemCodec {
                 createdAt = createdAt,
                 updatedAt = updatedAt,
                 version = version,
+                attachments = attachments,
             )
         } catch (t: Throwable) {
             null
         }
+    }
+
+    /** Strict lowercase-hex SHA-256 decoding; null when it is not exactly 64 hex chars. */
+    private fun decodeSha256Hex(hex: String): ByteArray? {
+        if (hex.length != SHA256_HEX_CHARS) return null
+        if (!hex.all { it in '0'..'9' || it in 'a'..'f' }) return null
+        return Encoding.fromHex(hex)
     }
 }

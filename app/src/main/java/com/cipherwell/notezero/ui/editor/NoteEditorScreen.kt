@@ -32,6 +32,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,9 +47,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cipherwell.notezero.data.NoteRepository
+import com.cipherwell.notezero.model.AttachmentRef
 import com.cipherwell.notezero.model.BlockDocument
 import com.cipherwell.notezero.model.ItemKind
 import com.cipherwell.notezero.model.MarkdownBlockCodec
+import com.cipherwell.notezero.ui.attachments.AttachmentController
+import com.cipherwell.notezero.ui.attachments.AttachmentStrip
+import com.cipherwell.notezero.ui.attachments.AttachmentViewerScreen
 import com.cipherwell.notezero.ui.theme.NoteZeroSpacing
 import com.cipherwell.notezero.ui.theme.NoteZeroType
 import kotlinx.coroutines.launch
@@ -58,6 +63,11 @@ import kotlinx.coroutines.launch
  * debounce) and an explicit save when leaving. The preview is rendered from
  * [MarkdownBlockCodec]; checklist taps rewrite the Markdown source (no side table).
  *
+ * The attachment strip sits between the title and the body. Its [AttachmentController]
+ * owns the encrypted import/view/export/delete flow and brackets every system picker
+ * with the repository's external-activity deferral; tests may inject one, otherwise the
+ * screen creates and closes its own.
+ *
  * All decrypted content stays in [EditorViewModel] memory; this composable never logs it.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,6 +76,7 @@ fun NoteEditorScreen(
     repository: NoteRepository,
     itemId: String,
     onClose: () -> Unit,
+    attachmentController: AttachmentController? = null,
 ) {
     val viewModel: EditorViewModel = viewModel(
         key = "editor_$itemId",
@@ -73,6 +84,18 @@ fun NoteEditorScreen(
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+
+    val ownedAttachmentController = remember(repository) { AttachmentController(repository) }
+    val attachmentsController = attachmentController ?: ownedAttachmentController
+    DisposableEffect(ownedAttachmentController) {
+        onDispose { ownedAttachmentController.close() }
+    }
+
+    val items by repository.items.collectAsStateWithLifecycle()
+    val attachments: List<AttachmentRef> = remember(items, itemId) {
+        items.firstOrNull { it.id == itemId }?.attachments.orEmpty()
+    }
+    var viewingAttachment by remember { mutableStateOf<AttachmentRef?>(null) }
 
     var previewMode by rememberSaveable { mutableStateOf(false) }
     var monospace by rememberSaveable { mutableStateOf(false) }
@@ -91,6 +114,7 @@ fun NoteEditorScreen(
 
     BackHandler { leave() }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
@@ -199,6 +223,13 @@ fun NoteEditorScreen(
                             .testTag("editor_title"),
                     )
 
+                    AttachmentStrip(
+                        controller = attachmentsController,
+                        noteId = itemId,
+                        attachments = attachments,
+                        onOpen = { viewingAttachment = it },
+                    )
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -285,6 +316,18 @@ fun NoteEditorScreen(
             }
         }
     }
+
+    // Full-screen viewer overlay: covers the editor; it is not a second route.
+    val openAttachment = viewingAttachment
+    if (openAttachment != null && attachments.any { it.id == openAttachment.id }) {
+        AttachmentViewerScreen(
+            controller = attachmentsController,
+            noteId = itemId,
+            attachment = openAttachment,
+            onClose = { viewingAttachment = null },
+        )
+    }
+    } // end of the editor's overlay Box
 }
 
 @Composable

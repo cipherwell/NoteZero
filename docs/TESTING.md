@@ -58,18 +58,22 @@ Commands:
   logs, auto-lock triggers on background/timeout; the SAF picker background is deferred
   without cancelling the idle timeout and later background locks still lock.
 
-## Measured baseline (2026-11-15, Phase 2 complete + Phase 3 start)
+## Measured baseline (2026-11-15, Phases 1–3 + Phase 4 attachments)
 
 | Suite | Command | Result |
 |---|---|---|
-| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **533 tests / 0 failures / 0 errors / 0 skipped** (43 classes) |
+| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **663 tests / 0 failures / 0 errors / 0 skipped** (51 classes) |
 | Instrumented (emulator) | `adb shell am instrument -w com.cipherwell.notezero.test/androidx.test.runner.AndroidJUnitRunner` | **OK (10 tests)** incl. `VaultFlowE2ETest` (notes + backup settings + code workspace) |
 | Offline guarantee | `./scripts/check-offline.sh --gradle` | exit 0 |
 | Release signing | `apksigner verify --print-certs app-release.apk` | NoteZero upload key SHA-256 `FA:CA:DD:67:…:92:78` |
 
-Per-area counts: crypto 61, data 57, model 43, security 5, code engine 126, ui code 72,
-ui backup/settings 37, ui shell/notes 132. Code editor tests include 200 KB lexer performance
-(Kotlin 6.42 ms, JS 7.85 ms, XML 3.21 ms) and fuzz invariants (bounds/ascending/non-overlap/cap).
+Per-area counts: crypto 61, data 99, model 43, security 5, code engine 139, ui code 100,
+ui attachments 47, ui editor 38, ui backup/settings 37, ui shell/notes 94.
+Highlights: code engine includes 200 KB lexer performance (Kotlin 6.42 ms, JS 7.85 ms,
+XML 3.21 ms), fuzz invariants and `CodeSearch`; attachments cover NZAT blob format,
+import limits/quota, AAD note/id swap rejection, tamper + SHA mismatch, trash-vs-delete
+lifecycle, orphan sweep, locked fail-closed, backup v2 round trip incl. bytes, duplicate-safe
+re-import and a frozen v1 backup fixture; E2E extends the SQLite plaintext scan to attachments.
 Device E2E also scans the raw SQLite files for plaintext and captures the screenshots in
 `docs/screenshots/`. Full evidence: `docs/VERIFICATION-2026-11-15.md`.
 

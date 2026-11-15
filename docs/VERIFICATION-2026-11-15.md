@@ -161,3 +161,52 @@ are all real emulator captures from these runs.
   2027-02-15.
 - Strings are still inline (bootstrap policy); extraction to `res/values/strings.xml` for
   translation is a tracked phase-5 item.
+
+---
+
+## 8. Increment 3 (same day): encrypted attachments + code-workspace polish
+
+### Build & tests
+
+| Command | Result |
+|---|---|
+| `./gradlew :app:testDebugUnitTest` | **BUILD SUCCESSFUL — 663 tests, 0 failures, 0 errors, 0 skipped (51 classes)** |
+| `./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -PallowScreenshots=true` | **BUILD SUCCESSFUL** |
+| `adb shell am instrument -w com.cipherwell.notezero.test/…AndroidJUnitRunner` | **OK (10 tests)** incl. extended `VaultFlowE2ETest` (notes + backup + code + workspace search) |
+| `./gradlew :app:assembleRelease :app:bundleRelease` (signing env sourced) | **BUILD SUCCESSFUL** — APK `d498b1f315e2d5acff1c8b494b8c74f1fade05ec4d300aa52743ad084361cc30`, AAB `a270d6d530e48447d0d0f21b2aa453423a866eb806c63f734e67e3ceb545591f`; certificate `FA:CA:DD:67:…:92:78` |
+| normal debug build + `adb exec-out screencap -p` | **0-byte capture** → FLAG_SECURE still active |
+| `aapt2 dump permissions` on the release APK | `USE_BIOMETRIC` only (+ androidx.core signature-level receiver guard) |
+| `./scripts/check-offline.sh --gradle` | exit 0 |
+
+Test areas: data 99 · code engine 139 · ui code 100 · ui attachments 47 · ui editor 38 ·
+crypto 61 · model 43 · backup/settings 37 · security 5 · shell/notes 94.
+
+Attachment-specific coverage: NZAT v1 blob format + bounds, import limits (10 MiB / 100 per
+note / 512 MiB quota) with no orphan blobs, AAD swap between notes/ids rejected, tampered
+ciphertext and valid-AEAD/SHA-mismatch rejected, trash-keeps vs delete-forever-removes, orphan
+sweep (with corrupt-row guard), locked fail-closed, export sink failure, backup v2 round trip
+with exact bytes + duplicate-safe re-import + cross-vault credential + frozen v1 fixture import
++ missing-blob skip-and-count, and a plaintext scan of the attachment directory.
+
+### Device E2E additions
+
+- Code workspace search: toggle → query `CodeE2E_secret` → **1 match** at `hello.kt 2:19` →
+  tap result → editor opens at the line. Screenshots `09-code-workspace-search.png` /
+  `10-code-editor-search-result.png`.
+- Attachment strip renders in the real notes editor ("Attachments · No attachments" + add
+  button) — screenshot `02-editor-edit.png`. Actual import/export is covered by Robolectric +
+  real-crypto data tests because the Photo Picker / SAF picker are system activities that
+  instrumentation cannot drive reliably.
+
+### Screenshots
+
+11 PNGs in `docs/screenshots/` (00-setup … 10-code-editor-search-result), all real emulator
+captures from the screenshot-enabled debug build; hashes in git.
+
+### Still open (Phase 4 follow-ups / Phase 5)
+
+- Drawing canvas, camera scan (still no camera permission), tables editing UI, quick capture
+  and widgets.
+- Chunked/streamed backup format v3 to lift the 64 MiB backup cap for large attachment vaults.
+- Byte-for-byte reproducible release builds; string extraction; F-Droid submission after the
+  3-month window (2027-02-15).

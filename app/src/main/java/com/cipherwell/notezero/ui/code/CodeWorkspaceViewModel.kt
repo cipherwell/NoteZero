@@ -3,6 +3,8 @@ package com.cipherwell.notezero.ui.code
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.cipherwell.notezero.code.CodeSearch
+import com.cipherwell.notezero.code.CodeSearchMatch
 import com.cipherwell.notezero.data.NoteRepository
 import com.cipherwell.notezero.data.VaultStatus
 import com.cipherwell.notezero.model.Folder
@@ -16,15 +18,25 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** Render-ready state of the code workspace file tree. */
+/** Render-ready state of the code workspace file tree and its search surface. */
 data class CodeWorkspaceUiState(
     val isUnlocked: Boolean = false,
     val rows: List<CodeTreeNode> = emptyList(),
     val moveTargets: List<FolderChoice> = emptyList(),
     val fileCount: Int = 0,
     val folderCount: Int = 0,
+    val searchVisible: Boolean = false,
+    val searchQuery: String = "",
+    val searchCaseSensitive: Boolean = false,
+    val searchResults: List<CodeSearchMatch> = emptyList(),
 ) {
     val isEmpty: Boolean get() = fileCount == 0 && folderCount == 0
+
+    /**
+     * True when the search bar is open *and* a non-blank query is being searched; the screen
+     * then shows the result list instead of the tree.
+     */
+    val searchActive: Boolean get() = searchVisible && searchQuery.isNotBlank()
 }
 
 /**
@@ -43,15 +55,30 @@ class CodeWorkspaceViewModel(
 
     private val expandedFolderIds = MutableStateFlow<Set<String>>(emptySet())
 
+    /** Non-secret search chrome: whether the bar is open, its query and the case toggle. */
+    private data class SearchState(
+        val visible: Boolean = false,
+        val query: String = "",
+        val caseSensitive: Boolean = false,
+    )
+
+    private val searchState = MutableStateFlow(SearchState())
+
     val uiState: StateFlow<CodeWorkspaceUiState> = combine(
         repository.items,
         repository.folders,
         repository.status,
         expandedFolderIds,
-    ) { items, folders, status, expanded ->
+        searchState,
+    ) { items, folders, status, expanded, search ->
         val unlocked = status == VaultStatus.UNLOCKED
         if (!unlocked) {
-            CodeWorkspaceUiState(isUnlocked = false)
+            CodeWorkspaceUiState(
+                isUnlocked = false,
+                searchVisible = search.visible,
+                searchQuery = search.query,
+                searchCaseSensitive = search.caseSensitive,
+            )
         } else {
             CodeWorkspaceUiState(
                 isUnlocked = true,
@@ -59,6 +86,16 @@ class CodeWorkspaceViewModel(
                 moveTargets = CodeTree.flattenFolders(folders),
                 fileCount = CodeTree.codeFiles(items).size,
                 folderCount = folders.size,
+                searchVisible = search.visible,
+                searchQuery = search.query,
+                searchCaseSensitive = search.caseSensitive,
+                searchResults = if (search.query.isBlank()) {
+                    emptyList()
+                } else {
+                    // Pure literal search over the decrypted in-memory index; bounded by
+                    // CodeSearch.DEFAULT_LIMIT and never throwing.
+                    CodeSearch.search(items, search.query, search.caseSensitive)
+                },
             )
         }
     }.stateIn(
@@ -66,6 +103,28 @@ class CodeWorkspaceViewModel(
         started = SharingStarted.Eagerly,
         initialValue = CodeWorkspaceUiState(),
     )
+
+    // ---- Workspace search ----------------------------------------------------
+
+    /** Opens the search bar, or closes it and resets the query/case toggle when already open. */
+    fun toggleSearch() {
+        searchState.update { current ->
+            if (current.visible) SearchState() else current.copy(visible = true)
+        }
+    }
+
+    fun setSearchQuery(query: String) {
+        searchState.update { current -> current.copy(query = query) }
+    }
+
+    fun toggleSearchCaseSensitive() {
+        searchState.update { current -> current.copy(caseSensitive = !current.caseSensitive) }
+    }
+
+    /** Hides the search bar and discards the query (tag results never outlive the bar). */
+    fun closeSearch() {
+        searchState.value = SearchState()
+    }
 
     // ---- Tree navigation -----------------------------------------------------
 

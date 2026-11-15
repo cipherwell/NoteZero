@@ -1,5 +1,6 @@
 package com.cipherwell.notezero.data
 
+import com.cipherwell.notezero.model.AttachmentRef
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
@@ -30,6 +31,7 @@ class PayloadCodecTest {
         createdAt: Long = 1_700_000_000_000L,
         updatedAt: Long = 1_700_000_123_000L,
         version: Long = 7L,
+        attachments: List<AttachmentRef> = emptyList(),
     ) = Item(
         id = id,
         kind = kind,
@@ -43,6 +45,23 @@ class PayloadCodecTest {
         createdAt = createdAt,
         updatedAt = updatedAt,
         version = version,
+        attachments = attachments,
+    )
+
+    private fun attachment(
+        id: String = "11111111-1111-4111-8111-111111111111",
+        displayName: String = "photo.jpg",
+        mimeType: String = "image/jpeg",
+        sizeBytes: Long = 1234L,
+        createdAt: Long = 1_700_000_100_000L,
+        sha256: String = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    ) = AttachmentRef(
+        id = id,
+        displayName = displayName,
+        mimeType = mimeType,
+        sizeBytes = sizeBytes,
+        createdAt = createdAt,
+        sha256 = sha256,
     )
 
     // ---- ItemCodec -----------------------------------------------------------
@@ -104,7 +123,7 @@ class PayloadCodecTest {
         assertNull(ItemCodec.decode(valid + byteArrayOf(0)))
 
         val wrongVersion = valid.copyOf()
-        wrongVersion[4] = 2.toByte()
+        wrongVersion[4] = 3.toByte()
         assertNull(ItemCodec.decode(wrongVersion))
 
         val wrongMagic = valid.copyOf()
@@ -168,6 +187,106 @@ class PayloadCodecTest {
         val decoded = ItemCodec.decode(ItemCodec.encode(note(body = body)))
         assertNotNull(decoded)
         assertEquals(body, decoded!!.body)
+    }
+
+    // ---- ItemCodec v2 attachments -------------------------------------------
+
+    @Test
+    fun `item codec v2 round trips attachment refs exactly`() {
+        val original = note(
+            title = "with attachments",
+            attachments = listOf(
+                attachment(),
+                attachment(
+                    id = "22222222-2222-4222-8222-222222222222",
+                    displayName = "café 🔥.txt",
+                    mimeType = "text/plain; charset=utf-8",
+                    sizeBytes = AttachmentLimits.MAX_ATTACHMENT_BYTES,
+                    sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                ),
+            ),
+        )
+        val decoded = ItemCodec.decode(ItemCodec.encode(original))
+        assertEquals(original, decoded)
+        assertEquals(2, decoded!!.attachments.size)
+        assertEquals(AttachmentLimits.MAX_ATTACHMENT_BYTES, decoded.attachments[1].sizeBytes)
+    }
+
+    @Test
+    fun `item codec encodes version 2 and still decodes legacy version 1 with no attachments`() {
+        val encoded = ItemCodec.encode(note(title = "legacy", attachments = emptyList()))
+        assertEquals(ItemCodec.ENVELOPE_VERSION, encoded[4].toInt())
+
+        // Hand-build the version-1 payload layout: same fields, no attachment list.
+        val legacy = BinaryWriter().apply {
+            u32(0x4E5A4954L) // NZIT
+            u8(1) // envelope version 1
+            u8(0) // NOTE
+            u8(0) // no flags
+            u64(1_700_000_000_000L)
+            u64(1_700_000_001_000L)
+            u64(4L)
+            lenPrefixedU16("legacy-id".toByteArray(Charsets.UTF_8), ItemCodec.MAX_ID_BYTES)
+            u32("legacy title".toByteArray(Charsets.UTF_8).size.toLong())
+            bytes("legacy title".toByteArray(Charsets.UTF_8))
+            u32("legacy body".toByteArray(Charsets.UTF_8).size.toLong())
+            bytes("legacy body".toByteArray(Charsets.UTF_8))
+            u16(1)
+            lenPrefixedU16("tag".toByteArray(Charsets.UTF_8), ItemCodec.MAX_TAG_BYTES)
+        }.toByteArray()
+        val decoded = ItemCodec.decode(legacy)
+        assertNotNull(decoded)
+        assertEquals("legacy-id", decoded!!.id)
+        assertEquals("legacy title", decoded.title)
+        assertEquals(listOf("tag"), decoded.tags)
+        assertEquals(4L, decoded.version)
+        assertTrue("v1 payloads decode to an empty attachment list", decoded.attachments.isEmpty())
+    }
+
+    @Test
+    fun `item codec rejects malformed attachment metadata`() {
+        val valid = ItemCodec.encode(note(attachments = listOf(attachment())))
+
+        // Truncated inside the attachment list.
+        for (cut in listOf(valid.size - 1, valid.size - 8, valid.size - 32, valid.size - 40)) {
+            if (cut in 1 until valid.size) assertNull(ItemCodec.decode(valid.copyOf(cut)))
+        }
+        // Trailing bytes after a complete attachment list are rejected.
+        assertNull(ItemCodec.decode(valid + byteArrayOf(0)))
+        // Corrupt the attachment count: fixed header 7 + timestamps 24 + id(2+36) +
+        // title(4+1) + body(4+1) + tagCount(2) = 81, no folder flag on this item.
+        val counted = ItemCodec.encode(
+            note(title = "t", body = "b", tags = emptyList(), folderId = null, attachments = listOf(attachment())),
+        )
+        assertEquals(0, counted[81].toInt()) // u16 attachment count, big-endian
+        assertEquals(1, counted[82].toInt())
+        val brokenCount = counted.copyOf()
+        brokenCount[81] = 200.toByte()
+        assertNull("over-limit attachment count must fail closed", ItemCodec.decode(brokenCount))
+    }
+
+    @Test
+    fun `item codec bounds attachment fields on encode`() {
+        val tooMany = note(attachments = List(AttachmentLimits.MAX_ATTACHMENTS_PER_NOTE + 1) { attachment(id = "id-$it") })
+        assertThrowsIllegalArgument { ItemCodec.encode(tooMany) }
+
+        assertThrowsIllegalArgument {
+            ItemCodec.encode(note(attachments = listOf(attachment(sha256 = "not-a-sha"))))
+        }
+        assertThrowsIllegalArgument {
+            ItemCodec.encode(note(attachments = listOf(attachment(sha256 = attachment().sha256.uppercase()))))
+        }
+        assertThrowsIllegalArgument {
+            ItemCodec.encode(
+                note(attachments = listOf(attachment(displayName = "x".repeat(ItemCodec.MAX_ATTACHMENT_NAME_BYTES + 1)))),
+            )
+        }
+        assertThrowsIllegalArgument {
+            ItemCodec.encode(note(attachments = listOf(attachment(sizeBytes = AttachmentLimits.MAX_ATTACHMENT_BYTES + 1))))
+        }
+        assertThrowsIllegalArgument {
+            ItemCodec.encode(note(attachments = listOf(attachment(sizeBytes = -1L))))
+        }
     }
 
     // ---- FolderCodec ---------------------------------------------------------

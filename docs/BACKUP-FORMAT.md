@@ -1,9 +1,14 @@
-# NoteZero — encrypted backup envelope format (v1)
+# NoteZero — encrypted backup envelope format (v1 and v2)
 
 **Owner:** data layer. Implementation: `app/src/main/java/com/cipherwell/notezero/backup/BackupFormat.kt`
 (wire format) + `EncryptedNoteRepository.exportBackup`/`importBackup` (credential handling,
-duplicate policy, atomic restore). Tests: `app/src/test/java/com/cipherwell/notezero/data/BackupFormatTest.kt`
-and the backup cases in `EncryptedNoteRepositoryTest.kt`.
+duplicate policy, atomic restore). Tests: `app/src/test/java/com/cipherwell/notezero/data/BackupFormatTest.kt`,
+the backup cases in `EncryptedNoteRepositoryTest.kt` and
+`EncryptedNoteRepositoryAttachmentsTest.kt` (v2 attachments + frozen v1 fixture import).
+
+The writer emits **format v2** (items + folders + attachment blobs); the reader accepts
+**v1** (pre-attachments backups) and **v2**. Attachment storage itself is documented in
+[ATTACHMENTS.md](ATTACHMENTS.md).
 
 The format is a self-contained, versioned, authenticated binary envelope designed for SAF:
 export writes to an `OutputStream`, import reads one `InputStream`. No Android type is
@@ -13,8 +18,12 @@ vault password, the recovery phrase or the backup password.
 
 ## 1. Security model
 
-- The payload contains the **decrypted** items and folders (exactly the in-memory model) and
-  is sealed with AES-256-GCM under the source vault's VMK.
+- The payload contains the **decrypted** items and folders (exactly the in-memory model) plus
+  the attachment blobs, and is sealed with AES-256-GCM under the source vault's VMK. Each
+  attachment blob is **additionally** still its own `NZAT` envelope sealed under the source
+  VMK with `CryptoAad.attachment(noteId, attachmentId)`, so a blob stays bound to its
+  note/id inside the payload and the importer can verify its SHA-256 before re-encrypting it
+  under the destination vault's VMK.
 - AAD = `CryptoAad.BACKUP` (`"notezero.backup.v1"`, UTF-8) followed by the **entire header
   byte sequence** (fixed header + embedded key-envelope block). Every header field is
   therefore authenticated: changing a count, mode, flag or envelope blob makes payload
@@ -49,27 +58,41 @@ vault password, the recovery phrase or the backup password.
     m        sealed payload = iv(12) || AES-256-GCM ciphertext || tag(16)
 ```
 
-Total header = `28 + envelopeBlockLen`. The AAD is exactly
-`"notezero.backup.v1".bytes || file[0 until (28 + envelopeBlockLen)]`.
+Total header = `32 + envelopeBlockLen` for v2 (`28 + envelopeBlockLen` for a read v1 file,
+which has no `attachmentCount`). The AAD is exactly the format domain string
+`"notezero.backup.v1".bytes || file[0 until (fixedHeaderBytes + envelopeBlockLen)]`, so every
+header field — including the v2 attachment count — is authenticated. Note the AAD domain
+string keeps its `v1` suffix in format v2: it names the AAD domain, not the file version.
 
 `payloadLen` is *not* part of the AAD, but the reader requires the stream to end exactly at
 `payloadLen` bytes; truncation, appended bytes or a rewritten length fail the structural
 parse (`read` returns null), and any change to the sealed payload fails GCM authentication
 (`decrypt` returns null). Either way, nothing is imported.
 
-### Decrypted payload layout
+### Decrypted payload layout (v2)
 
 ```
-u8   payloadVersion = 1
+u8   payloadVersion = 2
 u32  itemCount            (must equal the header's authenticated itemCount)
 u32  folderCount          (must equal the header's authenticated folderCount)
-repeat itemCount:   u32 encodedLen + ItemCodec payload (see docs/DATA-MODEL.md §2)
+u32  attachmentCount      (must equal the header's authenticated attachmentCount)
+repeat itemCount:   u32 encodedLen + ItemCodec payload (payload v2, docs/DATA-MODEL.md §2)
 repeat folderCount: u32 encodedLen + FolderCodec payload (docs/DATA-MODEL.md §3)
+repeat attachmentCount:
+    u16 noteIdLen       (1..128) + noteId UTF-8
+    u16 attachmentIdLen (1..128) + attachmentId UTF-8
+    u32 blobLen         (MIN_BLOB_BYTES..AttachmentBlob.MAX_BLOB_BYTES)
+    blobLen bytes       NZAT blob (magic+version+AES-GCM under the source VMK + attachment AAD)
 ```
 
-All lengths are bounds-checked against `ItemCodec`/`FolderCodec` field limits and the whole
-payload against ≥ 1 byte of ciphertext per record (empty payloads are allowed: a valid,
-empty vault backups to `itemCount = folderCount = 0`).
+A read **v1** file has `payloadVersion = 1` and no `attachmentCount` field at all, and its
+item payloads are ItemCodec v1 (no attachment list): it imports with
+`attachmentsImported = attachmentsSkipped = 0`. A v1 payload presented under a v2 header (or
+a count mismatch) is rejected.
+
+All lengths are bounds-checked against `ItemCodec`/`FolderCodec`/attachment field limits and
+the whole payload against the file size cap (empty payloads are allowed: a valid, empty
+vault backups to `itemCount = folderCount = attachmentCount = 0`).
 
 ## 3. Modes and credentials
 
@@ -112,8 +135,8 @@ is consumed/zeroized by the import.
       by design).
 3. Decrypt + decode the payload (`ItemCodec`/`FolderCodec` strict decode). Any failure ⇒
    `null`; nothing is written.
-4. Classify every record **against the current index and against earlier records in the
-   same file**:
+4. Classify every item/folder record **against the current index and against earlier
+   records in the same file**:
    - item id not present: import (one row, re-encrypted under the local VMK + `CryptoAad.item`);
    - item id present with **equal `updatedAt`**: duplicate — counted, never rewritten;
    - item id present with **different `updatedAt`**: conflict — counted as skipped, never
@@ -121,8 +144,23 @@ is consumed/zeroized by the import.
    - same id appearing twice in one file: duplicate;
    - folder id already present or repeated in the file: duplicate;
    - record that cannot be re-encoded/re-encrypted (defensive): skipped.
-5. Write all accepted rows in a single Room transaction, then update the in-memory index and
-   flows. Return `BackupImportReport(imported, duplicated, skipped, foldersImported)`.
+5. **Attachment blobs (v2 only).** Each blob record is matched to the target item in the
+   final index (imported or already-present duplicate) and that item's attachment ref with
+   the same id:
+   - existing `<id>.nzb` already present → counted as duplicate, never rewritten;
+   - repeated blob record in one file → duplicate;
+   - no target item / no matching ref / unsafe id / missing or invalid blob → counted as
+     `attachmentsSkipped` (the note is still restored — one bad attachment never fails it);
+   - otherwise: decrypt the inner `NZAT` blob with the **source** VMK (the one that opened
+     the payload) + attachment AAD, verify plaintext size and SHA-256 against the ref,
+     re-encrypt under the **local** VMK/AAD and write a temp file.
+   Attachment refs that travel in the item payload but have no blob record in the file (the
+   source could not read that blob at export time) are counted as `attachmentsSkipped`.
+6. Write all accepted item/folder rows in a single Room transaction, then rename the
+   re-encrypted blob temp files into `attachments/`. A DB failure deletes the temp files and
+   aborts the import (`null`), so nothing partial is restored. Then update the in-memory index
+   and flows. Return `BackupImportReport(imported, duplicated, skipped, foldersImported,
+   attachmentsImported, attachmentsSkipped)` (the attachment counts are 0 for v1 files).
 
 Consequences: importing the same file twice is a no-op (`imported = 0`; items with unchanged
 `updatedAt` count as duplicates). Deleting an item and re-importing the same backup restores
@@ -142,24 +180,41 @@ can never silently roll back newer local work.
 | wrong backup password / wrong source password / wrong source phrase | `importBackup` ⇒ null |
 | import into a locked vault | `importBackup` ⇒ null |
 | export while locked, or any IO/encode failure | `exportBackup` ⇒ false |
+| v2 blob tampered / inner AAD swap / SHA-256 or size mismatch | that attachment skipped+counted; the rest of the import proceeds |
+| v2 blob record for an item/ref not in the target index | skipped+counted (note still imported) |
+| v2 file whose attachment count exceeds the header/format limit, or header/payload count mismatch | `read` ⇒ null / `decrypt` ⇒ null |
 
 ## 6. Limits and versioning
 
 | Limit | Value |
 |---|---|
-| Max total stream size accepted | 64 MiB (`MAX_BACKUP_BYTES`) |
+| Max total stream size accepted | 64 MiB (`MAX_BACKUP_BYTES`); attachment blobs count toward it |
+| Max attachment blobs in one backup | 100 000 |
+| Max one attachment blob | `AttachmentBlob.MAX_BLOB_BYTES` = 10,485,793 bytes (10 MiB plaintext) |
 | Max header (fixed + envelope block) | 16 KiB (`MAX_HEADER_BYTES`) |
 | Max embedded key envelopes | 4 |
 | Max one `KeyEnvelope` | 1024 bytes (`KeyEnvelope.MAX_BYTES`) |
 | Max items / folders in one backup | 500 000 / 100 000 |
-| Payload version | 1 |
-| Envelope format version | 1 |
+| Payload version | 2 (v1 still read) |
+| Envelope format version | 2 (v1 still read) |
 
 Rules for future versions: bump `FORMAT_VERSION` (or `payloadVersion`) for any change to
 field layout or meaning; add new flags/modes only with a documented mapping, because current
 readers reject unknown values; never change a published AAD string (create a new domain
-string instead). v1 readers will reject every future-version file with `null` rather than
-misinterpret it.
+string instead). v1 readers reject every v2 file with `null` rather than misinterpret it;
+this build's reader accepts both. The 64 MiB stream cap is also the practical size ceiling
+for a v2 backup: a vault whose attachment bytes no longer fit fails the export cleanly
+(`false`, no partial file) rather than dropping attachments.
+
+### Format-v1 compatibility matrix
+
+| Reader | v1 file | v2 file |
+|---|---|---|
+| Phase 1–3 build (v1 reader) | imports | rejected (`null`) |
+| this build (v2 reader) | imports, 0 attachment counts | imports items/folders/refs + blobs |
+
+The frozen-v1 wire layout is `LegacyBackupFixture` in the tests (`writeV1`): 28-byte header
+without `attachmentCount`, payloadVersion 1, ItemCodec v1 records.
 
 ## 7. Interplay with the vault lifecycle
 
@@ -205,6 +260,10 @@ Implementation: `ui/backup/BackupFlowController.kt` (state machine, no Android t
   resume — your chosen file is still selected") and resumes through
   `onVaultUnlocked()` after the user unlocks. The chosen file is never silently dropped and
   the user does not have to pick it again.
+- **Attachment counts**: the v2 `BackupImportReport` fields `attachmentsImported` /
+  `attachmentsSkipped` are non-secret counts; a restore with a note whose blobs were missing
+  at export time shows the note plus a skipped-attachment count. Attachment bytes are
+  restored by the repository, never by the UI.
 - **Errors** are `BackupErrorKind` enums only: `INVALID_FILE` (the picked file is not a
   structurally valid v1 envelope), `WRONG_CREDENTIAL` (3 rejected attempts), `IO` (stream or
   picker failure), `LOCKED` (paused until unlock) and `EMPTY_VAULT` (export refused because

@@ -258,7 +258,15 @@ object CryptoAad {
     const val VMK_WRAP = "notezero.vmk.v1"
     const val RECOVERY_WRAP = "notezero.recovery.v1"
     const val BACKUP = "notezero.backup.v1"
+    const val ATTACHMENT = "notezero.attachment.v1"
 
     /** Binds ciphertext to the item id AND its type, per the security requirements. */
     fun item(itemId: String, kind: String): ByteArray = "notezero.item.v1|$itemId|$kind".toByteArray(Charsets.UTF_8)
+
+    /**
+     * Binds an attachment blob to its note AND attachment id, so moving/renaming
+     * `attachments/<id>.nzb` or copying a blob between notes/ids fails authentication.
+     */
+    fun attachment(noteId: String, attachmentId: String): ByteArray =
+        "$ATTACHMENT|$noteId|$attachmentId".toByteArray(Charsets.UTF_8)
 }

@@ -3,7 +3,8 @@
 **Owner:** data layer. This document is normative for the on-disk format: changing a byte
 layout, AAD string or column here is a breaking change and requires a schema/envelope
 version bump. Crypto primitives are specified in [CRYPTO-SPEC.md](CRYPTO-SPEC.md); the
-backup wire format has its own document, [BACKUP-FORMAT.md](BACKUP-FORMAT.md).
+backup wire format has its own document, [BACKUP-FORMAT.md](BACKUP-FORMAT.md); encrypted
+attachment storage has [ATTACHMENTS.md](ATTACHMENTS.md).
 
 The design rule is simple: **the database stores structure, never content.** Anything a
 user typed (title, body, tags, folder name, parent, pin/favourite/trash flags) is sealed
@@ -63,17 +64,22 @@ replayed as a recovery wrap (or vice versa) even with the same KEK.
 | `filesDir/notezero.vault.presence` | One non-secret byte marker ("1") so the synchronous initial `VaultStatus` is correct before the first DB read. Corrected by an async presence check if it disagrees with `vault_meta`. | No |
 | DataStore `notezero-prefs` | `auto_lock_minutes` (int, default 5, 0 disables), `theme_mode` (`SYSTEM`/`LIGHT`/`DARK`). | No |
 | crypto-core's private prefs + Android Keystore | Keystore-wrapped VMK copy for biometric unlock; the wrapping key never leaves the Keystore. | Ciphertext only |
+| `filesDir/attachments/<attachmentId>.nzb` | Encrypted attachment blobs: magic `NZAT` (4) + version `0x01` (1) + AES-256-GCM envelope (`iv||ct||tag`) under the VMK, AAD = `CryptoAad.attachment(noteId, attachmentId)`. File name is the random attachment id only. See [ATTACHMENTS.md](ATTACHMENTS.md). | Ciphertext only |
 
 ## 2. `ItemCodec` envelope payload
 
 Versioned big-endian binary payload stored **inside** the item ciphertext. Decoding is
 strict: unknown magic/version/flags, truncation, oversized fields or trailing bytes return
 `null` and the row is treated as corrupt. Limits are enforced on both encode and decode.
+**Version 2** appends the attachment metadata list; **version 1** payloads (pre-attachments
+vaults) still decode to an item with an empty attachment list — no migration or
+re-encryption is needed, the next save writes v2. Full description:
+[ATTACHMENTS.md](ATTACHMENTS.md) §3.
 
 ```
 offset size field
 0      4    magic "NZIT"
-4      1    envelope version = 1
+4      1    envelope version = 1 or 2 (2 is written)
 5      1    kind: ItemKind ordinal (0 = NOTE, 1 = CODE_FILE)
 6      1    flags: bit0 folderId present, bit1 pinned, bit2 favourite, bit3 trashed
             (all other bits must be 0)
@@ -89,7 +95,27 @@ offset size field
         2   tagCount   (u16, <= 256)
         ... per tag: 2-byte len (<= 512) + UTF-8 bytes
         2   folderIdLen (u16, <= 128) — only when flags.bit0 is set
+        -- version 2 only, appended after the folder id: --
+        2   attachmentCount (u16, <= 100)
+            per attachment: 2 idLen + id (1..128 bytes),
+                            4 displayNameLen + name (1..1024 bytes),
+                            2 mimeTypeLen + mime (1..256 bytes),
+                            8 sizeBytes (i64, 0..10 MiB),
+                            8 createdAt (i64),
+                            32 raw SHA-256 (hex lowercase in the model)
 ```
+
+Payload version table:
+
+| version | written by | attachments | readable |
+|---|---|---|---|
+| 1 | Phase 1–3 builds | empty | yes |
+| 2 | this build | `Item.attachments` | yes |
+
+`Item.attachments` is repository-owned metadata: `saveItem` preserves the stored list and
+only `importAttachment`/`deleteAttachment` change it (so a stale editor autosave can never
+add or drop a ref). Attachment **bytes** are not in the payload — they are the encrypted
+`NZAT` blob files described above; only names/MIME/size/SHA-256 live in the envelope.
 
 Why `id` and `kind` appear both in the row and the payload: the AAD binds the *row's*
 plaintext columns to the ciphertext, and the payload repeats them so the repository can
@@ -128,6 +154,7 @@ offset size field
 | recovery-wrapped VMK | KEK(phrase) | `CryptoAad.RECOVERY_WRAP` = `"notezero.recovery.v1"` | unwrap fails → `WRONG_RECOVERY_PHRASE`. |
 | backup extra-password envelope | KEK(backup password) | `CryptoAad.BACKUP` = `"notezero.backup.v1"` | unwrap fails → import returns null. |
 | backup payload | source VMK | `CryptoAad.BACKUP` `||` complete backup header bytes | tampered header/payload → AEAD failure. |
+| attachment blob (`.nzb`) | VMK | `CryptoAad.attachment(noteId, attachmentId)` = `"notezero.attachment.v1|<noteId>|<attachmentId>"` | `decrypt` returns null → read fails closed, counted; blob swaps between notes/ids/vaults fail. |
 
 ## 5. Vault lifecycle semantics
 
@@ -197,7 +224,10 @@ Two-phase, because a per-use-auth Keystore key cannot encrypt/decrypt without a
 ## 6. Mutations and derived state
 
 All mutations run under the repository mutex and update the DB row plus the in-memory index
-before publishing new `StateFlow` values.
+before publishing new `StateFlow` values. Attachment mutations happen through the dedicated
+four-method attachment API (see [ATTACHMENTS.md](ATTACHMENTS.md) §5); trashing keeps blobs,
+delete-forever/empty-trash removes them, and an unlock-time sweep removes unreferenced blobs
+(only when every row decoded).
 
 | Operation | Envelope change | Extra |
 |---|---|---|
@@ -242,6 +272,8 @@ from locally created ones. `BackupImportReport` counts:
 | `duplicated` | Records already present with the same identity — items with same `id` **and** same `updatedAt`; folders with the same `id`; repeated records inside one file. |
 | `skipped` | Conflicts/bad records: same item `id` with a *different* `updatedAt` (never overwritten), or a record that could not be re-encrypted/encoded. |
 | `foldersImported` | New folder ids written. |
+| `attachmentsImported` | v2 attachment blobs restored (decrypted from the source VMK, SHA-256-verified, re-encrypted under the local VMK). |
+| `attachmentsSkipped` | v2 attachment refs that could not be restored (missing/invalid blob record, SHA-256/size mismatch, no matching local ref, unsafe id). The note itself is still restored. Zero for v1 backups. |
 
 The whole file is authenticated before any write, and all writes happen in one Room
 transaction — an import is all-or-nothing for the accepted set.

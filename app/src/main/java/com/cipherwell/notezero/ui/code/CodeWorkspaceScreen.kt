@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -66,6 +67,11 @@ fun CodeWorkspaceScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var openFileId by rememberSaveable { mutableStateOf<String?>(null) }
 
+    // Open-at-line request. [openToken] is bumped on every open so re-opening the same file
+    // (a singleton editor ViewModel) still applies the new target line.
+    var openFileLine by rememberSaveable { mutableStateOf<Int?>(null) }
+    var openToken by rememberSaveable { mutableStateOf(0) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -77,13 +83,22 @@ fun CodeWorkspaceScreen(
                 state = state,
                 viewModel = viewModel,
                 onBack = onBack,
-                onOpenFile = { openFileId = it },
+                onOpenFile = { itemId, line ->
+                    openFileId = itemId
+                    openFileLine = line
+                    openToken += 1
+                },
             )
         } else {
             CodeEditorScreen(
                 repository = repository,
                 itemId = fileId,
-                onBack = { openFileId = null },
+                initialLine = openFileLine,
+                openToken = openToken,
+                onBack = {
+                    openFileId = null
+                    openFileLine = null
+                },
             )
         }
     }
@@ -95,7 +110,7 @@ private fun CodeTreeContent(
     state: CodeWorkspaceUiState,
     viewModel: CodeWorkspaceViewModel,
     onBack: () -> Unit,
-    onOpenFile: (String) -> Unit,
+    onOpenFile: (String, Int?) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
 
@@ -125,7 +140,7 @@ private fun CodeTreeContent(
             TopAppBar(
                 navigationIcon = {
                     IconButton(
-                        onClick = onBack,
+                        onClick = { if (state.searchVisible) viewModel.closeSearch() else onBack() },
                         modifier = Modifier.testTag(CodeTags.BACK),
                     ) {
                         Icon(Icons.Filled.ArrowBack, contentDescription = "Back to notes")
@@ -143,6 +158,21 @@ private fun CodeTreeContent(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { viewModel.toggleSearch() },
+                        modifier = Modifier
+                            .heightIn(min = NoteZeroSpacing.minTarget)
+                            .testTag(CodeTags.SEARCH_TOGGLE),
+                    ) {
+                        Icon(
+                            Icons.Filled.Search,
+                            contentDescription = if (state.searchVisible) {
+                                "Close workspace search"
+                            } else {
+                                "Search code files"
+                            },
+                        )
+                    }
                     TextButton(
                         onClick = { openCreateFolder(null) },
                         modifier = Modifier
@@ -161,50 +191,70 @@ private fun CodeTreeContent(
             )
         },
     ) { innerPadding ->
-        when {
-            !state.isUnlocked -> CenteredMessage(
-                title = "Vault is locked",
-                subtitle = "Unlock the vault to open the code workspace.",
-                modifier = Modifier.padding(innerPadding),
-            )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+        ) {
+            if (state.searchVisible) {
+                CodeSearchBar(
+                    query = state.searchQuery,
+                    caseSensitive = state.searchCaseSensitive,
+                    resultCount = state.searchResults.size,
+                    onQueryChange = viewModel::setSearchQuery,
+                    onToggleCase = viewModel::toggleSearchCaseSensitive,
+                    onClose = viewModel::closeSearch,
+                )
+            }
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                when {
+                    !state.isUnlocked -> CenteredMessage(
+                        title = "Vault is locked",
+                        subtitle = "Unlock the vault to open the code workspace.",
+                    )
 
-            state.isEmpty -> EmptyCodeTree(
-                onCreateFile = { openCreateFile(null) },
-                onCreateFolder = { openCreateFolder(null) },
-                modifier = Modifier.padding(innerPadding),
-            )
+                    state.searchActive -> CodeSearchResults(
+                        results = state.searchResults,
+                        onOpen = { match -> onOpenFile(match.itemId, match.line) },
+                    )
 
-            else -> LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .testTag(CodeTags.FILE_TREE),
-                contentPadding = PaddingValues(
-                    start = NoteZeroSpacing.s,
-                    end = NoteZeroSpacing.s,
-                    top = NoteZeroSpacing.s,
-                    bottom = NoteZeroSpacing.xxl,
-                ),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                items(state.rows, key = { it.key }) { row ->
-                    when (row) {
-                        is CodeTreeNode.FolderNode -> CodeFolderRow(
-                            node = row,
-                            onToggle = { viewModel.toggleFolder(row.folder.id) },
-                            onNewFile = { openCreateFile(row.folder.id) },
-                            onNewFolder = { openCreateFolder(row.folder.id) },
-                            onRename = { renameFolderTarget = row.folder },
-                            onDelete = { deleteFolderTarget = row.folder },
-                        )
+                    state.isEmpty -> EmptyCodeTree(
+                        onCreateFile = { openCreateFile(null) },
+                        onCreateFolder = { openCreateFolder(null) },
+                    )
 
-                        is CodeTreeNode.FileNode -> CodeFileRow(
-                            node = row,
-                            onOpen = { onOpenFile(row.item.id) },
-                            onRename = { renameFileTarget = row.item },
-                            onMove = { moveFileTarget = row.item },
-                            onDelete = { deleteFileTarget = row.item },
-                        )
+                    else -> LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag(CodeTags.FILE_TREE),
+                        contentPadding = PaddingValues(
+                            start = NoteZeroSpacing.s,
+                            end = NoteZeroSpacing.s,
+                            top = NoteZeroSpacing.s,
+                            bottom = NoteZeroSpacing.xxl,
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        items(state.rows, key = { it.key }) { row ->
+                            when (row) {
+                                is CodeTreeNode.FolderNode -> CodeFolderRow(
+                                    node = row,
+                                    onToggle = { viewModel.toggleFolder(row.folder.id) },
+                                    onNewFile = { openCreateFile(row.folder.id) },
+                                    onNewFolder = { openCreateFolder(row.folder.id) },
+                                    onRename = { renameFolderTarget = row.folder },
+                                    onDelete = { deleteFolderTarget = row.folder },
+                                )
+
+                                is CodeTreeNode.FileNode -> CodeFileRow(
+                                    node = row,
+                                    onOpen = { onOpenFile(row.item.id, null) },
+                                    onRename = { renameFileTarget = row.item },
+                                    onMove = { moveFileTarget = row.item },
+                                    onDelete = { deleteFileTarget = row.item },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -230,7 +280,7 @@ private fun CodeTreeContent(
                 showNewFile = false
                 scope.launch {
                     val created = viewModel.createFile(raw, parent)
-                    if (created != null) onOpenFile(created.id)
+                    if (created != null) onOpenFile(created.id, null)
                 }
             },
         )

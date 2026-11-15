@@ -522,4 +522,149 @@ class CodeEditorViewModelTest {
         assertEquals(0, repository.saveCount)
         assertTrue(model.state.value.dirty)
     }
+
+    // ---- Open-at-line, indent and copy payloads -------------------------------
+
+    @Test
+    fun `initialLine opens the draft with the caret on that one-based line`() = runTest(dispatcher) {
+        seed(body = "l1\nl2\nl3")
+        val model = CodeEditorViewModel(repository, "f1", preferences, initialLine = 2)
+        advanceUntilIdle()
+
+        val state = model.state.value
+        assertEquals(3, state.cursor)
+        assertEquals(3, state.selectionEnd)
+        assertEquals(1, state.navigationSeq)
+        assertFalse(state.dirty)
+    }
+
+    @Test
+    fun `initialLine out of range is ignored`() = runTest(dispatcher) {
+        seed(body = "l1\nl2")
+        val beyond = CodeEditorViewModel(repository, "f1", preferences, initialLine = 99)
+        advanceUntilIdle()
+        assertEquals(0, beyond.state.value.cursor)
+        assertEquals(0, beyond.state.value.navigationSeq)
+
+        val zero = CodeEditorViewModel(repository, "f1", preferences, initialLine = 0)
+        advanceUntilIdle()
+        assertEquals(0, zero.state.value.cursor)
+        assertEquals(0, zero.state.value.navigationSeq)
+    }
+
+    @Test
+    fun `goToLine bumps the navigation counter so the field can reveal the caret`() = runTest(dispatcher) {
+        seed(body = "one\ntwo\nthree")
+        val model = viewModel()
+        advanceUntilIdle()
+        assertEquals(0, model.state.value.navigationSeq)
+
+        assertTrue(model.goToLine(3))
+        assertEquals(8, model.state.value.cursor)
+        assertEquals(1, model.state.value.navigationSeq)
+
+        assertFalse(model.goToLine(99))
+        assertEquals(1, model.state.value.navigationSeq)
+    }
+
+    @Test
+    fun `indentSelection indents every touched line and maps the selection`() = runTest(dispatcher) {
+        seed(body = "a\nb\nc")
+        val model = viewModel()
+        advanceUntilIdle()
+        model.onSelectionChanged(0, 3)
+
+        model.indentSelection()
+
+        val state = model.state.value
+        assertEquals("    a\n    b\nc", state.body)
+        assertEquals(4, state.cursor)
+        assertEquals(11, state.selectionEnd)
+        assertTrue(state.dirty)
+        assertTrue(state.canUndo)
+    }
+
+    @Test
+    fun `outdentSelection removes one unit from every touched line`() = runTest(dispatcher) {
+        seed(body = "    a\n    b\nc")
+        val model = viewModel()
+        advanceUntilIdle()
+        model.onSelectionChanged(4, 11)
+
+        model.outdentSelection()
+
+        val state = model.state.value
+        assertEquals("a\nb\nc", state.body)
+        assertEquals(0, state.cursor)
+        assertEquals(3, state.selectionEnd)
+    }
+
+    @Test
+    fun `indent with an empty selection indents the caret line like Tab`() = runTest(dispatcher) {
+        seed(body = "x\ny")
+        val model = viewModel()
+        advanceUntilIdle()
+        model.onSelectionChanged(2, 2)
+
+        model.indentSelection()
+
+        val state = model.state.value
+        assertEquals("x\n    y", state.body)
+        assertEquals(6, state.cursor)
+        assertEquals(6, state.selectionEnd)
+    }
+
+    @Test
+    fun `outdent on an unindented line is a no-op`() = runTest(dispatcher) {
+        seed(body = "abc")
+        val model = viewModel()
+        advanceUntilIdle()
+        model.onSelectionChanged(0, 0)
+
+        model.outdentSelection()
+
+        val state = model.state.value
+        assertEquals("abc", state.body)
+        assertFalse(state.dirty)
+        assertFalse(state.canUndo)
+        assertEquals(0, repository.saveCount)
+    }
+
+    @Test
+    fun `indent autosaves and undo restores the unindented draft`() = runTest(dispatcher) {
+        seed(body = "a")
+        val model = viewModel()
+        advanceUntilIdle()
+        model.onSelectionChanged(0, 1)
+
+        model.indentSelection()
+        assertEquals("    a", model.state.value.body)
+        advanceTimeBy(CodeEditorViewModel.AUTOSAVE_DEBOUNCE_MS + 1)
+        advanceUntilIdle()
+        assertEquals("    a", repository.itemById("f1")!!.body)
+
+        model.undo()
+        assertEquals("a", model.state.value.body)
+    }
+
+    @Test
+    fun `copySelectionOrAll prefers the selection and falls back to the whole draft`() = runTest(dispatcher) {
+        seed(body = "abcd")
+        val model = viewModel()
+        advanceUntilIdle()
+
+        model.onSelectionChanged(1, 3)
+        assertEquals("bc", model.copySelectionOrAll())
+
+        model.onSelectionChanged(2, 2)
+        assertEquals("abcd", model.copySelectionOrAll())
+
+        // Caret at the very end (empty selection) still copies the whole draft.
+        model.onSelectionChanged(4, 4)
+        assertEquals("abcd", model.copySelectionOrAll())
+
+        val missing = viewModel("missing")
+        advanceUntilIdle()
+        assertEquals("", missing.copySelectionOrAll())
+    }
 }

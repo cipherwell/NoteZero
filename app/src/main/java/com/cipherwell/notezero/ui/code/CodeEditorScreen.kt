@@ -59,6 +59,7 @@ import com.cipherwell.notezero.code.LineIndex
 import com.cipherwell.notezero.data.NoteRepository
 import com.cipherwell.notezero.model.BlockDocument
 import com.cipherwell.notezero.model.MarkdownBlockCodec
+import com.cipherwell.notezero.ui.components.common.SensitiveClipboard
 import com.cipherwell.notezero.ui.editor.ChecklistMarkdown
 import com.cipherwell.notezero.ui.editor.MarkdownPreview
 import com.cipherwell.notezero.ui.theme.NoteZeroShapes
@@ -71,6 +72,15 @@ import kotlinx.coroutines.launch
  * current-line + bracket highlights, find/replace, go-to-line, bounded undo/redo,
  * font-size/wrap preferences, autosave (600 ms) and conflict handling.
  *
+ * Polish additions (docs/CONTRACTS-PHASE4.md §C): multi-line indent/outdent from the toolbar
+ * and Tab/Shift+Tab, Copy (selection-or-all) to a clipboard marked sensitive, and an explicit
+ * "Export decrypted copy" SAF flow behind an UNENCRYPTED-copy confirmation. Decrypted source
+ * only ever reaches memory, the clipboard the user asked for, or the file the user picked.
+ *
+ * [initialLine] (1-based) opens the file at a workspace search hit; [openToken] lets a
+ * re-open of the same file apply a new target line without recreating the ViewModel.
+ * [exportTarget] is injectable so the confirmation gate is testable without a system picker.
+ *
  * Markdown files additionally offer a preview that reuses
  * [com.cipherwell.notezero.ui.editor.MarkdownPreview] — no duplicate renderer exists.
  * Back always flushes pending edits before leaving (no keystroke is lost).
@@ -81,12 +91,15 @@ fun CodeEditorScreen(
     repository: NoteRepository,
     itemId: String,
     onBack: () -> Unit,
+    initialLine: Int? = null,
+    openToken: Int = 0,
+    exportTarget: CodeExportTarget = rememberSafCodeExportTarget(repository),
 ) {
     val context = LocalContext.current
     val preferences = remember(context) { CodeEditorPrefs(context) }
     val viewModel: CodeEditorViewModel = viewModel(
         key = "code_editor_$itemId",
-        factory = CodeEditorViewModelFactory(repository, itemId, preferences),
+        factory = CodeEditorViewModelFactory(repository, itemId, preferences, initialLine),
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
     val palette = rememberCodeSyntaxPalette()
@@ -96,12 +109,31 @@ fun CodeEditorScreen(
     var findVisible by rememberSaveable { mutableStateOf(false) }
     var previewMode by rememberSaveable { mutableStateOf(false) }
     var showGotoDialog by remember { mutableStateOf(false) }
+    var showExportConfirm by remember { mutableStateOf(false) }
+
+    // Open-at-line request: applied once the draft is loaded, and re-applied on every
+    // re-open of this file (new [openToken]) even though the ViewModel survives.
+    var pendingRevealLine by remember(initialLine, openToken) { mutableStateOf(initialLine) }
+    LaunchedEffect(pendingRevealLine, state.loading, state.missing, state.tooLarge) {
+        val line = pendingRevealLine ?: return@LaunchedEffect
+        if (state.loading || state.missing || state.tooLarge) return@LaunchedEffect
+        viewModel.goToLine(line)
+        pendingRevealLine = null
+    }
 
     fun leave() {
         scope.launch {
             viewModel.saveOnLeave()
             onBack()
         }
+    }
+
+    fun copyDraft() {
+        val payload = viewModel.copySelectionOrAll()
+        if (payload.isEmpty()) return
+        // Memory + clipboard only, never a file. The clip is marked sensitive so Android 13+
+        // hides it from the copy overlay and clipboard previews (backported extra below 33).
+        SensitiveClipboard.copy(context, "NoteZero code", payload)
     }
 
     BackHandler { leave() }
@@ -242,6 +274,12 @@ fun CodeEditorScreen(
                         onWrapToggle = viewModel::toggleWordWrap,
                         onPreviewToggle = { previewMode = !previewMode },
                     )
+                    EditorActionBar(
+                        onIndent = viewModel::indentSelection,
+                        onOutdent = viewModel::outdentSelection,
+                        onCopy = { copyDraft() },
+                        onExport = { showExportConfirm = true },
+                    )
                     if (findVisible) {
                         FindReplaceBar(
                             state = state,
@@ -293,6 +331,8 @@ fun CodeEditorScreen(
                                 .weight(1f)
                                 .fillMaxWidth(),
                             focusRequester = focusRequester,
+                            onIndent = viewModel::indentSelection,
+                            onOutdent = viewModel::outdentSelection,
                         )
                     }
                     EditorStatusRow(
@@ -325,6 +365,18 @@ fun CodeEditorScreen(
             onConfirm = { raw ->
                 showGotoDialog = false
                 raw.trim().toIntOrNull()?.let(viewModel::goToLine)
+            },
+        )
+    }
+
+    if (showExportConfirm) {
+        CodeExportConfirmDialog(
+            fileName = state.fileName,
+            onDismiss = { showExportConfirm = false },
+            onConfirm = {
+                showExportConfirm = false
+                // Whole current draft: the user exports what they are looking at.
+                exportTarget.requestExport(state.fileName, state.body)
             },
         )
     }
@@ -398,6 +450,53 @@ private fun EditorToolbar(
                 label = { Text("Preview", style = NoteZeroType.Caption) },
             )
         }
+    }
+}
+
+/**
+ * Second action row under the main toolbar: multi-line indent/outdent, clipboard copy and the
+ * explicit decrypted export. Kept separate from [EditorToolbar] so the long-lived
+ * find/font/wrap/preview controls keep their positions (and their stable E2E taps).
+ */
+@Composable
+private fun EditorActionBar(
+    onIndent: () -> Unit,
+    onOutdent: () -> Unit,
+    onCopy: () -> Unit,
+    onExport: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = NoteZeroSpacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(NoteZeroSpacing.xxs),
+    ) {
+        TextButton(
+            onClick = onIndent,
+            modifier = Modifier
+                .heightIn(min = NoteZeroSpacing.minTarget)
+                .testTag(CodeTags.INDENT_INCREASE),
+        ) { Text("Indent", style = NoteZeroType.Callout) }
+        TextButton(
+            onClick = onOutdent,
+            modifier = Modifier
+                .heightIn(min = NoteZeroSpacing.minTarget)
+                .testTag(CodeTags.INDENT_DECREASE),
+        ) { Text("Outdent", style = NoteZeroType.Callout) }
+        TextButton(
+            onClick = onCopy,
+            modifier = Modifier
+                .heightIn(min = NoteZeroSpacing.minTarget)
+                .testTag(CodeTags.COPY),
+        ) { Text("Copy", style = NoteZeroType.Callout) }
+        TextButton(
+            onClick = onExport,
+            modifier = Modifier
+                .heightIn(min = NoteZeroSpacing.minTarget)
+                .testTag(CodeTags.EXPORT),
+        ) { Text("Export", style = NoteZeroType.Callout) }
     }
 }
 

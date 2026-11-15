@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.cipherwell.notezero.code.CodeEditing
 import com.cipherwell.notezero.code.CodeLanguage
 import com.cipherwell.notezero.code.Languages
+import com.cipherwell.notezero.code.LineIndex
 import com.cipherwell.notezero.code.TextRange
 import com.cipherwell.notezero.data.NoteRepository
 import com.cipherwell.notezero.data.VaultStatus
@@ -53,6 +54,8 @@ class CodeEditorViewModel(
     private val preferences: CodeEditorPreferences = InMemoryCodeEditorPreferences(),
     private val debounceMs: Long = AUTOSAVE_DEBOUNCE_MS,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** 1-based line the editor should open at (workspace search hit); null opens at the top. */
+    private val initialLine: Int? = null,
 ) : ViewModel() {
 
     private data class Snapshot(val body: String, val cursor: Int, val selectionEnd: Int)
@@ -83,6 +86,12 @@ class CodeEditorViewModel(
         val currentMatch: Int = -1,
         /** Pair of matching bracket offsets to highlight, when the cursor is on one. */
         val bracketHighlight: TextRange? = null,
+        /**
+         * Bumped on every cursor jump the UI must reveal (go-to-line, open-at-line). The
+         * editor field scrolls to the cursor only when this changes, so normal scrolling and
+         * typing never yank the viewport.
+         */
+        val navigationSeq: Int = 0,
         val lastSavedAt: Long? = null,
         val successfulSaves: Int = 0,
     ) {
@@ -144,17 +153,30 @@ class CodeEditorViewModel(
             redoStack.clear()
             undoChars = 0
             redoChars = 0
-            _state.value = State(
-                loading = false,
-                fileName = item.title,
+            _state.value = withInitialLine(
+                loaded = State(
+                    loading = false,
+                    fileName = item.title,
+                    body = item.body,
+                    language = language,
+                    fontSizeSp = preferences.fontSizeSp,
+                    wordWrap = preferences.wordWrap,
+                    syntaxHighlighting = bytes <= MAX_HIGHLIGHT_BYTES,
+                    lastSavedAt = item.updatedAt.takeIf { it > 0L },
+                ),
                 body = item.body,
-                language = language,
-                fontSizeSp = preferences.fontSizeSp,
-                wordWrap = preferences.wordWrap,
-                syntaxHighlighting = bytes <= MAX_HIGHLIGHT_BYTES,
-                lastSavedAt = item.updatedAt.takeIf { it > 0L },
             )
         }
+    }
+
+    /** Places the caret at the requested 1-based line when opening from a search hit. */
+    private fun withInitialLine(loaded: State, body: String): State {
+        val target = initialLine ?: return loaded
+        if (target < 1) return loaded
+        val index = LineIndex.of(body)
+        if (target > index.lineCount) return loaded
+        val offset = index.startOfLine(target - 1).coerceIn(0, body.length)
+        return loaded.copy(cursor = offset, selectionEnd = offset, navigationSeq = 1)
     }
 
     // ---- Editing -------------------------------------------------------------
@@ -361,7 +383,7 @@ class CodeEditorViewModel(
         if (current.loading || current.missing || current.tooLarge) return false
         if (line < 1) return false
         val zeroBased = line - 1
-        val index = com.cipherwell.notezero.code.LineIndex.of(current.body)
+        val index = LineIndex.of(current.body)
         if (zeroBased > index.lineCount - 1) return false
         val offset = CodeEditing.offsetForLine(current.body, zeroBased)
         if (offset < 0 || offset > current.body.length) return false
@@ -369,8 +391,52 @@ class CodeEditorViewModel(
             cursor = offset,
             selectionEnd = offset,
             bracketHighlight = bracketPairAt(current.body, offset),
+            navigationSeq = _state.value.navigationSeq + 1,
         )
         return true
+    }
+
+    // ---- Multi-line indent ---------------------------------------------------
+
+    /** Indents every line the selection touches (one indent unit), keeping the selection. */
+    fun indentSelection() = shiftIndent(outdent = false)
+
+    /** Removes one indent unit from every line the selection touches, keeping the selection. */
+    fun outdentSelection() = shiftIndent(outdent = true)
+
+    /**
+     * Applies [CodeEditing.indentSelection] to the current cursor/selection. With an empty
+     * selection the caret's line is indented, which is what Tab/Shift+Tab do. Both the text
+     * and the mapped selection come from the pure engine, so undo/autosave work as for typing.
+     */
+    private fun shiftIndent(outdent: Boolean) {
+        val current = _state.value
+        if (current.loading || current.missing || current.tooLarge) return
+        val selection = TextRange(current.cursor, current.selectionEnd).normalized()
+        val result = CodeEditing.indentSelection(
+            text = current.body,
+            selection = selection,
+            outdent = outdent,
+            useTabs = false,
+            tabWidth = TAB_WIDTH,
+        )
+        val updated = result.first
+        if (updated == current.body) return
+        val mapped = result.second.clampedTo(updated.length)
+        applyBody(updated, cursor = mapped.start, selectionEnd = mapped.end)
+    }
+
+    /**
+     * Text the Copy action puts on the clipboard: the selection when there is one, otherwise
+     * the whole draft. Empty when nothing is open/loaded. Clipboard handling stays in the UI
+     * layer — this ViewModel never touches Android clipboard APIs.
+     */
+    fun copySelectionOrAll(): String {
+        val current = _state.value
+        if (current.loading || current.missing || current.tooLarge) return ""
+        val body = current.body
+        val range = TextRange(current.cursor, current.selectionEnd).normalized().clampedTo(body.length)
+        return if (range.isEmpty()) body else body.substring(range.start, range.end)
     }
 
     // ---- Saving --------------------------------------------------------------
@@ -622,12 +688,18 @@ class CodeEditorViewModelFactory(
     private val repository: NoteRepository,
     private val itemId: String,
     private val preferences: CodeEditorPreferences,
+    private val initialLine: Int? = null,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass.isAssignableFrom(CodeEditorViewModel::class.java)) {
             "Unknown ViewModel class: ${modelClass.name}"
         }
-        return CodeEditorViewModel(repository, itemId, preferences) as T
+        return CodeEditorViewModel(
+            repository = repository,
+            itemId = itemId,
+            preferences = preferences,
+            initialLine = initialLine,
+        ) as T
     }
 }

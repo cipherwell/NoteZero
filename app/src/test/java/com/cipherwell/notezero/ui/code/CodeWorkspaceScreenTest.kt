@@ -231,4 +231,97 @@ class CodeWorkspaceScreenTest {
         assertTrue(repository.itemById("f1")!!.trashed)
         composeRule.onAllNodesWithTag(CodeTags.FILE_ROW).assertCountEquals(0)
     }
+
+    // ---- Workspace search ----------------------------------------------------
+
+    private fun openSearch(query: String) {
+        composeRule.onNodeWithTag(CodeTags.SEARCH_TOGGLE).performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag(CodeTags.SEARCH_QUERY).performTextInput(query)
+        composeRule.waitForIdle()
+    }
+
+    @Test
+    fun `search finds a body hit and opens the file at that line`() {
+        repository.seedCodeFile(
+            id = "f1",
+            title = "Main.kt",
+            body = "fun main() {\n    val target = 1\n}",
+        )
+        setWorkspace()
+
+        openSearch("target")
+
+        composeRule.onNodeWithTag(CodeTags.SEARCH_RESULTS).assertExists()
+        composeRule.onAllNodesWithTag(CodeTags.SEARCH_RESULT_ROW).assertCountEquals(1)
+        composeRule.onNodeWithTag(CodeTags.SEARCH_STATUS).assertTextContains("1 match")
+        composeRule.onNodeWithText("Main.kt").assertExists()
+        // The tree is replaced by the results while a query is active.
+        composeRule.onNodeWithTag(CodeTags.FILE_TREE).assertDoesNotExist()
+
+        composeRule.onAllNodesWithTag(CodeTags.SEARCH_RESULT_ROW)[0].performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag(CodeTags.EDITOR).assertExists()
+        composeRule.onNodeWithTag(CodeTags.STATUS).assertTextContains("Ln 2", substring = true)
+    }
+
+    @Test
+    fun `search case toggle narrows the result rows`() {
+        repository.seedCodeFile(id = "f1", title = "Main.kt", body = "Target\ntarget")
+        setWorkspace()
+
+        openSearch("Target")
+        composeRule.onAllNodesWithTag(CodeTags.SEARCH_RESULT_ROW).assertCountEquals(2)
+
+        composeRule.onNodeWithTag(CodeTags.SEARCH_CASE).performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onAllNodesWithTag(CodeTags.SEARCH_RESULT_ROW).assertCountEquals(1)
+        composeRule.onNodeWithTag(CodeTags.SEARCH_STATUS).assertTextContains("1 match")
+    }
+
+    @Test
+    fun `search matches file names too`() {
+        repository.seedCodeFile(id = "f1", title = "SearchMe.kt", body = "nothing")
+        repository.seedCodeFile(id = "f2", title = "Other.kt", body = "nothing")
+        setWorkspace()
+
+        openSearch("SearchMe")
+
+        composeRule.onAllNodesWithTag(CodeTags.SEARCH_RESULT_ROW).assertCountEquals(1)
+        composeRule.onNodeWithText("SearchMe.kt").assertExists()
+    }
+
+    @Test
+    fun `search with no hits reports zero matches without leaving the bar`() {
+        repository.seedCodeFile(id = "f1", title = "Main.kt", body = "nothing")
+        setWorkspace()
+
+        openSearch("absent")
+
+        composeRule.onNodeWithTag(CodeTags.SEARCH_RESULTS).assertExists()
+        composeRule.onAllNodesWithTag(CodeTags.SEARCH_RESULT_ROW).assertCountEquals(0)
+        composeRule.onNodeWithTag(CodeTags.SEARCH_STATUS).assertTextContains("No matches")
+    }
+
+    @Test
+    fun `back closes the search bar before leaving the workspace`() {
+        repository.seedCodeFile(id = "f1", title = "Main.kt", body = "target")
+        setWorkspace()
+
+        openSearch("target")
+        composeRule.onNodeWithTag(CodeTags.SEARCH_QUERY).assertExists()
+
+        composeRule.onNodeWithTag(CodeTags.BACK).performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag(CodeTags.SEARCH_QUERY).assertDoesNotExist()
+        composeRule.onNodeWithTag(CodeTags.SEARCH_TOGGLE).assertExists()
+        assertEquals(0, backCount)
+
+        composeRule.onNodeWithTag(CodeTags.BACK).performClick()
+        composeRule.waitForIdle()
+        assertEquals(1, backCount)
+    }
 }

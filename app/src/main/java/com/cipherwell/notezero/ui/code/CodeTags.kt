@@ -50,6 +50,23 @@ object CodeTags {
     const val REDO = "code_redo"
     const val MORE = "code_more"
 
+    // ---- Workspace search ---------------------------------------------------
+    const val SEARCH_TOGGLE = "code_search_toggle"
+    const val SEARCH_QUERY = "code_search_query"
+    const val SEARCH_CASE = "code_search_case"
+    const val SEARCH_RESULTS = "code_search_results"
+    const val SEARCH_RESULT_ROW = "code_search_result_row"
+    const val SEARCH_STATUS = "code_search_status"
+
+    // ---- Copy / export / indentation ----------------------------------------
+    const val COPY = "code_copy"
+    const val EXPORT = "code_export"
+    const val EXPORT_CONFIRM = "code_export_confirm"
+    const val EXPORT_CANCEL = "code_export_cancel"
+    const val EXPORT_DIALOG = "code_export_dialog"
+    const val INDENT_INCREASE = "code_indent_increase"
+    const val INDENT_DECREASE = "code_indent_decrease"
+
     // ---- Shared dialogs -----------------------------------------------------
     /** Shared by the create-file, create-folder, rename and go-to-line dialogs. */
     const val DIALOG_FIELD = "code_dialog_field"

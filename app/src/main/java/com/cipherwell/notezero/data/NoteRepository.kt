@@ -2,6 +2,7 @@ package com.cipherwell.notezero.data
 
 import com.cipherwell.notezero.crypto.BiometricDecrypt
 import com.cipherwell.notezero.crypto.BiometricEnroll
+import com.cipherwell.notezero.model.AttachmentRef
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
@@ -35,13 +36,65 @@ data class VaultInfo(
     val schemaVersion: Int,
 )
 
-/** Outcome of restoring an encrypted backup envelope through SAF. */
+/**
+ * Outcome of restoring an encrypted backup envelope through SAF.
+ *
+ * [attachmentsImported]/[attachmentsSkipped] are the v2 attachment-blob counts (zero for
+ * v1 backups). A skipped attachment is never an error that fails the import: e.g. the
+ * backup carried a ref but no blob, the blob failed its SHA-256/integrity check, or the
+ * target note does not reference that attachment id. The note itself is still restored.
+ */
 data class BackupImportReport(
     val imported: Int,
     val duplicated: Int,
     val skipped: Int,
     val foldersImported: Int,
+    val attachmentsImported: Int = 0,
+    val attachmentsSkipped: Int = 0,
 )
+
+/** Hard limits for encrypted attachments. Values are part of the storage/backup contract. */
+object AttachmentLimits {
+    /** Maximum plaintext size of one attachment (10 MiB). */
+    const val MAX_ATTACHMENT_BYTES: Long = 10L * 1024 * 1024
+
+    /** Maximum number of attachments in one item. */
+    const val MAX_ATTACHMENTS_PER_NOTE: Int = 100
+
+    /** Maximum total plaintext size of all referenced attachments in the vault (512 MiB). */
+    const val MAX_TOTAL_BYTES: Long = 512L * 1024 * 1024
+}
+
+/**
+ * Non-secret attachment failure kinds. The UI maps these to friendly messages; no path,
+ * file name or content is ever included.
+ */
+enum class AttachmentError {
+    /** The source exceeded [AttachmentLimits.MAX_ATTACHMENT_BYTES]. */
+    TOO_LARGE,
+
+    /** The per-item count or the vault-wide byte quota would be exceeded. */
+    QUOTA_EXCEEDED,
+
+    /** The target note does not exist (or is not in the decrypted index). */
+    NOTE_NOT_FOUND,
+
+    /** The vault is locked / locked-out; attachments fail closed. */
+    LOCKED,
+
+    /** Reading the source, writing the blob or persisting the item failed. */
+    IO,
+
+    /** The stored blob failed its SHA-256 / AEAD / size integrity check. */
+    INTEGRITY,
+}
+
+/** Result of [NoteRepository.importAttachment]. */
+sealed interface AttachmentImport {
+    data class Success(val ref: AttachmentRef) : AttachmentImport
+
+    data class Failure(val error: AttachmentError) : AttachmentImport
+}
 
 /**
  * The single contract between the encrypted data layer and the Compose UI.
@@ -190,5 +243,56 @@ interface NoteRepository {
      * the password is wrong.
      */
     suspend fun importBackup(input: InputStream, password: CharArray?): BackupImportReport?
+
+    // ---- Encrypted attachments (v2; streams resolved by the UI) --------------
+
+    /**
+     * Encrypts [source] into the vault as a new attachment of the note [noteId].
+     *
+     * The blob is written to app-private storage only after it is AES-256-GCM encrypted
+     * (magic `NZAT` + version + ciphertext); the per-file size limit is enforced **while
+     * reading** (a hostile [source] cannot make us allocate past
+     * [AttachmentLimits.MAX_ATTACHMENT_BYTES]); the vault-wide byte quota and the
+     * per-note count are enforced before anything is written. Import is atomic: on any
+     * failure there is no orphan blob and no attachment ref. Never logs the name/content.
+     *
+     * Default is fail-secure (`LOCKED`) for test fakes / alternative implementations.
+     */
+    suspend fun importAttachment(
+        noteId: String,
+        displayName: String,
+        mimeType: String,
+        source: InputStream,
+    ): AttachmentImport = AttachmentImport.Failure(AttachmentError.LOCKED)
+
+    /**
+     * Decrypts one attachment and returns its plaintext bytes, or null when the vault is
+     * locked, the note/ref is unknown, the blob is missing, or its SHA-256 / AEAD / size
+     * check fails (counted, never surfaced). The result is caller-owned; it must never be
+     * cached to disk or logged.
+     *
+     * Default is fail-secure (`null`).
+     */
+    suspend fun attachmentBytes(noteId: String, attachmentId: String): ByteArray? = null
+
+    /**
+     * Explicit user-initiated decrypted export (SAF target): decrypts the attachment and
+     * writes the plaintext to [out]. Returns false on any failure (including locked vault
+     * or integrity failure). This is the ONLY path that hands attachment plaintext to
+     * external storage, and only because the user explicitly asked for it.
+     *
+     * Default is fail-secure (`false`).
+     */
+    suspend fun exportAttachment(noteId: String, attachmentId: String, out: OutputStream): Boolean =
+        false
+
+    /**
+     * Removes the attachment ref from the note and deletes its encrypted blob. Returns
+     * false when locked or when the note/ref does not exist. Trashing a note never deletes
+     * blobs; deleting it forever / emptying the trash does.
+     *
+     * Default is fail-secure (`false`).
+     */
+    suspend fun deleteAttachment(noteId: String, attachmentId: String): Boolean = false
 }
 

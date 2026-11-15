@@ -3,6 +3,61 @@
 All notable changes to NoteZero are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [Unreleased] — Phase 4 attachments + Phase 3 polish (2026-11-15, increment 3)
+
+### Added
+
+**Encrypted attachments (Phase 4)**
+- `AttachmentRef` metadata (display name, MIME, size, sha256) lives **inside** the item's
+  AES-GCM envelope (`ItemCodec` payload v2, still decodes v1 rows); the bytes live in
+  app-private `filesDir/attachments/<id>.nzb` as `NZAT` v1 blobs (magic+version+AES-256-GCM
+  under the vault VMK, AAD `notezero.attachment.v1|<noteId>|<attachmentId>`), SHA-256 verified
+  on read, bounds-checked, atomic import (temp + rename, no orphan blob/ref on failure).
+- Limits enforced while streaming: 10 MiB per attachment, 100 per note, 512 MiB vault quota;
+  path-traversal-safe ids; locked vault fails closed.
+- Lifecycle: trash keeps blobs, delete-forever/empty-trash removes them; startup orphan sweep
+  (skipped when corrupt rows exist); attachment refs are repository-owned, so a stale editor
+  autosave can never add or drop refs.
+- Encrypted backup **format v2** carries attachment bytes; v1 backups still import;
+  duplicate-safe restore with SHA-256 verification, missing/invalid blobs skipped+counted.
+- Notes editor: attachment strip between title and body — Photo Picker image import
+  (`PickVisualMedia`, no camera/storage permission), SAF file import, in-memory thumbnails
+  (no plaintext cache), full-screen decrypted viewer, delete with confirm, decrypted export
+  behind an explicit UNENCRYPTED-copy warning; all system pickers bracketed with
+  `beginExternalActivity`/`endExternalActivity`.
+
+**Code workspace polish (Phase 3 completion)**
+- Workspace-wide search (`code/CodeSearch`, pure Kotlin): titles + bodies, line/column +
+  snippet, case toggle, bounded; a result opens the file at the matched line.
+- Sensitivity-aware copy (selection or all, `EXTRA_IS_SENSITIVE`) and explicit-warning
+  decrypted export via SAF; multi-line indent/outdent toolbar actions and Tab/Shift+Tab.
+- Docs: `docs/ATTACHMENTS.md`, `docs/ATTACHMENTS-UI.md`, `docs/CONTRACTS-PHASE4.md`,
+  `docs/EDITOR-SPEC.md` §10, and `docs/DECISIONS.md` #14 (attachment storage/AAD/quota,
+  including the documented 64 MiB backup cap consequence).
+
+### Verified (measured)
+
+- **663 unit tests / 0 failures** (51 classes): data 99, code engine 139, ui code 100,
+  ui attachments 47, ui editor 38, crypto 61, model 43, backup/settings 37, security 5,
+  shell/notes 94. Includes attachment AAD swap/tamper/SHA-mismatch, quota, trash-vs-delete,
+  orphan sweep, backup v2 round trip incl. bytes + frozen v1 fixture, and code-search tests.
+- **10 instrumented tests OK**; `VaultFlowE2ETest` extended with the code-workspace search
+  flow (search `CodeE2E_secret` → 1 match → result opens at line) and the attachments strip
+  renders in the real editor. Plaintext-at-rest scan still clean for note/code content.
+- Signed release rebuilt and verified: APK `d498b1f3…cc30`, AAB `a270d6d5…591f`, certificate
+  `FA:CA:DD:67:…:92:78`. FLAG_SECURE re-verified (`screencap` 0 bytes on the normal build);
+  release permissions unchanged (`USE_BIOMETRIC` only); `check-offline.sh` green.
+- Screenshots refreshed (11 PNGs incl. workspace search + search-result editor).
+
+### Notes / known limits
+
+- Backup format v2 keeps the existing 64 MiB `MAX_BACKUP_BYTES` OOM guard; a vault with more
+  attachment bytes than that fails export **cleanly** (returns false, no partial file) instead
+  of streaming — chunked backup v3 is future work (documented in BACKUP-FORMAT §6).
+- Per-note count and vault quota share `AttachmentError.QUOTA_EXCEEDED` (UI differentiates).
+- Drawing canvas, camera scan, tables editing UI and widgets remain Phase 4 follow-ups.
+- Byte-for-byte reproducible release builds remain a Phase-5 task.
+
 ## [Unreleased] — Phase 2 complete + Phase 3 start (2026-11-15, increment 2)
 
 ### Added

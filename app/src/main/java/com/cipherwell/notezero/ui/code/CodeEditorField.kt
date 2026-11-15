@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,6 +29,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
@@ -64,6 +71,10 @@ import com.cipherwell.notezero.ui.theme.NoteZeroType
  * state is what keeps the gutter in sync with the code, including soft-wrapped files.
  *
  * Security: no content is logged, copied or persisted here; rendering only.
+ *
+ * Tab/Shift+Tab are intercepted (preview pass) and forwarded to [onIndent]/[onOutdent] so the
+ * editor indents instead of moving focus; the field scrolls to the caret when the ViewModel
+ * reports a navigation jump ([CodeEditorViewModel.State.navigationSeq]).
  */
 @Composable
 internal fun CodeEditorField(
@@ -73,6 +84,8 @@ internal fun CodeEditorField(
     palette: CodeSyntaxPalette,
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
+    onIndent: (() -> Unit)? = null,
+    onOutdent: (() -> Unit)? = null,
 ) {
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
@@ -108,6 +121,25 @@ internal fun CodeEditorField(
     var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
     val verticalScroll = rememberScrollState()
     val horizontalScroll = rememberScrollState()
+
+    // Reveal the caret after an explicit jump (open-at-line / go-to-line). Keyed on the
+    // navigation counter, not on the cursor, so typing and manual scrolling never yank the
+    // viewport on their own.
+    var lastRevealedNavigation by remember { mutableStateOf(0) }
+    LaunchedEffect(state.navigationSeq, layoutResult) {
+        val layout = layoutResult ?: return@LaunchedEffect
+        if (state.navigationSeq <= lastRevealedNavigation) return@LaunchedEffect
+        lastRevealedNavigation = state.navigationSeq
+        if (layout.lineCount <= 0) return@LaunchedEffect
+        val textLength = layout.layoutInput.text.length
+        val safeOffset = if (textLength == 0) 0 else state.cursor.coerceIn(0, textLength - 1)
+        val visualLine = runCatching { layout.getLineForOffset(safeOffset) }
+            .getOrDefault(0)
+            .coerceIn(0, layout.lineCount - 1)
+        val lineTop = layout.getLineTop(visualLine)
+        val lineHeight = (layout.getLineBottom(visualLine) - lineTop).coerceAtLeast(1f)
+        verticalScroll.scrollTo((lineTop - lineHeight * 2f).toInt().coerceAtLeast(0))
+    }
 
     val charWidthPx = remember(textMeasurer, textStyle) {
         val measured = textMeasurer.measure(AnnotatedString("0000"), textStyle)
@@ -176,6 +208,8 @@ internal fun CodeEditorField(
                         onLayout = { layoutResult = it },
                         state = state,
                         focusRequester = focusRequester,
+                        onIndent = onIndent,
+                        onOutdent = onOutdent,
                         modifier = fieldModifier.fillMaxWidth(),
                     )
                 } else {
@@ -194,6 +228,8 @@ internal fun CodeEditorField(
                             onLayout = { layoutResult = it },
                             state = state,
                             focusRequester = focusRequester,
+                            onIndent = onIndent,
+                            onOutdent = onOutdent,
                             modifier = Modifier.width(contentWidth).heightIn(min = viewportHeight),
                         )
                     }
@@ -214,6 +250,8 @@ private fun SourceTextField(
     onLayout: (TextLayoutResult) -> Unit,
     state: CodeEditorViewModel.State,
     focusRequester: FocusRequester? = null,
+    onIndent: (() -> Unit)? = null,
+    onOutdent: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     BasicTextField(
@@ -221,6 +259,13 @@ private fun SourceTextField(
         onValueChange = onValueChange,
         modifier = modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .then(
+                if (onIndent != null && onOutdent != null) {
+                    Modifier.indentKeys(onIndent = onIndent, onOutdent = onOutdent)
+                } else {
+                    Modifier
+                },
+            )
             .testTag(CodeTags.EDITOR),
         textStyle = textStyle.copy(color = palette.text),
         cursorBrush = SolidColor(palette.keyword),
@@ -248,6 +293,20 @@ private fun SourceTextField(
         },
     )
 }
+
+/**
+ * Intercepts Tab / Shift+Tab on the preview pass so the editor indents its selection instead
+ * of moving focus to the next control. Returning true consumes the key event.
+ */
+private fun Modifier.indentKeys(onIndent: () -> Unit, onOutdent: () -> Unit): Modifier =
+    onPreviewKeyEvent { event ->
+        if (event.type != KeyEventType.KeyDown || event.key != Key.Tab) {
+            false
+        } else {
+            if (event.isShiftPressed) onOutdent() else onIndent()
+            true
+        }
+    }
 
 /**
  * Composes the syntax-highlighted source as an [AnnotatedString]: base text, then one

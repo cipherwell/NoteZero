@@ -7,6 +7,7 @@ import com.cipherwell.notezero.crypto.CryptoAad
 import com.cipherwell.notezero.crypto.EnvelopeType
 import com.cipherwell.notezero.crypto.KeyEnvelope
 import com.cipherwell.notezero.crypto.NoteCrypto
+import com.cipherwell.notezero.model.AttachmentRef
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
@@ -40,6 +41,7 @@ class BackupFormatTest {
         pinned: Boolean = false,
         favorite: Boolean = false,
         trashed: Boolean = false,
+        attachments: List<AttachmentRef> = emptyList(),
     ) = Item(
         id = id,
         kind = kind,
@@ -53,6 +55,7 @@ class BackupFormatTest {
         createdAt = 1_700_000_000_000L,
         updatedAt = 1_700_000_001_000L,
         version = 3L,
+        attachments = attachments,
     )
 
     private fun folder(id: String = "folder-1", name: String = "Work", parentId: String? = null) =
@@ -67,6 +70,58 @@ class BackupFormatTest {
         ),
         folders = listOf(folder(), folder(id = "folder-2", name = "Nested", parentId = "folder-1")),
     )
+
+    private fun attachmentRef(
+        id: String = "att-1",
+        noteId: String = "item-1",
+        plaintext: ByteArray = "attachment plaintext".toByteArray(Charsets.UTF_8),
+    ) = AttachmentRef(
+        id = id,
+        displayName = "photo-caf\u00e9.jpg",
+        mimeType = "image/jpeg",
+        sizeBytes = plaintext.size.toLong(),
+        createdAt = 1_700_000_000_500L,
+        sha256 = AttachmentBlob.sha256Hex(plaintext),
+    )
+
+    private fun attachmentRecord(
+        noteId: String = "item-1",
+        attachmentId: String = "att-1",
+        plaintext: ByteArray = "attachment plaintext".toByteArray(Charsets.UTF_8),
+    ) = BackupFormat.AttachmentBlobRecord(
+        noteId = noteId,
+        attachmentId = attachmentId,
+        blob = AttachmentBlob.encode(
+            plaintext,
+            NoteCrypto.secretKey(vmk),
+            CryptoAad.attachment(noteId, attachmentId),
+        ),
+    )
+
+    private fun v2Contents(): BackupFormat.Contents = BackupFormat.Contents(
+        exportedAt = 1_700_000_002_000L,
+        items = listOf(
+            item(
+                id = "item-1",
+                attachments = listOf(attachmentRef()),
+            ),
+            item(id = "item-2", kind = ItemKind.CODE_FILE, title = "Main.kt"),
+        ),
+        folders = listOf(folder()),
+        attachments = listOf(attachmentRecord()),
+    )
+
+    private fun writeV2Backup(contents: BackupFormat.Contents = v2Contents()): ByteArray {
+        val stream = ByteArrayOutputStream()
+        BackupFormat.write(
+            stream,
+            contents,
+            vmk,
+            BackupFormat.MODE_VAULT_KEY,
+            listOf(passwordEnvelope("pw".toCharArray())),
+        )
+        return stream.toByteArray()
+    }
 
     private fun passwordEnvelope(
         password: CharArray,
@@ -274,8 +329,8 @@ class BackupFormatTest {
     @Test
     fun `tampered embedded envelope blob fails authentication`() {
         val bytes = writeVaultKeyBackup()
-        // Layout: 28-byte fixed header, then envelope count byte, then first u16 length.
-        val firstEnvelopeDataStart = 28 + 1 + 2
+        // Layout: 32-byte fixed v2 header, then envelope count byte, then first u16 length.
+        val firstEnvelopeDataStart = 32 + 1 + 2
         val tampered = bytes.copyOf()
         tampered[firstEnvelopeDataStart + 20] =
             (tampered[firstEnvelopeDataStart + 20].toInt() xor 0x02).toByte()
@@ -307,11 +362,11 @@ class BackupFormatTest {
         assertNull(
             read(
                 bytes.copyOf().also {
-                    it[24] = 0xFF.toByte()
-                    it[25] = 0xFF.toByte()
+                    it[28] = 0xFF.toByte()
+                    it[29] = 0xFF.toByte()
                 },
             ),
-        ) // oversized envelope block
+        ) // oversized envelope block (offset 28 in v2)
     }
 
     @Test
@@ -337,6 +392,126 @@ class BackupFormatTest {
                 BackupFormat.MODE_VAULT_KEY,
                 listOf(passwordEnvelope("a".toCharArray())),
             )
+        }
+    }
+
+    // ---- v2 attachments ------------------------------------------------------
+
+    @Test
+    fun `v2 backup round trips items refs and individually encrypted blobs`() {
+        val contents = v2Contents()
+        val bytes = writeV2Backup(contents)
+        val envelope = read(bytes)
+        assertNotNull(envelope)
+        assertEquals(BackupFormat.FORMAT_VERSION, envelope!!.formatVersion)
+        assertEquals(2, envelope.itemCount)
+        assertEquals(1, envelope.folderCount)
+        assertEquals(1, envelope.attachmentCount)
+
+        val decoded = envelope.decrypt(vmk)
+        assertEquals(contents, decoded)
+        // The blob itself is still the NZAT envelope, sealed under the source VMK + AAD.
+        val record = decoded!!.attachments.single()
+        assertArrayEquals("the stored blob is reproduced byte for byte", contents.attachments.single().blob, record.blob)
+        val innerPlaintext = AttachmentBlob.decode(
+            record.blob,
+            NoteCrypto.secretKey(vmk),
+            CryptoAad.attachment(record.noteId, record.attachmentId),
+        )
+        assertEquals("attachment plaintext", String(innerPlaintext!!, Charsets.UTF_8))
+        // No plaintext attachment bytes/names in the backup file.
+        val asText = String(bytes, Charsets.ISO_8859_1)
+        assertFalse(asText.contains("attachment plaintext"))
+        assertFalse(asText.contains("photo-"))
+    }
+
+    @Test
+    fun `v1 fixture backup still parses and decrypts`() {
+        val items = contents().items
+        val folders = contents().folders
+        val bytes = LegacyBackupFixture.writeV1(
+            sourceVmk = vmk,
+            backupPassword = "v1 backup password".toCharArray(),
+            items = items,
+            folders = folders,
+        )
+        val envelope = read(bytes)
+        assertNotNull("v1 backup must still parse", envelope)
+        assertEquals(1, envelope!!.formatVersion)
+        assertEquals(0, envelope.attachmentCount)
+        assertEquals(items.size, envelope.itemCount)
+        assertEquals(folders.size, envelope.folderCount)
+        assertEquals(BackupFormat.MODE_EXTRA_PASSWORD, envelope.mode)
+
+        val decoded = envelope.decrypt(vmk)
+        assertNotNull(decoded)
+        assertEquals(items, decoded!!.items)
+        assertEquals(folders, decoded.folders)
+        assertTrue(decoded.attachments.isEmpty())
+    }
+
+    @Test
+    fun `v2 header attachment count is authenticated and bounded`() {
+        val bytes = writeV2Backup()
+        // Header offset 24 is the u32 attachmentCount in v2.
+        val countTampered = bytes.copyOf()
+        countTampered[27] = 3.toByte() // still structurally valid (3 <= MAX) but no longer matches the AAD
+        val envelope = read(countTampered)
+        assertNotNull("count change still parses structurally", envelope)
+        assertNull("header attachment count must fail the AAD", envelope!!.decrypt(vmk))
+
+        val oversized = bytes.copyOf()
+        oversized[24] = 0x7F.toByte()
+        oversized[25] = 0xFF.toByte()
+        oversized[26] = 0xFF.toByte()
+        oversized[27] = 0xFF.toByte()
+        assertNull("oversized attachment count must be rejected at parse time", read(oversized))
+    }
+
+    @Test
+    fun `v2 payload with a corrupted attachment record fails authentication`() {
+        val bytes = writeV2Backup()
+        val tampered = bytes.copyOf()
+        // Flip a byte inside the sealed payload (last 8 bytes are the GCM tag region).
+        tampered[bytes.size - 4] = (tampered[bytes.size - 4].toInt() xor 0x01).toByte()
+        val envelope = read(tampered)
+        assertNotNull(envelope)
+        assertNull(envelope!!.decrypt(vmk))
+    }
+
+    @Test
+    fun `v2 write rejects a blob over the attachment size limit`() {
+        val huge = ByteArray(AttachmentLimits.MAX_ATTACHMENT_BYTES.toInt() + 1)
+        // Format-level guard: an NZAT blob larger than the maximum cannot be embedded.
+        val record = BackupFormat.AttachmentBlobRecord(
+            noteId = "item-1",
+            attachmentId = "att-1",
+            blob = ByteArray(AttachmentBlob.MAX_BLOB_BYTES.toInt() + 1),
+        )
+        val stream = ByteArrayOutputStream()
+        try {
+            BackupFormat.write(
+                stream,
+                BackupFormat.Contents(
+                    exportedAt = 1L,
+                    items = emptyList(),
+                    folders = emptyList(),
+                    attachments = listOf(record),
+                ),
+                vmk,
+                BackupFormat.MODE_VAULT_KEY,
+                listOf(passwordEnvelope("pw".toCharArray())),
+            )
+            throw AssertionError("expected IllegalArgumentException")
+        } catch (expected: IllegalArgumentException) {
+            assertEquals("rejected before writing anything", 0, stream.size())
+        }
+        // sanity: the huge plaintext itself is rejected by the blob encoder
+        try {
+            AttachmentBlob.encode(huge, NoteCrypto.secretKey(vmk), CryptoAad.attachment("n", "a"))
+            throw AssertionError("expected IllegalArgumentException")
+        } catch (expected: IllegalArgumentException) {
+            // expected
         }
     }
 

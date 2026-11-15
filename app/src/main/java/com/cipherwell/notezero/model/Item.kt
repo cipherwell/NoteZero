@@ -14,11 +14,36 @@ enum class ItemKind {
 }
 
 /**
+ * Reference to one encrypted attachment of an item.
+ *
+ * The bytes themselves live outside Room in `filesDir/attachments/<id>.nzb` (see
+ * docs/ATTACHMENTS.md); this ref is content and therefore encrypted **inside** the item
+ * envelope (`ItemCodec` payload v2). [displayName]/[mimeType]/[sizeBytes] are user data:
+ * never log them, never use [displayName] as a file name.
+ *
+ * [id] is a random UUID generated at import time and never derived from the content.
+ * [sha256] is the lowercase hex SHA-256 of the *plaintext* bytes, verified on every read;
+ * a mismatch means the blob was corrupted/tampered with and is never surfaced.
+ */
+data class AttachmentRef(
+    val id: String,
+    val displayName: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val createdAt: Long,
+    val sha256: String,
+)
+
+/**
  * A decrypted vault item. This type must never be written to disk in plaintext:
  * persistence happens through the encrypted item envelope (see data/ItemCodec).
  *
  * [id] is a random UUID generated at creation and never derived from content.
  * [createdAt]/[updatedAt] are epoch millis.
+ *
+ * [attachments] is repository-owned metadata: it is added by `importAttachment` and
+ * removed by `deleteAttachment`; `saveItem` preserves the stored list, so an editor
+ * autosave with a stale copy can never add or drop an attachment ref.
  */
 data class Item(
     val id: String,
@@ -34,6 +59,7 @@ data class Item(
     val updatedAt: Long = 0L,
     /** Incremented on every successful save; used for autosave conflict detection. */
     val version: Long = 0L,
+    val attachments: List<AttachmentRef> = emptyList(),
 ) {
     val isBlank: Boolean get() = title.isBlank() && body.isBlank()
 }
