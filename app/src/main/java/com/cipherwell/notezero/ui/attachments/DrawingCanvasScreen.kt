@@ -6,15 +6,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -99,6 +100,10 @@ fun DrawingCanvasScreen(
         properties = DialogProperties(
             usePlatformDefaultWidth = false,
             dismissOnClickOutside = false,
+            // The dialog content applies WindowInsets.safeDrawing itself; letting the window
+            // also fit system windows double-insets and clips the tool rows on tall devices
+            // with a larger font scale (device QA: buttons were pushed off-screen).
+            decorFitsSystemWindows = false,
         ),
     ) {
         Surface(
@@ -110,7 +115,8 @@ fun DrawingCanvasScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.safeDrawing),
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .verticalScroll(rememberScrollState()),
             ) {
                 DrawingHeader(
                     canSave = sketch.hasContent && !saving,
@@ -136,18 +142,15 @@ fun DrawingCanvasScreen(
                     },
                 )
 
-                Box(
+                Surface(
                     modifier = Modifier
-                        .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = NoteZeroSpacing.l, vertical = NoteZeroSpacing.s),
-                    contentAlignment = Alignment.Center,
+                        .padding(horizontal = NoteZeroSpacing.l, vertical = NoteZeroSpacing.s)
+                        .aspectRatio(DrawingFormat.aspectRatio)
+                        .testTag("drawing_paper"),
+                    shape = NoteZeroShapes.field,
+                    color = DrawingPalette.paper,
                 ) {
-                    Surface(
-                        modifier = Modifier.aspectRatio(DrawingFormat.aspectRatio),
-                        shape = NoteZeroShapes.field,
-                        color = DrawingPalette.paper,
-                    ) {
                         Box(modifier = Modifier.fillMaxSize()) {
                             Canvas(
                                 modifier = Modifier
@@ -190,7 +193,6 @@ fun DrawingCanvasScreen(
                                 )
                             }
                         }
-                    }
                 }
 
                 if (failed) {
@@ -211,6 +213,7 @@ fun DrawingCanvasScreen(
                     onWidth = { sketch = sketch.withWidth(it) },
                     onUndo = { sketch = sketch.undo() },
                     onClear = { sketch = sketch.clear() },
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
@@ -257,10 +260,10 @@ private fun DrawingTools(
     onWidth: (DrawingWidth) -> Unit,
     onUndo: () -> Unit,
     onClear: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
             .padding(horizontal = NoteZeroSpacing.l, vertical = NoteZeroSpacing.s),
     ) {
         // Seven 48dp swatches do not fit every phone width: the ink row scrolls, the

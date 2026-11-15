@@ -56,6 +56,48 @@ All notable changes to NoteZero are documented here. Format follows
   PDF export, encrypted per-note version history, translations, and the F-Droid window
   (2027-02-15).
 
+## [Unreleased] — Device QA on a real phone (2026-11-15, increment 7)
+
+First run of the **release build** on the owner's device (Pixel 9 Pro XL, Android 17, font
+scale 1.15). Everything below was reproduced on-device, fixed, and re-verified on-device.
+
+### Fixed
+
+- **Invisible status/navigation bar in light theme**: system bar icons followed the platform
+  instead of the app theme (white icons on the `#FAFAFA` surface). `NoteZeroTheme` now sets
+  `isAppearanceLightStatusBars`/`isAppearanceLightNavigationBars` from the resolved
+  light/dark mode (DECISIONS #19a).
+- **Drawing canvas tools cut off at a larger font scale**: the tool rows (ink palette, stroke
+  widths, Undo/Clear) could be pushed below the screen, making them unreachable. The page is
+  now a fixed 3:4 scroll-contained sheet (normalized stroke coordinates and the saved PNG are
+  unchanged) and the full-screen dialog applies insets exactly once (DECISIONS #19b).
+- **Misleading biometric error copy**: a failed/timed-out Face unlock surfaced
+  "Biometrics are not available on this device." even though fingerprint/face were enrolled
+  and the prompt itself had opened. Prompt errors are now mapped to specific, non-secret
+  messages — not enrolled ("No fingerprint or face enrolled. Add biometrics in system
+  settings."), temporarily unavailable, lockout, cancelled (silent) and retry
+  ("…didn't complete. Try again.") (DECISIONS #19c).
+- **Biometric CTA on a vault that never enabled biometrics**: the button was based only on
+  hardware availability, so it could only fail. The repository now exposes the non-secret
+  enrolled flag (wrapped-VMK check) that the unlock screen gates the CTA on, including while
+  locked (DECISIONS #19d).
+- **Attachment-only notes silently trashed on back**: the empty-note cleanup that keeps quick
+  capture tidy treated "no title/body" as empty even when an attachment existed. Attachments
+  now count as content and are kept (DECISIONS #19e).
+- **Stale settings banner**: a previous "Vault locked."/error message stayed on screen when
+  Settings was re-opened later. The banner is cleared on entry (DECISIONS #19f).
+- Pluralised the remaining "locked item(s)" settings counter (`plurals.xml`).
+
+### Verified (measured on the Pixel 9 Pro XL, Android 17)
+
+- All fixed areas re-checked from the actual release/QA build: status bar readable in light
+  theme, drawing canvas draws/saves/views an encrypted attachment with every tool visible at
+  font scale 1.15, note export writes the plaintext file via SAF, encrypted backup export
+  writes `NZBK` bytes with no plaintext, biometric unlock unlocks via fingerprint, and a note
+  with only a drawing survives back-out.
+- Unit suite grown to **876 tests / 0 failures** (73 classes); instrumented suite **OK
+  (10 tests)**; reproducibility re-run for the release artifacts (hashes in VERIFICATION §12).
+
 ## [Unreleased] — Phase 5: audit remediation, strings, reproducible APK+AAB (2026-11-15, increment 5)
 
 ### Added

@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cipherwell.notezero.data.NoteRepository
@@ -47,7 +48,11 @@ fun LockSettingsSection(
             text = if (verifiedIds.isEmpty()) {
                 stringResource(R.string.lock_settings_none)
             } else {
-                stringResource(R.string.lock_settings_count, verifiedIds.size)
+                pluralStringResource(
+                    R.plurals.lock_settings_count,
+                    verifiedIds.size,
+                    verifiedIds.size,
+                )
             },
             style = NoteZeroType.Caption,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

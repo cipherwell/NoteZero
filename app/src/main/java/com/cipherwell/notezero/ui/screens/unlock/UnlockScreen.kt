@@ -74,6 +74,10 @@ fun UnlockScreen(
             stringResource(R.string.unlock_error_corrupt)
         unlock.failure == UnlockFailure.BIOMETRIC_FAILED ->
             stringResource(R.string.unlock_error_biometric_failed)
+        unlock.failure == UnlockFailure.BIOMETRIC_TRY_AGAIN ->
+            stringResource(R.string.unlock_error_biometric_try_again)
+        unlock.failure == UnlockFailure.BIOMETRIC_NOT_ENROLLED ->
+            stringResource(R.string.unlock_error_biometric_not_enrolled)
         unlock.failure == UnlockFailure.BIOMETRIC_UNAVAILABLE ->
             stringResource(R.string.unlock_error_biometric_unavailable)
         unlock.failure == UnlockFailure.BIOMETRIC_LOCKOUT ->

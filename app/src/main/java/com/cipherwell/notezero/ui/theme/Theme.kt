@@ -1,13 +1,19 @@
 package com.cipherwell.notezero.ui.theme
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import com.cipherwell.notezero.model.ThemeMode
 
 /**
@@ -88,6 +94,18 @@ fun NoteZeroTheme(
     content: @Composable () -> Unit,
 ) {
     val dark = resolveDarkTheme(themeMode, darkTheme)
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        // Edge-to-edge: the status/navigation bar icons must contrast with the app surface.
+        // Without this the light theme renders white icons on the light surface (invisible
+        // status bar), and the dark theme does the opposite.
+        SideEffect {
+            val activity = view.context.findActivity() ?: return@SideEffect
+            val controller = WindowCompat.getInsetsController(activity.window, view)
+            controller.isAppearanceLightStatusBars = !dark
+            controller.isAppearanceLightNavigationBars = !dark
+        }
+    }
     CompositionLocalProvider(LocalNoteZeroColors provides if (dark) nzDarkColors() else nzLightColors()) {
         MaterialTheme(
             colorScheme = if (dark) darkScheme() else lightScheme(),
@@ -96,4 +114,14 @@ fun NoteZeroTheme(
             content = content,
         )
     }
+}
+
+/** Finds the host Activity through the Compose context chain (context may be a wrapper). */
+private fun Context.findActivity(): Activity? {
+    var context: Context? = this
+    while (context is ContextWrapper) {
+        if (context is Activity) return context
+        context = context.baseContext
+    }
+    return context as? Activity
 }

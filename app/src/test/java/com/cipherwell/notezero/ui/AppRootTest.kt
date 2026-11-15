@@ -131,4 +131,29 @@ class AppRootTest : UiTestBase() {
         composeRule.onNodeWithTag("recovery_reset_notice").assertDoesNotExist()
         composeRule.onNodeWithTag("notes_list").assertExists()
     }
+
+    @Test
+    fun `biometric CTA is hidden when unlock was never enabled`() {
+        // Available hardware, but biometric unlock was never enabled -> no CTA. Device QA:
+        // the button used to be shown and could only fail with an "unavailable" message.
+        val repository = FakeNoteRepository(
+            initialStatus = VaultStatus.LOCKED,
+            initialPassword = FakeNoteRepository.STRONG_PASSWORD,
+        )
+        val vm = VaultViewModel(repository, BiometricAvailability { true })
+        setThemedContent { AppRoot(repository = repository, viewModel = vm) }
+        composeRule.onNodeWithTag("unlock_password").assertExists()
+        composeRule.onNodeWithTag("unlock_biometric").assertDoesNotExist()
+    }
+
+    @Test
+    fun `biometric CTA is offered when a wrapped VMK is enrolled`() {
+        val repository = FakeNoteRepository(
+            initialStatus = VaultStatus.LOCKED,
+            initialPassword = FakeNoteRepository.STRONG_PASSWORD,
+        ).apply { forceBiometricEnrolled() }
+        val vm = VaultViewModel(repository, BiometricAvailability { true })
+        setThemedContent { AppRoot(repository = repository, viewModel = vm) }
+        composeRule.onNodeWithTag("unlock_biometric").assertExists()
+    }
 }

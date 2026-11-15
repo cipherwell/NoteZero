@@ -141,6 +141,14 @@ interface NoteRepository {
     suspend fun disableBiometricUnlock()
 
     /**
+     * True when a Keystore-wrapped VMK for biometric unlock exists for this device —
+     * independent of whether the vault is currently unlocked (the wrapped copy is
+     * ciphertext-only and non-secret). The unlock screen uses this to decide whether
+     * offering the biometric CTA makes sense at all. Fail-secure default: false.
+     */
+    fun isBiometricUnlockEnrolled(): Boolean = false
+
+    /**
      * Prepares the Keystore cipher for a BiometricPrompt; UI wraps it in a
      * BiometricPrompt.CryptoObject, then calls [completeBiometricUnlock].
      * Returns null when biometric unlock is not enrolled/available.

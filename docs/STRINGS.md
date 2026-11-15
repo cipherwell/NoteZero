@@ -1,7 +1,7 @@
 # NoteZero UI strings
 
-All user-visible Compose copy lives in `app/src/main/res/values/strings.xml`; count
-strings live in `app/src/main/res/values/plurals.xml`. Composables read them through
+All user-visible Compose copy lives in `app/src/main/res/values/strings.xml` (383 strings);
+count strings live in `app/src/main/res/values/plurals.xml` (7 plurals). Composables read them through
 `stringResource(...)` / `pluralStringResource(...)`. There is no one-off string
 constant for UI copy in a screen as of the extraction pass (exceptions below).
 

@@ -161,8 +161,14 @@ fun NoteEditorScreen(
         scope.launch {
             viewModel.saveOnLeave()
             val current = viewModel.state.value
-            if (!current.loading && !current.missing && !current.sessionCleared &&
-                current.title.isBlank() && current.body.isBlank()
+            if (shouldTrashOnLeave(
+                    title = current.title,
+                    body = current.body,
+                    attachmentCount = attachments.size,
+                    loading = current.loading,
+                    missing = current.missing,
+                    sessionCleared = current.sessionCleared,
+                )
             ) {
                 // Never leave a brand-new empty note behind after quick capture is abandoned.
                 // A cleared session is not "empty": the vault is locked and must not be touched.
@@ -527,3 +533,18 @@ private fun saveStateLabel(state: EditorViewModel.EditorState): String = when {
     state.saveStatus == SaveStatus.SAVED -> stringResource(R.string.common_saved)
     else -> stringResource(R.string.common_saved)
 }
+
+/**
+ * True when backing out of the editor should move the note to the trash: the note never got
+ * any content. Attachments count as content — a drawing/photo/file with no title or body must
+ * be kept (device QA: attachment-only notes were silently trashed on back).
+ */
+internal fun shouldTrashOnLeave(
+    title: String,
+    body: String,
+    attachmentCount: Int,
+    loading: Boolean,
+    missing: Boolean,
+    sessionCleared: Boolean,
+): Boolean = !loading && !missing && !sessionCleared &&
+    title.isBlank() && body.isBlank() && attachmentCount == 0

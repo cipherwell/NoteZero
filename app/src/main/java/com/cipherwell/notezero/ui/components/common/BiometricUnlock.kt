@@ -45,8 +45,14 @@ class AndroidBiometricAvailability(private val context: Context) : BiometricAvai
 
 /** Outcome of a prompt, mapped to non-secret user-facing copy in the ViewModel. */
 enum class BiometricPromptError {
-    /** No hardware/enrolment, or the Keystore key was invalidated. */
+    /** No biometric hardware, not enabled for apps, or the Keystore key was invalidated. */
     UNAVAILABLE,
+
+    /** Hardware exists but no fingerprint/face is enrolled on this device. */
+    NOT_ENROLLED,
+
+    /** Hardware temporarily busy/unavailable (e.g. sensor in use) — retrying works. */
+    TEMPORARILY_UNAVAILABLE,
 
     /** Too many attempts; the user must fall back to the password. */
     LOCKOUT,
@@ -54,10 +60,11 @@ enum class BiometricPromptError {
     /** Lockout that requires unlocking the device first. */
     LOCKOUT_PERMANENT,
 
-    /** The user dismissed the prompt. Not an error worth showing. */
+    /** The user dismissed the prompt (negative button / system cancel). Not worth showing. */
     CANCELLED,
 
-    /** Anything else. */
+    /** Timeout, unable-to-process, vendor error or anything else: authentication did not
+     *  complete even though the prompt opened. */
     FAILED,
 }
 
@@ -167,17 +174,29 @@ class BiometricPromptLauncher(private val activity: Activity) {
         )
     }
 
+    private companion object {
+        /** `BiometricPrompt.BIOMETRIC_ERROR_NEGATIVE_BUTTON` (stable platform code). */
+        const val BIOMETRIC_ERROR_NEGATIVE_BUTTON_CODE = 12
+    }
+
     private fun mapError(errorCode: Int): BiometricPromptError = when (errorCode) {
         BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED,
         BiometricPrompt.BIOMETRIC_ERROR_CANCELED,
+        // The platform constant for the negative button (12) is not exposed on every SDK
+        // level this app compiles against; the value is stable in the platform API contract.
+        BIOMETRIC_ERROR_NEGATIVE_BUTTON_CODE,
         -> BiometricPromptError.CANCELLED
         BiometricPrompt.BIOMETRIC_ERROR_LOCKOUT -> BiometricPromptError.LOCKOUT
         BiometricPrompt.BIOMETRIC_ERROR_LOCKOUT_PERMANENT -> BiometricPromptError.LOCKOUT_PERMANENT
-        BiometricPrompt.BIOMETRIC_ERROR_NO_BIOMETRICS,
+        // Hardware present but nothing enrolled on the device.
+        BiometricPrompt.BIOMETRIC_ERROR_NO_BIOMETRICS -> BiometricPromptError.NOT_ENROLLED
+        // No hardware / not usable by apps / key invalidated.
         BiometricPrompt.BIOMETRIC_ERROR_HW_NOT_PRESENT,
-        BiometricPrompt.BIOMETRIC_ERROR_HW_UNAVAILABLE,
         BiometricPrompt.BIOMETRIC_ERROR_NOT_ENABLED_FOR_APPS,
         -> BiometricPromptError.UNAVAILABLE
+        // Sensor busy: the prompt opened but the TEE/biometric service could not serve it.
+        BiometricPrompt.BIOMETRIC_ERROR_HW_UNAVAILABLE -> BiometricPromptError.TEMPORARILY_UNAVAILABLE
+        // Timeout / unable-to-process / vendor / no-space: the user gets a retry prompt.
         else -> BiometricPromptError.FAILED
     }
 }

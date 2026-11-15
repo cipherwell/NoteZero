@@ -143,6 +143,8 @@ class FakeNoteRepository(
         _vaultInfo.value = buildVaultInfo(biometricEnabled = false)
     }
 
+    override fun isBiometricUnlockEnrolled(): Boolean = biometricEnrolled
+
     override fun prepareBiometricDecrypt(): BiometricDecrypt? =
         if (biometricEnrolled) BiometricDecrypt(dummyCipher()) else null
 

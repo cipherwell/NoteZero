@@ -15,6 +15,7 @@ import com.cipherwell.notezero.ui.components.common.BiometricPromptError
 import com.cipherwell.notezero.ui.screens.setup.PasswordPolicy
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -40,6 +41,8 @@ data class VaultUiState(
     val vaultInfo: VaultInfo? = null,
     val biometricAvailable: Boolean = false,
     val biometricEnabled: Boolean = false,
+    /** A wrapped VMK exists for biometric unlock (known even while the vault is locked). */
+    val biometricEnrolled: Boolean = false,
 )
 
 enum class SetupStep { PASSWORD, PHRASE, CONFIRM, DONE }
@@ -67,7 +70,11 @@ enum class UnlockFailure {
     WRONG_PASSWORD,
     CORRUPT_VAULT,
     BIOMETRIC_FAILED,
+    /** Prompt opened but authentication did not complete (timeout/vendor/unable). */
+    BIOMETRIC_TRY_AGAIN,
     BIOMETRIC_UNAVAILABLE,
+    /** Hardware exists but the device has no fingerprint/face enrolled. */
+    BIOMETRIC_NOT_ENROLLED,
     BIOMETRIC_LOCKOUT,
 }
 
@@ -103,6 +110,8 @@ enum class SettingsMessage {
     BIOMETRIC_ENABLED,
     BIOMETRIC_DISABLED,
     BIOMETRIC_UNAVAILABLE,
+    BIOMETRIC_NOT_ENROLLED,
+    BIOMETRIC_TRY_AGAIN,
     BIOMETRIC_FAILED,
     AUTO_LOCK_UPDATED,
     THEME_UPDATED,
@@ -131,6 +140,10 @@ data class SettingsUiState(
         SettingsMessage.BIOMETRIC_ENABLED -> "Biometric unlock enabled."
         SettingsMessage.BIOMETRIC_DISABLED -> "Biometric unlock disabled."
         SettingsMessage.BIOMETRIC_UNAVAILABLE -> "Biometrics are not available on this device."
+        SettingsMessage.BIOMETRIC_NOT_ENROLLED ->
+            "No fingerprint or face enrolled. Add biometrics in system settings."
+        SettingsMessage.BIOMETRIC_TRY_AGAIN ->
+            "Biometric authentication didn't complete. Try again."
         SettingsMessage.BIOMETRIC_FAILED -> "Biometric authentication failed. Try again."
         SettingsMessage.AUTO_LOCK_UPDATED -> "Auto-lock updated."
         SettingsMessage.THEME_UPDATED -> "Appearance updated."
@@ -156,27 +169,60 @@ class VaultViewModel(
     private val biometricAvailableFlow =
         MutableStateFlow(runCatching { biometricAvailability.canAuthenticate() }.getOrDefault(false))
 
-    /** Combined vault state (status, theme, auto-lock, non-secret vault info). */
-    val state: StateFlow<VaultUiState> = combine(
+    /**
+     * Whether a wrapped VMK for biometric unlock exists. Known without the vault being
+     * unlocked (the wrap is ciphertext), so the locked screen can decide whether to offer
+     * the biometric CTA at all instead of showing a button that can only fail.
+     */
+    private val biometricEnrolledFlow = MutableStateFlow(
+        runCatching { repository.isBiometricUnlockEnrolled() }.getOrDefault(false),
+    )
+
+    private data class SessionMeta(
+        val status: VaultStatus,
+        val themeMode: ThemeMode,
+        val autoLockMinutes: Int,
+        val vaultInfo: VaultInfo?,
+    )
+
+    private val sessionMeta: Flow<SessionMeta> = combine(
         repository.status,
         repository.themeMode,
         repository.autoLockMinutes,
         repository.vaultInfo,
+    ) { status, themeMode, autoLockMinutes, vaultInfo ->
+        SessionMeta(status, themeMode, autoLockMinutes, vaultInfo)
+    }
+
+    /** Combined vault state (status, theme, auto-lock, non-secret vault info + biometric flags). */
+    val state: StateFlow<VaultUiState> = combine(
+        sessionMeta,
         biometricAvailableFlow,
-    ) { status, themeMode, autoLockMinutes, vaultInfo, biometricAvailable ->
+        biometricEnrolledFlow,
+    ) { meta, biometricAvailable, biometricEnrolled ->
         VaultUiState(
-            status = status,
-            themeMode = themeMode,
-            autoLockMinutes = autoLockMinutes,
-            vaultInfo = vaultInfo,
+            status = meta.status,
+            themeMode = meta.themeMode,
+            autoLockMinutes = meta.autoLockMinutes,
+            vaultInfo = meta.vaultInfo,
             biometricAvailable = biometricAvailable,
-            biometricEnabled = vaultInfo?.biometricUnlockEnabled == true,
+            biometricEnabled = meta.vaultInfo?.biometricUnlockEnabled == true,
+            biometricEnrolled = biometricEnrolled,
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
-        initialValue = VaultUiState(biometricAvailable = biometricAvailableFlow.value),
+        initialValue = VaultUiState(
+            biometricAvailable = biometricAvailableFlow.value,
+            biometricEnrolled = biometricEnrolledFlow.value,
+        ),
     )
+
+    /** Refreshes the enrolled flag from the repository (Keystore/prefs-backed, non-secret). */
+    private fun refreshBiometricEnrolled() {
+        biometricEnrolledFlow.value =
+            runCatching { repository.isBiometricUnlockEnrolled() }.getOrDefault(false)
+    }
 
     // ---- Setup -------------------------------------------------------------
 
@@ -210,8 +256,10 @@ class VaultViewModel(
     val recoveryResetNotice: StateFlow<Boolean> = _recoveryResetNotice.asStateFlow()
 
     init {
+        refreshBiometricEnrolled()
         viewModelScope.launch {
             repository.status.collect { status ->
+                refreshBiometricEnrolled()
                 when (status) {
                     VaultStatus.UNLOCKED -> {
                         lockoutJob?.cancel()
@@ -452,10 +500,13 @@ class VaultViewModel(
         val failure = when (error) {
             BiometricPromptError.CANCELLED -> return
             BiometricPromptError.UNAVAILABLE -> UnlockFailure.BIOMETRIC_UNAVAILABLE
+            BiometricPromptError.NOT_ENROLLED -> UnlockFailure.BIOMETRIC_NOT_ENROLLED
             BiometricPromptError.LOCKOUT,
             BiometricPromptError.LOCKOUT_PERMANENT,
             -> UnlockFailure.BIOMETRIC_LOCKOUT
-            BiometricPromptError.FAILED -> UnlockFailure.BIOMETRIC_FAILED
+            BiometricPromptError.TEMPORARILY_UNAVAILABLE,
+            BiometricPromptError.FAILED,
+            -> UnlockFailure.BIOMETRIC_TRY_AGAIN
         }
         _unlock.update { it.copy(isWorking = false, failure = failure) }
     }
@@ -662,9 +713,12 @@ class VaultViewModel(
         if (!isUnlocked()) return null
         val enroll = runCatching { repository.prepareBiometricEnroll() }.getOrNull()
         if (enroll == null) {
-            _settings.update {
-                it.copy(message = SettingsMessage.BIOMETRIC_UNAVAILABLE, isError = true)
+            val message = if (biometricAvailableFlow.value) {
+                SettingsMessage.BIOMETRIC_TRY_AGAIN
+            } else {
+                SettingsMessage.BIOMETRIC_UNAVAILABLE
             }
+            _settings.update { it.copy(message = message, isError = true) }
         }
         return enroll
     }
@@ -678,10 +732,11 @@ class VaultViewModel(
             } catch (_: Throwable) {
                 enabled = false
             }
+            refreshBiometricEnrolled()
             _settings.update {
                 it.copy(
                     isWorking = false,
-                    message = if (enabled) SettingsMessage.BIOMETRIC_ENABLED else SettingsMessage.BIOMETRIC_FAILED,
+                    message = if (enabled) SettingsMessage.BIOMETRIC_ENABLED else SettingsMessage.BIOMETRIC_TRY_AGAIN,
                     isError = !enabled,
                 )
             }
@@ -692,7 +747,12 @@ class VaultViewModel(
         val message = when (error) {
             BiometricPromptError.CANCELLED -> return
             BiometricPromptError.UNAVAILABLE -> SettingsMessage.BIOMETRIC_UNAVAILABLE
-            else -> SettingsMessage.BIOMETRIC_FAILED
+            BiometricPromptError.NOT_ENROLLED -> SettingsMessage.BIOMETRIC_NOT_ENROLLED
+            BiometricPromptError.TEMPORARILY_UNAVAILABLE,
+            BiometricPromptError.FAILED,
+            BiometricPromptError.LOCKOUT,
+            BiometricPromptError.LOCKOUT_PERMANENT,
+            -> SettingsMessage.BIOMETRIC_TRY_AGAIN
         }
         _settings.update { it.copy(isWorking = false, message = message, isError = true) }
     }
@@ -703,6 +763,7 @@ class VaultViewModel(
             _settings.update { it.copy(isWorking = true, message = null, isError = false) }
             try {
                 repository.disableBiometricUnlock()
+                refreshBiometricEnrolled()
                 _settings.update { it.copy(isWorking = false, message = SettingsMessage.BIOMETRIC_DISABLED, isError = false) }
             } catch (_: Throwable) {
                 _settings.update { it.copy(isWorking = false, message = SettingsMessage.FAILED, isError = true) }

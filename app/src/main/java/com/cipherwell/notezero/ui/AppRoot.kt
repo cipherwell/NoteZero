@@ -162,8 +162,10 @@ fun AppRoot(
                             } else {
                                 UnlockScreen(
                                     unlock = unlock,
-                                    showBiometric = state.biometricAvailable &&
-                                        (state.biometricEnabled || state.vaultInfo == null),
+                                    // Offer the CTA only when a wrapped VMK actually exists
+                                    // (known even while locked); otherwise the button could
+                                    // only fail (device QA finding).
+                                    showBiometric = state.biometricAvailable && state.biometricEnrolled,
                                     onUnlock = viewModel::unlock,
                                     onBiometricUnlock = {
                                         val controller = biometricController
@@ -220,7 +222,12 @@ fun AppRoot(
 
                                 else -> NotesListScreen(
                                     repository = repository,
-                                    onOpenSettings = { unlockedRoute = ROUTE_SETTINGS },
+                                    onOpenSettings = {
+                                        // A stale success/error banner from a previous visit
+                                        // must not greet the user on a fresh entry.
+                                        viewModel.clearSettingsMessage()
+                                        unlockedRoute = ROUTE_SETTINGS
+                                    },
                                     onOpenCode = { unlockedRoute = ROUTE_CODE },
                                     startNewNote = pendingNewNote,
                                     onStartNewNoteConsumed = {

@@ -36,4 +36,8 @@
         <item quantity="one">%1$d match</item>
         <item quantity="other">%1$d matches</item>
     </plurals>
+    <plurals name="lock_settings_count">
+        <item quantity="one">%1$d locked item revealed for this session. Re-arm to hide it again immediately.</item>
+        <item quantity="other">%1$d locked items revealed for this session. Re-arm to hide them again immediately.</item>
+    </plurals>
 </resources>

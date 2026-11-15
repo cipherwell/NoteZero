@@ -271,6 +271,59 @@ class VaultViewModelTest {
         assertEquals(UnlockFailure.BIOMETRIC_LOCKOUT, viewModel.unlock.value.failure)
     }
 
+    @Test
+    fun `prompt failures map to retry, not-enrolled and lockout copy`() = runTest(dispatcher) {
+        val repository = lockedVault().apply { forceBiometricEnrolled() }
+        val viewModel = createViewModel(repository, biometrics = true)
+        advanceUntilIdle()
+
+        // Timeout / unable-to-process / vendor: prompt opened but auth did not complete.
+        viewModel.onBiometricPromptError(BiometricPromptError.FAILED)
+        assertEquals(UnlockFailure.BIOMETRIC_TRY_AGAIN, viewModel.unlock.value.failure)
+        viewModel.onBiometricPromptError(BiometricPromptError.TEMPORARILY_UNAVAILABLE)
+        assertEquals(UnlockFailure.BIOMETRIC_TRY_AGAIN, viewModel.unlock.value.failure)
+        // Hardware exists but nothing is enrolled on the device.
+        viewModel.onBiometricPromptError(BiometricPromptError.NOT_ENROLLED)
+        assertEquals(UnlockFailure.BIOMETRIC_NOT_ENROLLED, viewModel.unlock.value.failure)
+        viewModel.onBiometricPromptError(BiometricPromptError.LOCKOUT_PERMANENT)
+        assertEquals(UnlockFailure.BIOMETRIC_LOCKOUT, viewModel.unlock.value.failure)
+    }
+
+    @Test
+    fun `enrolled flag is exposed while locked and refreshed after disable`() = runTest(dispatcher) {
+        // While locked, the enrolled flag is what lets the unlock screen decide whether to
+        // offer the biometric CTA (the wrapped VMK is non-secret metadata).
+        val locked = lockedVault().apply { forceBiometricEnrolled() }
+        val lockedViewModel = createViewModel(locked)
+        advanceUntilIdle()
+        assertTrue(lockedViewModel.state.value.biometricEnrolled)
+
+        val unlocked = unlockedVault().apply { forceBiometricEnrolled() }
+        val viewModel = createViewModel(unlocked)
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.biometricEnrolled)
+
+        viewModel.disableBiometricUnlock()
+        advanceUntilIdle()
+        assertEquals(false, viewModel.state.value.biometricEnrolled)
+    }
+
+    @Test
+    fun `enrollment failures surface retry or not-enrolled copy`() = runTest(dispatcher) {
+        val viewModel = createViewModel(unlockedVault())
+
+        viewModel.onBiometricEnrollError(BiometricPromptError.NOT_ENROLLED)
+        assertEquals(SettingsMessage.BIOMETRIC_NOT_ENROLLED, viewModel.settings.value.message)
+        assertTrue(viewModel.settings.value.isError)
+
+        viewModel.onBiometricEnrollError(BiometricPromptError.TEMPORARILY_UNAVAILABLE)
+        assertEquals(SettingsMessage.BIOMETRIC_TRY_AGAIN, viewModel.settings.value.message)
+
+        // Cancelling the prompt stays silent.
+        viewModel.onBiometricEnrollError(BiometricPromptError.CANCELLED)
+        assertEquals(SettingsMessage.BIOMETRIC_TRY_AGAIN, viewModel.settings.value.message)
+    }
+
     // ---- Settings -----------------------------------------------------------
 
     @Test

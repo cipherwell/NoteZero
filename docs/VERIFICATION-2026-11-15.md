@@ -381,8 +381,8 @@ handling, recovery-reset session boundary).
 | `adb shell am instrument -w com.cipherwell.notezero.test/…AndroidJUnitRunner` | **OK (10 tests)** incl. the extended E2E flow |
 | `./scripts/verify-reproducible.sh` (signed APK) | **RESULT: REPRODUCIBLE** — both builds `04ba7e180981df9a8724d8c9518126d3d40f5db8d6f74dde65a14300b982c71f` |
 | `./scripts/verify-reproducible.sh --artifact aab` | **RESULT: REPRODUCIBLE** — both builds `b0f0280ee1e9806ba9bc74d2bd9a7ea058ed442e8dc17b9573515261f0f90898` |
-| published `releases/notezero-0.1.0-release.apk` | `04ba7e180981df9a8724d8c9518126d3d40f5db8d6f74dde65a14300b982c71f` |
-| published `releases/notezero-0.1.0-release.aab` | `b0f0280ee1e9806ba9bc74d2bd9a7ea058ed442e8dc17b9573515261f0f90898` |
+| published `releases/notezero-0.1.0-release.apk` (superseded by §12 after the device-QA fixes) | `04ba7e180981df9a8724d8c9518126d3d40f5db8d6f74dde65a14300b982c71f` |
+| published `releases/notezero-0.1.0-release.aab` (superseded by §12) | `b0f0280ee1e9806ba9bc74d2bd9a7ea058ed442e8dc17b9573515261f0f90898` |
 | `apksigner verify --print-certs` | `CN=Cipherwell, O=Cipherwell, OU=NoteZero`, SHA-256 `FA:CA:DD:67:…:92:78` |
 | normal debug build + `adb exec-out screencap -p` | **0-byte capture** → FLAG_SECURE active |
 | `aapt2 dump permissions` on the release APK | `USE_BIOMETRIC` only (+ androidx.core signature-level receiver guard) |
@@ -425,3 +425,49 @@ tables 20, export flows 21, quick capture 2.
 - Camera scan (adds the CAMERA permission; deliberately last), home-screen widgets, PDF export,
   encrypted per-note version history, translations, and the F-Droid submission window
   (2027-02-15).
+
+---
+
+## 12. Increment 7 (same day): device QA on a real phone (Pixel 9 Pro XL, Android 17)
+
+The release build was installed on the owner's physical device and driven with `adb`/uiautomator
+(system UI inspection), with the owner's real settings: **font scale 1.15**, gesture navigation,
+enrolled fingerprint + Face unlock, Android 17 / SDK 37, 1344x2992 @ 480dpi.
+
+### Findings and fixes (all reproduced, fixed and re-verified on-device)
+
+| # | Finding (device) | Fix | Re-verified on-device |
+|---|---|---|---|
+| D1 | Status/navigation bar icons were **white on the light surface** (invisible time/battery) on every screen | `NoteZeroTheme` sets `isAppearanceLightStatusBars` / `isAppearanceLightNavigationBars` from the resolved light/dark theme | Dark icons now readable on the light `#FAFAFA` background (screenshot captured) |
+| D2 | Drawing canvas **tool rows clipped below the screen** at font scale 1.15 (Undo/Clear unreachable; ink row half visible) | Fixed 3:4 scroll-contained page (stroke coordinates still normalized; PNG unchanged) + full-screen dialog applies `safeDrawing` insets exactly once (`decorFitsSystemWindows = false`) | Drawn two strokes → Save → encrypted attachment `drawing-*.png` imported, viewer renders it, all tool rows on-screen |
+| D3 | Biometric toggle showed **"Biometrics are not available on this device."** when Face didn't match, even though the prompt opened and fingerprint was enrolled | Prompt error codes mapped to `UNAVAILABLE` / `NOT_ENROLLED` / `TEMPORARILY_UNAVAILABLE` / `LOCKOUT` / `CANCELLED` / `FAILED` with specific copy; enrollment null-result no longer claims "unavailable" when hardware is available | Fingerprint enrollment completed; settings shows "Biometric unlock — Enabled…"; biometric unlock from the locked screen unlocked the vault |
+| D4 | Unlock screen offered the biometric CTA on a vault that had never enabled biometrics (CTA could only fail) | `NoteRepository.isBiometricUnlockEnrolled()` (wrapped-VMK Keystore check, non-secret) exposed through `VaultUiState.biometricEnrolled`; CTA gated on availability **and** enrollment | Enrolled device: CTA present and works; not-enrolled test (`AppRootTest`) covers the hidden case |
+| D5 | Attachment-only note (drawing, no title/body) was **silently moved to trash on back** | `shouldTrashOnLeave(title, body, attachmentCount, …)` keeps any note with content, including attachments | After the fix, a drawing-only note stays in the list (verified on-device once the fixed build was installed) |
+| D6 | Stale "Vault locked." banner re-appeared when re-opening Settings later | Banner cleared on Settings entry | Not re-shown on re-entry |
+| D7 | Settings counter said "1 locked item(s) revealed" | `plurals.xml` `lock_settings_count` | Unit assertion updated |
+
+Working on-device flows (unchanged features, re-run): password unlock; **biometric unlock**
+(fingerprint); lock note → masked row → biometric re-auth → revealed; drawing save/view; table
+insert dialog; Markdown note export through SAF (writes the plaintext file; `note.md` existed
+in Downloads); encrypted backup export through SAF (`notezero-backup-*.nzbk`, 56 039 bytes,
+starts with `NZBK`, contains no plaintext); no camera/storage/network permission prompts.
+
+All QA-created files were deleted from the device (`Downloads/note.md`, the backup file); the
+owner's vault data was preserved (same signing key re-installed over it, no uninstall).
+
+### Measurements after the fixes
+
+| Check | Result |
+|---|---|
+| `./gradlew :app:testDebugUnitTest` | **876 tests / 0 failures / 0 errors / 0 skipped (73 classes)** |
+| Instrumented suite (emulator) | **OK (10 tests)**; screenshots refreshed, incl. the new drawing canvas layout |
+| `./scripts/check-offline.sh --gradle` | exit 0 |
+| Release permissions (`aapt2 dump permissions`) | `USE_BIOMETRIC` only |
+| Reproducibility, signed APK | **REPRODUCIBLE** — both builds sha256 `07b2b4bbd7633be35514792892b48a8c4609184ee0b182961c020c6d81c77d60` |
+| Reproducibility, AAB | **REPRODUCIBLE** — both builds sha256 `1a93561b62ccf470de8ff8a524f21cb8675641b35493c0bb4d46de1387a9f502` |
+| Published `releases/notezero-0.1.0-release.apk` | `07b2b4bbd7633be35514792892b48a8c4609184ee0b182961c020c6d81c77d60` |
+| Published `releases/notezero-0.1.0-release.aab` | `1a93561b62ccf470de8ff8a524f21cb8675641b35493c0bb4d46de1387a9f502` |
+| Device install of the fixed release | `adb install -r` over the previous build (same upload key) → vault intact, version 0.1.0 |
+| Device smoke after install | Unlocks with password + fingerprint; status bar readable; drawing tools visible at 1.15; biometric settings "Enabled"; attachment-only note kept; 0 FATAL/ANR in logcat |
+
+DECISIONS #19 records the policies behind D1–D6.

@@ -95,6 +95,8 @@
     <string name="unlock_error_wrong_password">Incorrect password. Try again.</string>
     <string name="unlock_error_corrupt">This vault could not be read. Use your recovery phrase to reset it.</string>
     <string name="unlock_error_biometric_failed">Biometric unlock failed. Enter your password.</string>
+    <string name="unlock_error_biometric_try_again">Biometric authentication didn\'t complete. Try again or enter your password.</string>
+    <string name="unlock_error_biometric_not_enrolled">No fingerprint or face is enrolled. Add biometrics in system settings, or enter your password.</string>
     <string name="unlock_error_biometric_unavailable">Biometric unlock is not available. Enter your password.</string>
     <string name="unlock_error_biometric_lockout">Biometric authentication is locked. Enter your password.</string>
     <string name="unlock_button">Unlock</string>

@@ -72,7 +72,7 @@ class LockSettingsSectionTest {
         repository.markLockVerified("n1")
         setScreen()
 
-        composeRule.onNodeWithText("1 locked item(s) revealed for this session. Re-arm to hide them again immediately.")
+        composeRule.onNodeWithText("1 locked item revealed for this session. Re-arm to hide it again immediately.")
             .assertExists()
         composeRule.onNodeWithTag("settings_relock").performClick()
         composeRule.waitForIdle()

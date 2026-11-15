@@ -615,6 +615,12 @@ class EncryptedNoteRepository(
         }
     }
 
+    override fun isBiometricUnlockEnrolled(): Boolean = try {
+        biometrics.isEnrolled()
+    } catch (e: Exception) {
+        false
+    }
+
     override fun prepareBiometricDecrypt(): BiometricDecrypt? {
         val wasEnrolled = metaCache?.biometricEnabled == true
         val decrypt = try {

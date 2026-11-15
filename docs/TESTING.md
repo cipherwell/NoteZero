@@ -62,15 +62,18 @@ Commands:
 
 | Suite | Command | Result |
 |---|---|---|
-| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **866 tests / 0 failures / 0 errors / 0 skipped** (72 classes) |
+| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **876 tests / 0 failures / 0 errors / 0 skipped** (73 classes) |
 | Instrumented (emulator) | `adb shell am instrument -w com.cipherwell.notezero.test/androidx.test.runner.AndroidJUnitRunner` | **OK (10 tests)** incl. `VaultFlowE2ETest` (notes + backup settings + code workspace) |
 | Offline guarantee | `./scripts/check-offline.sh --gradle` | exit 0 |
 | Release signing | `apksigner verify --print-certs app-release.apk` | NoteZero upload key SHA-256 `FA:CA:DD:67:…:92:78` |
 
-Per-area counts: crypto 61, data 124, model 61, security 5, code engine 139, ui code 117,
-ui attachments 88, ui editor 69, ui backup/settings 37, ui locks 18, ui notes 82, other UI 65.
+Per-area counts: crypto 61, data 124, model 61, security 5, code engine 256, ui attachments 88,
+ui notes 82, ui editor 74, other UI 62, backup 33, ui locks 18, ui screens 12.
 Audit remediation added 24 regression tests (editor state wipe on lock/re-arm, code editor
 locked gate, export status gating, stale-session handling, recovery-reset boundaries).
+Device QA (Pixel 9 Pro XL, Android 17, font scale 1.15) added 10 more: biometric prompt-error
+mapping + enrolled-flag gating (VaultViewModel/AppRoot) and the empty-note-on-leave predicate
+(attachments count as content).
 Highlights: code engine includes 200 KB lexer performance (Kotlin 6.42 ms, JS 7.85 ms,
 XML 3.21 ms), fuzz invariants and `CodeSearch`; attachments cover NZAT blob format,
 import limits/quota, AAD note/id swap rejection, tamper + SHA mismatch, trash-vs-delete
