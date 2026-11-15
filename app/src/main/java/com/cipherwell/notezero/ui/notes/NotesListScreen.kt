@@ -50,7 +50,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -82,6 +86,7 @@ import kotlinx.coroutines.launch
 fun NotesListScreen(
     repository: NoteRepository,
     onOpenSettings: () -> Unit,
+    onOpenCode: () -> Unit = {},
 ) {
     val viewModel: NotesViewModel = viewModel(factory = NotesViewModelFactory(repository))
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -100,6 +105,7 @@ fun NotesListScreen(
     NotesListContent(
         state = state,
         viewModel = viewModel,
+        onOpenCode = onOpenCode,
         onOpenEditor = { editorItemId = it },
         onOpenSettings = onOpenSettings,
     )
@@ -112,6 +118,7 @@ private fun NotesListContent(
     viewModel: NotesViewModel,
     onOpenEditor: (String) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenCode: () -> Unit,
 ) {
     var renameTarget by remember { mutableStateOf<Item?>(null) }
     var moveTarget by remember { mutableStateOf<Item?>(null) }
@@ -177,6 +184,21 @@ private fun NotesListContent(
                             modifier = Modifier.testTag("trash_empty_button"),
                         ) { Text("Empty") }
                     } else {
+                        IconButton(
+                            onClick = onOpenCode,
+                            modifier = Modifier
+                                .testTag("nav_code")
+                                .semantics { contentDescription = "Code workspace" },
+                        ) {
+                            Text(
+                                text = "</>",
+                                style = NoteZeroType.Caption.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         IconButton(
                             onClick = { viewModel.showTrash() },
                             modifier = Modifier.testTag("trash_button"),

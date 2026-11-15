@@ -35,6 +35,10 @@ com.cipherwell.notezero
 ├── backup/
 │   └── BackupFormat.kt         stream-based, authenticated backup envelope (pure JVM)
 └── ui/                         Compose UI (shell + notes/editor + theme tokens)
+    ├── backup/                 SAF backup UI: BackupFlowController (unit-testable state
+    │                           machine + external-activity bracket), BackupFlowViewModel
+    │                           (Activity-scoped pending-uri owner), BackupSection (settings)
+    └── screens/settings/       SettingsScreen — composes the "Data & backup" section
 ```
 
 The dependency direction is strictly one-way:
@@ -42,6 +46,7 @@ The dependency direction is strictly one-way:
 ```
 ui ──► data (NoteRepository) ──► crypto
 ui ──► model
+ui/backup ──► backup (structural header validation only, never decryption)
 data ──► model, backup, crypto
 backup ──► data (codecs), model, crypto
 crypto ──► (nothing but JDK/Android Keystore)
@@ -135,14 +140,22 @@ immediately corrects marker/DB disagreement (e.g. DB restored from an old backup
 - The repository owns the idle timer (nothing in the UI schedules locks).
 - `registerInteraction()` is called by the UI on real user input; it re-arms the timer.
 - `onAppBackgrounded()` (Activity `onStop`/screen-off) **locks immediately** — the secure
-  default for a vault app. The only exception is the build flag
+  default for a vault app. The only exceptions are the build flag
   `-PdevDisableAutoLock=true` (`BuildConfig.DEV_DISABLE_AUTO_LOCK`), consumed via the
-  `allowAutoLock` constructor parameter, for automation/emulator verification.
-  Integration note: an in-app SAF flow (backup export/import) is a separate Activity, so it
-  triggers `onStop` → lock while the file picker is open. The backup UI must therefore
-  treat the post-picker resume as "locked": keep the resolved `Uri` in its ViewModel, let
-  the app route to unlock, and call `exportBackup`/`importBackup` only after `UNLOCKED`
-  (or ask the Lead for an explicit external-activity suppression hook on the interface).
+  `allowAutoLock` constructor parameter, for automation/emulator verification, and an
+  active external activity (below).
+- **External-activity deferral (the SAF picker).** `beginExternalActivity()` /
+  `endExternalActivity()` bracket a system-owned activity that stops the app on purpose
+  (`ActivityResultContracts.CreateDocument` / `OpenDocument`). While the bracket is open,
+  `onAppBackgrounded()` records the pending background state instead of locking; the idle
+  timer is **not** cancelled, so a picker left open past `autoLockMinutes` still locks — no
+  permanent suppression. `onAppForegrounded()` clears the pending state (and resets a leaked
+  bracket count, so a picker result that never arrives cannot weaken later background
+  locks); `endExternalActivity()` while the app is still backgrounded locks immediately.
+  The backup UI keeps the pending mode + `content://` uri in an Activity-scoped ViewModel
+  (`ui/backup/BackupFlowViewModel`) and resumes the transfer via
+  `BackupFlowController.onVaultUnlocked()` after the user unlocks, so the chosen file is
+  never silently dropped. The deferral itself writes no plaintext and holds no secret.
 - `onAppForegrounded()` re-arms the idle timer when still unlocked.
 - `autoLockMinutes` (0 disables) is persisted in DataStore, clamped to `0..240`, default
   `5`. The timer polls every 10 s against the injected clock; the deterministic decision
@@ -170,6 +183,15 @@ writes every new row in one Room transaction. Duplicate policy is item-id + `upd
 equal ⇒ counted as duplicate; same id with different `updatedAt` ⇒ conflict, never
 overwritten (counted as skipped). Full wire format: [BACKUP-FORMAT.md](BACKUP-FORMAT.md).
 
+The UI flow lives in `ui/backup/` and `ui/screens/settings/` (Settings → "Data & backup"):
+export opens SAF `CreateDocument` (MIME `application/octet-stream`, suggested name
+`notezero-backup-YYYYMMDD-HHmm.nzbk`) and import opens `OpenDocument`; both are bracketed by
+the external-activity deferral above. A cross-vault envelope prompts once for the source
+master password **or** the source 12-word phrase (joined with single spaces; max 3 attempts,
+then a non-secret `WRONG_CREDENTIAL` error). If the vault locked while the picker was open,
+the controller keeps the chosen uri and resumes after unlock instead of re-asking the user to
+pick the file again. See [BACKUP-FORMAT.md](BACKUP-FORMAT.md) §8.
+
 ## 7. Security boundaries and non-goals
 
 - The only key material persisted is the wrapped VMK (`vault_meta` envelopes) and the
@@ -191,6 +213,8 @@ overwritten (counted as skipped). Full wire format: [BACKUP-FORMAT.md](BACKUP-FO
 | Read-side helpers | `model/ItemQueriesTest` — title/preview, search/filter/sort, tags, trash window, folder tree | plain JUnit |
 | Binary payloads | `data/PayloadCodecTest` — round-trip, bounds, corruption, fuzzing | plain JUnit |
 | Backup envelope | `data/BackupFormatTest` — real AES-GCM, modes, header binding, tamper/truncation | plain JUnit |
+| Backup UI flow | `ui.backup/BackupFlowControllerTest` — export/import state machine, credential cap, lock resume; `ui.backup/BackupSectionContentTest` — every state rendering | plain JUnit + Robolectric Compose |
+| External-activity lock | `data/ExternalActivityLockTest` — picker background deferral, end-while-background, idle-timeout backstop | Robolectric + in-memory Room, real crypto |
 | Repository end-to-end | `data/EncryptedNoteRepositoryTest` — setup/unlock/lock, recovery, AAD swaps, CRUD/folders, auto-lock, redaction, backup import/export | Robolectric + in-memory/on-disk Room, real crypto |
 
 The repository test injects a `NoteZeroDatabase`, a `VaultPreferences` built on an isolated
@@ -210,6 +234,10 @@ iterations (`10_000`) so the suite stays fast; production defaults remain 600 00
 - `MainActivity` forwards `onStop` → `onAppBackgrounded()`, `onStart` → `onAppForegrounded()`
   and the UI input layer forwards `registerInteraction()`. The UI never constructs the
   repository inside a composable and never sees a VMK or ciphertext.
+- The Settings "Data & backup" section needs the app-scoped repository: `SettingsScreen`
+  takes an optional `backupRepository` parameter (AppRoot may pass its instance) and,
+  when absent, reads `NoteZeroApp.repository` through the context chain — it never creates
+  a second repository.
 
 ## 10. Deliberate deviations / notes
 

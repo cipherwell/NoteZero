@@ -1,5 +1,6 @@
 package com.cipherwell.notezero
 
+import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.graphics.Bitmap
@@ -8,6 +9,8 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -69,6 +72,10 @@ class VaultFlowE2ETest {
         const val NOTE_BODY = "# Heading\n- [ ] unchecked task\n- [x] done task\n```kotlin\nval answer = 42\n```"
         const val EDITOR_NOTE_TITLE = "Second note from editor"
         const val SECOND_BODY = "# Preview\n- [ ] tap me\n\n> quote\n\n| a | b |\n|---|---|\n| 1 | 2 |"
+        const val CODE_FILE_NAME = "hello.kt"
+        const val CODE_SECRET_MARKER = "CodeE2E_secret"
+        const val CODE_BODY =
+            "fun main() {\n    val secret = \"$CODE_SECRET_MARKER\"\n    println(secret)\n}"
         const val DB_NAME = "notezero-vault.db"
     }
 
@@ -197,6 +204,43 @@ class VaultFlowE2ETest {
                 compose.onAllNodesWithText(EDITOR_NOTE_TITLE, substring = true).fetchSemanticsNodes().isNotEmpty()
             }
             saveScreenshot("04-notes-list-two-notes")
+
+            // ---- 6b. Settings with the backup section --------------------------------
+            compose.onNodeWithTag("settings_button").performClick()
+            compose.waitForTag("settings_screen", 15_000)
+            // Scroll to the Data & backup section so the evidence screenshot shows it.
+            repeat(3) {
+                compose.onNodeWithTag("settings_screen").performTouchInput { swipeUp() }
+                compose.waitForIdle()
+            }
+            saveScreenshot("05-settings-backup")
+            // The settings header scrolls with the content, so use the system back action,
+            // which is routed through SettingsScreen's BackHandler.
+            pressSystemBack()
+            compose.waitForTag("notes_list", 15_000)
+
+            // ---- 6c. Code workspace: create a file, edit it, persist -----------------
+            compose.onNodeWithTag("nav_code").performClick()
+            compose.waitForTag("code_workspace", 20_000)
+            saveScreenshot("06-code-workspace-empty")
+            compose.onNodeWithTag("code_new_file").performClick()
+            compose.waitForTag("code_dialog_field", 15_000)
+            compose.onNodeWithTag("code_dialog_field").performClick()
+            compose.onNodeWithTag("code_dialog_field").performTextInput(CODE_FILE_NAME)
+            compose.onNodeWithTag("code_dialog_confirm").performClick()
+            compose.waitForTag("code_editor", 20_000)
+            compose.onNodeWithTag("code_editor").performClick()
+            compose.onNodeWithTag("code_editor").performTextInput(CODE_BODY)
+            compose.waitUntil(15_000) {
+                compose.onAllNodesWithText("Saved", substring = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            saveScreenshot("07-code-editor-kotlin")
+            compose.onNodeWithTag("code_back").performClick()
+            compose.waitForTag("code_workspace", 20_000)
+            compose.waitUntil(15_000) {
+                compose.onAllNodesWithText(CODE_FILE_NAME, substring = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            saveScreenshot("08-code-workspace-file")
         } finally {
             scenario.close()
         }
@@ -206,15 +250,30 @@ class VaultFlowE2ETest {
         val editorItem = repository.items.value.firstOrNull { it.title == EDITOR_NOTE_TITLE }
         assertTrue("note created in the editor must persist", editorItem != null)
         assertTrue(editorItem!!.body.contains("tap me"))
+        val codeItem = repository.items.value.firstOrNull { it.title == CODE_FILE_NAME }
+        assertTrue("code file created in the workspace must persist", codeItem != null)
+        assertEquals(ItemKind.CODE_FILE, codeItem!!.kind)
+        assertTrue(
+            "code editor body must persist through autosave",
+            codeItem.body.contains(CODE_SECRET_MARKER),
+        )
         runBlocking { repository.lock() }
         val afterUiDisk = String(databaseBytes(), Charsets.ISO_8859_1)
         assertFalse("editor plaintext title leaked into the database", afterUiDisk.contains(EDITOR_NOTE_TITLE))
+        assertFalse("code file plaintext title leaked into the database", afterUiDisk.contains(CODE_FILE_NAME))
+        assertFalse("code file plaintext body leaked into the database", afterUiDisk.contains(CODE_SECRET_MARKER))
     }
 
     // ---- helpers ------------------------------------------------------------------------
 
     private fun androidx.compose.ui.test.junit4.ComposeTestRule.waitForTag(tag: String, timeoutMs: Long) {
         waitUntil(timeoutMs) { onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    /** System back (routes through the app's BackHandler instead of a scrolled-away button). */
+    private fun pressSystemBack() {
+        InstrumentationRegistry.getInstrumentation().uiAutomation
+            .performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
     }
 
     private fun saveScreenshot(name: String) {

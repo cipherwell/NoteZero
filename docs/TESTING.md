@@ -22,6 +22,24 @@ export JAVA_HOME=/usr/lib/jvm/java-17-openjdk
 
 CI runs `assembleDebug`, `testDebugUnitTest`, and `check-offline.sh --gradle` on every push.
 
+## Backup-flow tests (Phase-2 SAF gap)
+
+| Test | What it proves | Tooling |
+|---|---|---|
+| `data/ExternalActivityLockTest` | The SAF picker's `onStop` does not lock the vault; `endExternalActivity` while backgrounded locks immediately; the idle timeout still locks during an external activity (no permanent suppression); nested brackets; a lost picker result cannot suppress later background locks | Robolectric, real repository + in-memory Room + real crypto |
+| `ui.backup/BackupFlowControllerTest` | Vault-key and separate-password export write a non-empty envelope and wipe the password; import report/duplicate counts; cross-vault credential prompt; password **or** phrase submitted joined by single spaces; 3-attempt cap; `INVALID_FILE` structural probe; locked-picker resume via `onVaultUnlocked()`; cancelled/failed picker settles the external-activity bracket | plain JUnit, fake repository + in-memory streams |
+| `ui.backup/BackupSectionContentTest` | Every `BackupUiState` renders the contract tags, non-secret copy, credential dialog, confirmation gate and disabled in-progress actions | Robolectric Compose |
+| `ui.screens.settings/BackupSettingsSectionTest` | Settings screen shows the "Data & backup" section with stable tags; empty-vault export is refused without launching SAF | Robolectric Compose |
+
+Commands:
+
+```bash
+./gradlew :app:testDebugUnitTest \
+  --tests "com.cipherwell.notezero.data.*" \
+  --tests "com.cipherwell.notezero.ui.backup.*" \
+  --tests "com.cipherwell.notezero.ui.screens.settings.*"
+```
+
 ## Required coverage by area (from the security bar)
 
 - **Crypto:** PBKDF2-HMAC-SHA256 RFC 7914 vectors, AES-GCM NIST vectors, BIP-39 official
@@ -37,18 +55,21 @@ CI runs `assembleDebug`, `testDebugUnitTest`, and `check-offline.sh --gradle` on
   not overwritten), wrong password rejected, phrase-only mode.
 - **UI/security UX:** FLAG_SECURE on by default, recovery phrase displayed once and gated
   behind confirmation, clipboard marked sensitive, password fields masked, no plaintext in
-  logs, auto-lock triggers on background/timeout.
+  logs, auto-lock triggers on background/timeout; the SAF picker background is deferred
+  without cancelling the idle timeout and later background locks still lock.
 
-## Measured baseline (2026-11-15, Phase 1)
+## Measured baseline (2026-11-15, Phase 2 complete + Phase 3 start)
 
 | Suite | Command | Result |
 |---|---|---|
-| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **290 tests / 0 failures / 0 errors / 0 skipped** (27 classes) |
-| Instrumented (emulator) | `adb shell am instrument -w com.cipherwell.notezero.test/androidx.test.runner.AndroidJUnitRunner` | **OK (10 tests)** incl. `VaultFlowE2ETest` |
+| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **533 tests / 0 failures / 0 errors / 0 skipped** (43 classes) |
+| Instrumented (emulator) | `adb shell am instrument -w com.cipherwell.notezero.test/androidx.test.runner.AndroidJUnitRunner` | **OK (10 tests)** incl. `VaultFlowE2ETest` (notes + backup settings + code workspace) |
 | Offline guarantee | `./scripts/check-offline.sh --gradle` | exit 0 |
 | Release signing | `apksigner verify --print-certs app-release.apk` | NoteZero upload key SHA-256 `FA:CA:DD:67:…:92:78` |
 
-Per-area counts: crypto 61, data 49, model 43, security 5, ui shell 62, ui notes/editor 70.
+Per-area counts: crypto 61, data 57, model 43, security 5, code engine 126, ui code 72,
+ui backup/settings 37, ui shell/notes 132. Code editor tests include 200 KB lexer performance
+(Kotlin 6.42 ms, JS 7.85 ms, XML 3.21 ms) and fuzz invariants (bounds/ascending/non-overlap/cap).
 Device E2E also scans the raw SQLite files for plaintext and captures the screenshots in
 `docs/screenshots/`. Full evidence: `docs/VERIFICATION-2026-11-15.md`.
 

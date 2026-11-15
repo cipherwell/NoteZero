@@ -115,6 +115,32 @@ interface NoteRepository {
 
     fun onAppForegrounded()
 
+    /**
+     * Marks the start of a system-owned external activity (the SAF picker) launched from
+     * the unlocked vault. While one is active the [onAppBackgrounded] caused by that
+     * activity must NOT lock the vault (the user did not leave the app on purpose); the
+     * pending background state is recorded and [endExternalActivity] decides once the
+     * result arrives. The idle auto-lock timer keeps running, so a picker left open past
+     * the timeout still locks — there is no permanent suppression.
+     *
+     * Call immediately before launching the activity, from the main thread.
+     */
+    fun beginExternalActivity() {
+        // Fail-secure default (test doubles that never launch system activities): no
+        // deferral is recorded, so onAppBackgrounded keeps its immediate lock.
+    }
+
+    /**
+     * Marks the end of that external activity (result success, cancel or error). If the
+     * app has not returned to the foreground yet, this locks the vault immediately.
+     *
+     * Defaults are fail-secure no-ops for test fakes that never launch system activities;
+     * [EncryptedNoteRepository] overrides both methods with the real deferral.
+     */
+    fun endExternalActivity() {
+        // Fail-secure default: nothing was deferred, so nothing to settle.
+    }
+
     suspend fun setAutoLockMinutes(minutes: Int)
 
     suspend fun setThemeMode(mode: ThemeMode)

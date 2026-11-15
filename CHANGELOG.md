@@ -3,6 +3,62 @@
 All notable changes to NoteZero are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [Unreleased] — Phase 2 complete + Phase 3 start (2026-11-15, increment 2)
+
+### Added
+
+**Encrypted backup UI (closes the Phase-2 gap)**
+- SAF export/import of encrypted backup envelopes: `CreateDocument`/`OpenDocument`, suggested
+  name `notezero-backup-YYYYMMDD-HHmm.nzbk`, no plaintext leaves the app.
+- External-activity lock deferral: the SAF picker's background stop no longer locks the vault
+  (`beginExternalActivity`/`endExternalActivity`); idle timeout still applies, end-while-
+  background locks immediately, no permanent suppression, foreground return clears state.
+- Export modes: vault-key (phrase-only restore) and optional separate backup password.
+- Import: duplicate-safe verified restore, report counts (imported/duplicated/skipped/folders),
+  cross-vault credential prompt accepting the source master password **or** 12-word phrase
+  (3-attempt cap), lock-resume keeps the chosen file and continues after unlock.
+- Settings "Data & backup" section with progress/success/report/error states; passwords are
+  zeroized and never logged.
+
+**Code editor (Phase 3)**
+- Pure-Kotlin (JVM-testable) engine `com.cipherwell.notezero.code`: lexers for Kotlin, Java,
+  JS, TS, Python, JSON, XML, Markdown and Shell (single-pass scanners, 200k token cap, no
+  catastrophic regexes), `LineIndex`, and editing operations (indent/outdent, language-aware
+  auto-indent, bracket matching, literal find/replace, go-to-line).
+- Code workspace UI: nested file/folder tree over the SAME encrypted item model and folder
+  tree as notes (`ItemKind.CODE_FILE`), create file/folder, rename, move, trash, empty state.
+- Compose code editor: line-number gutter, current-line highlight, lexer token colours,
+  auto-indent, bracket-match highlight, find/replace bar (next/prev/replace all/case/count),
+  go-to-line, bounded undo/redo, font size 12–24 sp and wrap toggles persisted in non-secret
+  prefs, 600 ms autosave with save-on-leave, dirty/conflict banner, 2 MiB open guard and
+  >256 KiB plain-mono guard, Markdown preview reuse for .md files.
+- Notes screen gains a Code workspace entry; `AppRoot` routes code workspace ↔ notes ↔ settings.
+- Docs: `docs/CONTRACTS-PHASE3.md`, `docs/EDITOR-SPEC.md`, backup flow in
+  `docs/BACKUP-FORMAT.md`, external-activity mechanism in `docs/ARCHITECTURE.md`,
+  `docs/DECISIONS.md` #13.
+
+### Verified (measured)
+
+- **533 unit tests / 0 failures** (43 classes; code engine 126 incl. 200 KB lexer perf
+  Kotlin 6.42 ms / JS 7.85 ms / XML 3.21 ms and fuzz invariants, ui code 72, backup 37,
+  data 57 incl. 8 external-activity tests).
+- **10 instrumented tests OK** on the emulator; `VaultFlowE2ETest` now also covers: Settings
+  backup section, and the code workspace (create `hello.kt` → syntax-highlighted editor →
+  `Saved` → back → file persisted). The raw SQLite plaintext scan was extended to the code
+  file's name and body — both stay encrypted at rest.
+- Signed release rebuilt and re-verified with the NoteZero upload key (APK sha256
+  `2998c954…3195`, AAB `60203086…21c2`; certificate `FA:CA:DD:67:…:92:78`).
+- E2E screenshot review caught two real defects and both were fixed with regression tests:
+  always-plural workspace header ("1 files") and a scrolled-away settings back button
+  (E2E now uses the system back action).
+- `scripts/check-offline.sh` green; no new dependencies; no network imports.
+
+### Notes
+
+- Device E2E capture requires `-PallowScreenshots=true` (debug-only; normal builds keep
+  FLAG_SECURE and `screencap` returns 0 bytes).
+- Byte-for-byte reproducible release builds remain a Phase-5 task.
+
 ## [Unreleased] — Phase 1: security core + notes MVP (2026-11-15)
 
 ### Added

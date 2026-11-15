@@ -103,3 +103,61 @@ that unauthenticated enrollment persists nothing.
   unchanged.
 - Code editor (phase 3), attachments/camera (phase 4), F-Droid submission (3-month rule) are
   deliberately out of this session.
+
+---
+
+## 7. Increment 2 (same day): backup UI + code editor
+
+Second pass after Phase 1: SAF encrypted-backup UI and the Phase-3 code editor. Same
+environment/emulator; commands below were run in the same tree.
+
+### Build & tests
+
+| Command | Result |
+|---|---|
+| `./gradlew :app:testDebugUnitTest` | **BUILD SUCCESSFUL — 533 tests, 0 failures, 0 errors, 0 skipped (43 classes)** |
+| `./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -PallowScreenshots=true` | **BUILD SUCCESSFUL** |
+| `adb shell am instrument -w com.cipherwell.notezero.test/…AndroidJUnitRunner` | **OK (10 tests)** incl. extended `VaultFlowE2ETest` |
+| `./gradlew :app:assembleRelease :app:bundleRelease` (signing env sourced) | **BUILD SUCCESSFUL** — APK `2998c9546e3a1bba90d44ed85c685b95f7aacf437e0b17861b8c166706a53195`, AAB `6020308605816c683305edf65c972c9fbf028a71a471ac5a1d2782df11f521c2`; certificate still `FA:CA:DD:67:…:92:78` |
+
+Test areas: crypto 61 · data 57 (incl. 8 external-activity lock tests) · model 43 · security 5 ·
+code engine 126 · ui code 72 · ui backup/settings 37 · ui shell/notes 132.
+
+Code editor engine performance (200 KB inputs, JUnit XML): Kotlin 6.42 ms, JavaScript 7.85 ms,
+XML 3.21 ms (target < 250 ms); 200k token cap, 1 MB single token and 500 KB unterminated
+constructs bounded; 120 random + 150 construct-sequence fuzz cases per language with no throws.
+
+### Device E2E additions (real UI, real crypto)
+
+`VaultFlowE2ETest` now also proves:
+1. Settings renders the encrypted "Data & backup" section (export/import, separate-password
+   toggle, encrypted/local-only copy) — screenshot `05-settings-backup.png`.
+2. Code workspace opens from the notes screen (`nav_code`), a new file `hello.kt` is created
+   through the dialog, edited in the syntax-highlighted editor until save state reads
+   `Saved`, and is listed back in the tree — screenshots `06/07/08`.
+3. The created code file is persisted as `ItemKind.CODE_FILE` through the same encrypted
+   envelope as notes, and the raw SQLite files (db + WAL + SHM) contain **no** plaintext of
+   the code file name or body (`CodeE2E_secret` marker absent).
+4. External-activity deferral is covered by repository tests (8) rather than SAF UI automation;
+   the SAF picker is a system activity and is not driven by instrumentation.
+
+### Defects found by this E2E pass (fixed with regression tests)
+
+- Workspace header always pluralised ("1 files") → fixed `countLabel()` helper + test.
+- Settings back button scrolls away with content → E2E uses the system back action
+  (routed through the screen's `BackHandler`); product UX unchanged.
+
+### Updated screenshots
+
+`docs/screenshots/00-setup.png` … `08-code-workspace-file.png` (10 PNGs, hashes in git). The
+first-run setup, unlock, notes, editor/preview, backup settings, code tree and Kotlin editor
+are all real emulator captures from these runs.
+
+### Still open
+
+- Code editor UI is Phase-3 complete for the requested feature list; remaining Phase-3 polish
+  is deliberately deferred (search-in-files across the workspace, multi-cursor, file export).
+- Byte-for-byte reproducible release builds (Phase 5); F-Droid submission window opens
+  2027-02-15.
+- Strings are still inline (bootstrap policy); extraction to `res/values/strings.xml` for
+  translation is a tracked phase-5 item.

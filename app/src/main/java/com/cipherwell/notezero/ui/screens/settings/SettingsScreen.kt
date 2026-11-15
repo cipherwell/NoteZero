@@ -1,5 +1,7 @@
 package com.cipherwell.notezero.ui.screens.settings
 
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,12 +28,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.cipherwell.notezero.BuildConfig
+import com.cipherwell.notezero.NoteZeroApp
+import com.cipherwell.notezero.data.NoteRepository
 import com.cipherwell.notezero.model.ThemeMode
 import com.cipherwell.notezero.ui.SettingsMessage
+import com.cipherwell.notezero.ui.backup.BackupSection
 import com.cipherwell.notezero.ui.SettingsUiState
 import com.cipherwell.notezero.ui.VaultUiState
 import com.cipherwell.notezero.ui.VaultViewModel
@@ -84,8 +90,19 @@ fun SettingsScreen(
     onLockNow: () -> Unit,
     onClearMessage: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * The app-scoped repository for the "Data & backup" section. When null the section
+     * resolves the process singleton from the Application ([NoteZeroApp]) — AppRoot passes
+     * the same instance it renders with, so explicit injection is preferred and equivalent.
+     */
+    backupRepository: NoteRepository? = null,
 ) {
     BackHandler { onBack() }
+
+    val context = LocalContext.current
+    val resolvedBackupRepository = backupRepository ?: remember(context) {
+        findAppScopedRepository(context)
+    }
 
     var changePasswordExpanded by rememberSaveable { mutableStateOf(false) }
     var rotateExpanded by rememberSaveable { mutableStateOf(false) }
@@ -191,6 +208,11 @@ fun SettingsScreen(
                         .testTag("settings_lock_now"),
                     enabled = !settings.isWorking,
                 )
+            }
+
+            // ---- Data & backup ----------------------------------------------
+            if (resolvedBackupRepository != null) {
+                BackupSection(repository = resolvedBackupRepository)
             }
 
             // ---- Appearance -------------------------------------------------
@@ -535,6 +557,21 @@ private fun RotatedPhraseDialog(
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         shape = NoteZeroShapes.sheet,
     )
+}
+
+/**
+ * Finds the process-scoped repository through the Activity/Application context chain.
+ * Used when the caller (AppRoot) has not injected [SettingsScreen.backupRepository]; the
+ * app never constructs a second repository here — it reads [NoteZeroApp.repository].
+ */
+private fun findAppScopedRepository(context: Context): NoteRepository? {
+    var current: Context? = context
+    val visited = HashSet<Context>()
+    while (current != null && visited.add(current)) {
+        if (current is NoteZeroApp) return current.repository
+        current = (current as? ContextWrapper)?.baseContext
+    }
+    return (context.applicationContext as? NoteZeroApp)?.repository
 }
 
 private fun formatDate(epochMillis: Long): String {

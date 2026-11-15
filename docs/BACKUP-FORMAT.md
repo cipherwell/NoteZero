@@ -172,3 +172,41 @@ misinterpret it.
 - Backups carry no plaintext titles, bodies, tags, folder names or vault id; a loss of the
   backup file leaks nothing beyond its existence. Losing every credential for the source
   vault makes the backup unrecoverable (zero-knowledge, by design).
+
+
+## 8. UI flow (SAF) and lock handling
+
+Implementation: `ui/backup/BackupFlowController.kt` (state machine, no Android types),
+`ui/backup/BackupFlowViewModel.kt` (Activity-scoped owner of the pending URI) and
+`ui/backup/BackupSection.kt` + `ui/screens/settings/SettingsScreen.kt` ("Data & backup").
+
+- **Export.** The user may opt into a separate backup password (password + confirmation).
+  Tapping "Export encrypted backup" calls `startExport(mode, password?)`, which arms
+  `repository.beginExternalActivity()` and only then launches SAF `CreateDocument` (MIME
+  `application/octet-stream`, suggested name `notezero-backup-YYYYMMDD-HHmm.nzbk`). When the
+  picker result arrives the controller calls `repository.endExternalActivity()` and then
+  `exportBackup(stream, passwordOrNull)`: `EXPORT_VAULT_KEY` passes `null` (the envelope
+  embeds the source password/recovery wrappers), `EXPORT_PASSWORD` passes the chosen password
+  and wipes that `CharArray` once the write finishes. The UI only resolves the `content://`
+  URI to a `ContentResolver` stream; it never sees plaintext.
+- **Import.** Launches SAF `OpenDocument` and tries `importBackup(stream, null)` first
+  (same-vault backups restore through the local-VMK shortcut, no credential). A `null`
+  result is refined with a structural `BackupFormat.read` probe: not an envelope ⇒
+  `INVALID_FILE`; valid envelope from another vault ⇒ one prompt accepting the **source
+  master password or the source 12-word phrase** (words joined with single spaces; the
+  repository auto-detects the phrase form), retried with a freshly opened stream and capped
+  at 3 attempts ⇒ `WRONG_CREDENTIAL`. The non-secret `BackupImportReport` counts are shown.
+  Nothing is written unless the whole file authenticated and decoded.
+- **Resume-after-unlock rule.** The picker stops the Activity, which normally locks the
+  vault; `beginExternalActivity`/`endExternalActivity` defer exactly that lock (mechanism in
+  [ARCHITECTURE.md](ARCHITECTURE.md) §5). If the vault is nevertheless LOCKED when the
+  picker result arrives (idle timeout while the picker was open), the controller keeps the
+  pending mode + URI in the Activity-scoped ViewModel, surfaces `Error(LOCKED)` ("Unlock to
+  resume — your chosen file is still selected") and resumes through
+  `onVaultUnlocked()` after the user unlocks. The chosen file is never silently dropped and
+  the user does not have to pick it again.
+- **Errors** are `BackupErrorKind` enums only: `INVALID_FILE` (the picked file is not a
+  structurally valid v1 envelope), `WRONG_CREDENTIAL` (3 rejected attempts), `IO` (stream or
+  picker failure), `LOCKED` (paused until unlock) and `EMPTY_VAULT` (export refused because
+  the vault has no notes or folders). No path, file name, title, content or credential is
+  ever logged or rendered by this UI.

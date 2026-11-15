@@ -23,6 +23,7 @@ import com.cipherwell.notezero.data.VaultStatus
 import com.cipherwell.notezero.ui.components.common.BiometricPromptError
 import com.cipherwell.notezero.ui.components.common.BiometricPromptLauncher
 import com.cipherwell.notezero.ui.components.common.rememberBiometricAvailability
+import com.cipherwell.notezero.ui.code.CodeWorkspaceScreen
 import com.cipherwell.notezero.ui.components.common.rememberBiometricPromptLauncher
 import com.cipherwell.notezero.ui.notes.NotesListScreen
 import com.cipherwell.notezero.ui.screens.recovery.RecoveryScreen
@@ -158,6 +159,7 @@ fun AppRoot(repository: NoteRepository, viewModel: VaultViewModel) {
                         ROUTE_SETTINGS -> SettingsScreen(
                             state = state,
                             settings = settings,
+                            backupRepository = repository,
                             onBack = { unlockedRoute = ROUTE_NOTES },
                             onChangePassword = viewModel::changePassword,
                             onRotateRecoveryPhrase = viewModel::rotateRecoveryPhrase,
@@ -177,9 +179,15 @@ fun AppRoot(repository: NoteRepository, viewModel: VaultViewModel) {
                             onClearMessage = viewModel::clearSettingsMessage,
                         )
 
+                        ROUTE_CODE -> CodeWorkspaceScreen(
+                            repository = repository,
+                            onBack = { unlockedRoute = ROUTE_NOTES },
+                        )
+
                         else -> NotesListScreen(
                             repository = repository,
                             onOpenSettings = { unlockedRoute = ROUTE_SETTINGS },
+                            onOpenCode = { unlockedRoute = ROUTE_CODE },
                         )
                     }
                 }
@@ -223,3 +231,4 @@ private const val ROUTE_UNLOCK = "unlock"
 private const val ROUTE_RECOVERY = "recovery"
 private const val ROUTE_NOTES = "notes"
 private const val ROUTE_SETTINGS = "settings"
+private const val ROUTE_CODE = "code"

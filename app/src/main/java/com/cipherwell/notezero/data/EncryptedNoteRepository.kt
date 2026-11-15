@@ -119,6 +119,20 @@ class EncryptedNoteRepository(
 
     private var autoLockJob: Job? = null
 
+    /**
+     * Guards [externalActivityCount]/[backgroundLockDeferred]. The Activity lifecycle
+     * callbacks and the backup flow controller can arrive from different threads, so the
+     * deferral decision is always taken under this lock (the lock itself is only requested
+     * outside it — [lock] is suspend).
+     */
+    private val sessionLock = Any()
+
+    /** Number of system-owned activities (SAF pickers) currently launched over the vault. */
+    private var externalActivityCount: Int = 0
+
+    /** True when [onAppBackgrounded] happened while an external activity was active. */
+    private var backgroundLockDeferred: Boolean = false
+
     @Volatile
     private var lastInteractionAt: Long = 0L
 
@@ -605,16 +619,65 @@ class EncryptedNoteRepository(
 
     override fun onAppBackgrounded() {
         // Security-first default: leaving the app (including screen-off) locks immediately.
-        // The seeded DEV_DISABLE_AUTO_LOCK flag is the only escape hatch, for automation.
+        // The one exception is the system file picker (SAF backup export/import), which
+        // stops the Activity on purpose: the vault must stay open so the chosen file can be
+        // written/read when the result arrives. The idle timer is NOT cancelled here, so a
+        // picker left open past the timeout still locks the vault (no permanent suppression).
         if (!allowAutoLock) return
         if (_status.value != VaultStatus.UNLOCKED) return
-        autoLockJob?.cancel()
-        autoLockJob = null
-        scope.launch { lock() }
+        val deferred = synchronized(sessionLock) {
+            if (externalActivityCount > 0) {
+                backgroundLockDeferred = true
+                true
+            } else {
+                false
+            }
+        }
+        if (deferred) return
+        requestLockNow()
     }
 
     override fun onAppForegrounded() {
+        // Returning to the foreground ends the external-activity excursion. Reset the
+        // counter as well: if a picker result callback never arrives (e.g. the picker
+        // process died), leaving it set would weaken all later background locks.
+        synchronized(sessionLock) {
+            if (backgroundLockDeferred) externalActivityCount = 0
+            backgroundLockDeferred = false
+        }
         if (_status.value == VaultStatus.UNLOCKED) armAutoLock()
+    }
+
+    override fun beginExternalActivity() {
+        synchronized(sessionLock) {
+            externalActivityCount += 1
+        }
+    }
+
+    override fun endExternalActivity() {
+        val lockNow = synchronized(sessionLock) {
+            if (externalActivityCount > 0) externalActivityCount -= 1
+            val deferredBackground = externalActivityCount == 0 && backgroundLockDeferred
+            if (deferredBackground) backgroundLockDeferred = false
+            deferredBackground
+        }
+        // Result arrived before the app came back to the foreground (timeout/process
+        // weirdness): the background lock that was deferred must happen now.
+        if (lockNow && _status.value == VaultStatus.UNLOCKED) requestLockNow()
+    }
+
+    /** Test/diagnostic hooks: no secret material, exposed as internal for the regression tests. */
+    internal fun hasActiveExternalActivity(): Boolean =
+        synchronized(sessionLock) { externalActivityCount > 0 }
+
+    internal fun isBackgroundLockDeferred(): Boolean =
+        synchronized(sessionLock) { backgroundLockDeferred }
+
+    /** Cancels the idle timer and locks asynchronously, exactly like the background lock. */
+    private fun requestLockNow() {
+        autoLockJob?.cancel()
+        autoLockJob = null
+        scope.launch { lock() }
     }
 
     override suspend fun setAutoLockMinutes(minutes: Int) = withContext(ioDispatcher) {
@@ -889,6 +952,10 @@ class EncryptedNoteRepository(
 
     /** Releases this repository's resources; tests call it, the app keeps one instance. */
     fun close() {
+        synchronized(sessionLock) {
+            externalActivityCount = 0
+            backgroundLockDeferred = false
+        }
         autoLockJob?.cancel()
         autoLockJob = null
         scope.cancel()
