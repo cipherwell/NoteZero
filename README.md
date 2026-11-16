@@ -14,9 +14,10 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 > Security core, notes MVP, encrypted SAF backup/restore, code editor (workspace
 > search/copy/export/indent), encrypted attachments (images/files/**drawings**),
 > **locked notes/folders**, **Markdown/HTML note export**, **table editing** and
-> **quick-capture launcher shortcut** are in; an independent security audit found
+> **quick-capture launcher shortcut**, a **create menu (Note / Drawing / Code / PDF)** and
+> **blank encrypted PDF documents** are in; an independent security audit found
 > **no HIGH/CRITICAL issues** and its findings are remediated. Builds green,
-> **876 unit tests + 10 device tests**, UI is translation-ready, and **signed APK + AAB
+> **899 unit tests + 12 device tests**, UI is translation-ready, and **signed APK + AAB
 > release builds are byte-for-byte reproducible**. A device-QA pass on a Pixel 9 Pro XL
 > (Android 17) found and fixed system-bar, large-font drawing, biometric-copy and
 > empty-note bugs. What ships now, evidence and the remaining Phase-5 tail: [docs/VERIFICATION-2026-11-15.md](docs/VERIFICATION-2026-11-15.md).
@@ -38,7 +39,9 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 | ![Table](docs/screenshots/14-table-insert.png) | ![Drawing](docs/screenshots/15-drawing-canvas.png) | ![Quick capture](docs/screenshots/16-quick-capture.png) |
 | **Locked note masked in the list** | **Re-auth with master password** | **Revealed after verification** |
 | ![Locked](docs/screenshots/11-locked-note-masked.png) | ![Re-auth](docs/screenshots/12-reauth-dialog.png) | ![Revealed](docs/screenshots/13-locked-note-revealed.png) |
-| ![Device status bar](docs/screenshots/17-device-status-bar-light.png) | ![Device drawing](docs/screenshots/18-device-drawing-canvas-1-15x.png) | *(last two: Pixel 9 Pro XL, Android 17, font scale 1.15 — device QA)* |
+| **Create menu: Note / Drawing / Code / PDF** | **Blank PDF document viewer** | **Encrypted PDF stored as an attachment** |
+| ![Create menu](docs/screenshots/17-create-sheet.png) | ![PDF viewer](docs/screenshots/18-pdf-viewer.png) | ![PDF in list](docs/screenshots/18-pdf-viewer.png) |
+| ![Device status bar](docs/screenshots/20-device-status-bar-light.png) | ![Device drawing](docs/screenshots/21-device-drawing-canvas-1-15x.png) | *(last row: Pixel 9 Pro XL, Android 17, font scale 1.15 — device QA)* |
 
 Screenshots are real emulator captures from the instrumented E2E run (debug build with
 `-PallowScreenshots=true`; normal builds set FLAG_SECURE, which makes `screencap` return a
@@ -46,7 +49,7 @@ Screenshots are real emulator captures from the instrumented E2E run (debug buil
 
 ## Verified end to end (2026-11-15)
 
-- 876 unit tests / 0 failures (73 classes); 10 instrumented tests on a real emulator.
+- 899 unit tests / 0 failures (77 classes); 12 instrumented tests on a real emulator.
 - Real Android crypto: setup → BIP-39 phrase → lock/unlock; **password change leaves note
   ciphertext byte-identical**; recovery reset invalidates the old password; a raw SQLite scan
   of the database files (main + WAL + SHM) finds no plaintext title/body/phrase — including a
@@ -65,6 +68,13 @@ Screenshots are real emulator captures from the instrumented E2E run (debug buil
   note id + attachment id, SHA-256 verified on read, 10 MiB/file, 100/note, 512 MiB quota;
   in-memory thumbnails only (no plaintext cache); decrypted export only behind an explicit
   "writes an UNENCRYPTED copy" confirmation. Backups (v2) carry the attachment bytes.
+- **Create menu**: the Notes "+" opens a sheet to create a **Note** (Markdown), a
+  **Drawing** (editor opens with the canvas ready), a **Code** file (name + picker with 27
+  well-known extensions: `.txt .md .html .css .js .ts .json .xml .yml .toml .py .kt .java .c
+  .cpp .h .cs .go .rs .rb .php .swift .sql .sh .csv .ini .properties`; a typed known extension
+  wins, formats without a lexer edit as plain text rather than mis-highlighted) or a **PDF**
+  (blank one-page document stored as an encrypted `application/pdf` attachment and rendered by
+  the platform PDF viewer; export only behind the explicit decrypted-copy warning).
 - Locked notes/folders: the lock flag lives inside the encrypted envelope; locked content is
   masked in lists/search/counts and in the code workspace until re-authenticated with
   biometrics or the master password (presence gate, not a second encryption layer — content

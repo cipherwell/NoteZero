@@ -56,6 +56,57 @@ All notable changes to NoteZero are documented here. Format follows
   PDF export, encrypted per-note version history, translations, and the F-Droid window
   (2027-02-15).
 
+## [Unreleased] — Create menu, code formats and encrypted PDF documents (2026-11-15, increment 8)
+
+### Added
+
+**Create menu instead of an instant "New note"**
+- The Notes `+` button is now an **icon-only FAB**; tapping it opens a bottom sheet to choose
+  what to create: **Note**, **Drawing**, **Code** or **PDF**. Creation goes through the normal
+  unlocked repository path (same locks, autosave and encryption as any other item).
+- **Drawing**: creates a note and opens the editor with the drawing canvas already visible
+  (one-shot request; attachments are saved through the encrypted pipeline as before).
+- **Code**: a name + format dialog with all well-known extensions (`.txt .md .html .css .js .ts
+  .json .xml .yml .toml .py .kt .java .c .cpp .h .cs .go .rs .rb .php .swift .sql .sh .csv .ini
+  .properties`); the workspace "new file" dialog uses the same picker. A typed known extension
+  is kept; formats without a lexer edit as plain text instead of being mis-highlighted.
+- **PDF**: creates a blank, standards-valid one-page PDF (pure-Kotlin `BlankPdf` with computed
+  xref offsets) and stores it as an encrypted `application/pdf` attachment on a new
+  `ItemKind.PDF_FILE` item. The item is trashed again if the attachment import fails, so no
+  empty row or orphan blob can be left behind.
+
+**PDF viewer**
+- Full-screen viewer renders the decrypted PDF with the platform `PdfRenderer`: bounded
+  rendering (≤ 8 pages, ≤ 1600 px long edge), page indicator, in-memory bitmaps recycled on
+  close, and a clean non-secret error for corrupt files. "Export decrypted copy" goes through
+  the same explicit `UNENCRYPTED copy` warning + SAF `CreateDocument` + external-activity
+  bracket as attachment export. Rendering needs a seekable descriptor, so bytes go through an
+  ephemeral app-private cache file that is deleted in a `finally` block (DECISIONS #20).
+
+### Fixed during device QA (Pixel 9 Pro XL, Android 17, font scale 1.15)
+
+- The create sheet was first a full-screen `Dialog`; the edge-to-edge device laid that window
+  out taller than the visible display, so the PDF option slipped under the gesture bar at font
+  scale 1.15. It is now an in-window overlay with the real window insets, a scrollable capped
+  card and scrim dismissal — all four options are visible and reachable on the device.
+- Code files created from the menu now open the **code editor** (lexer/format-aware) instead of
+  the Markdown editor; tapping a code row in Notes does the same. PDF rows open the PDF viewer.
+- Verified on-device end to end: the exported PDF (`pdfinfo`: 1 page, no JavaScript) is byte-
+  valid, the PDF viewer renders it, drawings open straight into the canvas and save as encrypted
+  attachments, and attachment-only notes are kept.
+
+### Verified (measured)
+
+- **899 unit tests / 0 failures** (77 classes; +23 over increment 7): blank-PDF wire format +
+  codec round trip, code-format name rules, create sheet/code dialog/PDF viewer Robolectric
+  tests, `NotesViewModel.createPdf/createCodeFile`.
+- **12 instrumented tests OK** on the emulator, including a real-`PdfRenderer` test that proves
+  the generated PDF renders (1 page, real pixels) and leaves no render temp file, plus the E2E
+  flow creating a note from the sheet and an encrypted PDF through the viewer (screenshots
+  `17-create-sheet`, `18-pdf-viewer`).
+- Reproducibility, FLAG_SECURE, permissions and device checks repeated (hashes in
+  VERIFICATION §13).
+
 ## [Unreleased] — Device QA on a real phone (2026-11-15, increment 7)
 
 First run of the **release build** on the owner's device (Pixel 9 Pro XL, Android 17, font

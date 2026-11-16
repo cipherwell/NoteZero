@@ -19,6 +19,7 @@ import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -187,8 +188,11 @@ class VaultFlowE2ETest {
             }
             saveScreenshot("01-notes-list")
 
-            // Create a note through the real editor.
+            // Create a note through the real create sheet (the "+" is icon-only now).
             compose.onNodeWithTag("new_note_button").performClick()
+            compose.waitForTag("create_sheet", 5_000)
+            saveNodeScreenshot("17-create-sheet", "create_sheet")
+            compose.onNodeWithTag("create_note").performClick()
             compose.waitForTag("editor_title", 15_000)
             compose.onNodeWithTag("editor_title").performClick()
             compose.onNodeWithTag("editor_title").performTextInput(EDITOR_NOTE_TITLE)
@@ -249,8 +253,8 @@ class VaultFlowE2ETest {
             saveScreenshot("06-code-workspace-empty")
             compose.onNodeWithTag("code_new_file").performClick()
             compose.waitForTag("code_dialog_field", 15_000)
-            compose.onNodeWithTag("code_dialog_field").performClick()
-            compose.onNodeWithTag("code_dialog_field").performTextInput(CODE_FILE_NAME)
+            // The format dialog pre-fills "untitled.txt"; replace it with the target name.
+            compose.onNodeWithTag("code_dialog_field").performTextReplacement(CODE_FILE_NAME)
             compose.onNodeWithTag("code_dialog_confirm").performClick()
             compose.waitForTag("code_editor", 20_000)
             compose.onNodeWithTag("code_editor").performClick()
@@ -308,6 +312,19 @@ class VaultFlowE2ETest {
                 compose.onAllNodesWithText(EDITOR_NOTE_TITLE, substring = true).fetchSemanticsNodes().isNotEmpty()
             }
             saveScreenshot("13-locked-note-revealed")
+
+            // ---- 6f. PDF: create from the "+" sheet, open the encrypted viewer -----------
+            // Re-auth opened the revealed note; go back to the list before using the FAB.
+            compose.onNodeWithTag("editor_back").performClick()
+            compose.waitForTag("notes_list", 15_000)
+            compose.onNodeWithTag("new_note_button").performClick()
+            compose.waitForTag("create_sheet", 5_000)
+            compose.onNodeWithTag("create_pdf").performClick()
+            compose.waitForTag("pdf_viewer", 20_000)
+            compose.waitForTag("pdf_page", 20_000)
+            saveScreenshot("18-pdf-viewer")
+            compose.onNodeWithTag("pdf_back").performClick()
+            compose.waitForTag("notes_list", 15_000)
         } finally {
             scenario.close()
         }
@@ -331,6 +348,14 @@ class VaultFlowE2ETest {
             "lock verification must not survive the session/background lock",
             repository.verifiedLockedIds.value.isEmpty(),
         )
+        val pdfItem = repository.items.value.firstOrNull { it.kind == ItemKind.PDF_FILE }
+        assertTrue("PDF created from the create sheet must persist", pdfItem != null)
+        assertEquals(
+            "the PDF is stored as an encrypted application/pdf attachment",
+            "application/pdf",
+            pdfItem!!.attachments.single().mimeType,
+        )
+        assertTrue("PDF title carries the .pdf extension", pdfItem.title.endsWith(".pdf"))
         val codeItem = repository.items.value.firstOrNull { it.title == CODE_FILE_NAME }
         assertTrue("code file created in the workspace must persist", codeItem != null)
         assertEquals(ItemKind.CODE_FILE, codeItem!!.kind)

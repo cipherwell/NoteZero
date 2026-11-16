@@ -27,8 +27,8 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -64,12 +64,18 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cipherwell.notezero.data.NoteRepository
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
+import com.cipherwell.notezero.model.ItemKind
+import com.cipherwell.notezero.ui.code.CodeEditorScreen
+import com.cipherwell.notezero.ui.code.CodeTree
+import com.cipherwell.notezero.ui.code.NewCodeFileDialog
 import com.cipherwell.notezero.ui.locks.LockBiometricPrompt
 import com.cipherwell.notezero.ui.locks.LockReauthController
 import com.cipherwell.notezero.ui.locks.LockTargetKind
 import com.cipherwell.notezero.ui.locks.LockedTarget
 import com.cipherwell.notezero.ui.locks.ReauthDialog
 import com.cipherwell.notezero.ui.locks.rememberLockReauthController
+import com.cipherwell.notezero.ui.components.common.NzFab
+import com.cipherwell.notezero.ui.pdf.PdfViewerScreen
 import com.cipherwell.notezero.ui.notes.components.FolderRow
 import com.cipherwell.notezero.ui.notes.components.MoveToFolderDialog
 import com.cipherwell.notezero.ui.notes.components.NoteRow
@@ -80,6 +86,7 @@ import com.cipherwell.notezero.ui.notes.components.SectionHeader
 import com.cipherwell.notezero.ui.notes.components.TagChip
 import com.cipherwell.notezero.ui.notes.components.TextInputDialog
 import com.cipherwell.notezero.ui.notes.components.TrashRow
+import com.cipherwell.notezero.ui.theme.NoteZeroShapes
 import com.cipherwell.notezero.ui.theme.NoteZeroSpacing
 import com.cipherwell.notezero.ui.theme.NoteZeroType
 import kotlinx.coroutines.launch
@@ -106,7 +113,15 @@ fun NotesListScreen(
 ) {
     val viewModel: NotesViewModel = viewModel(factory = NotesViewModelFactory(repository))
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val createError by viewModel.createError.collectAsStateWithLifecycle()
     var editorItemId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pdfItemId by rememberSaveable { mutableStateOf<String?>(null) }
+    var codeItemId by rememberSaveable { mutableStateOf<String?>(null) }
+    var editorOpenDrawing by rememberSaveable { mutableStateOf(false) }
+    var showCreateSheet by rememberSaveable { mutableStateOf(false) }
+    var showNewCodeDialog by rememberSaveable { mutableStateOf(false) }
+    val createScope = rememberCoroutineScope()
+    val folderForCreate = if (state.section == NotesSection.FOLDERS) state.currentFolderId else null
 
     // Quick capture (launcher shortcut / pending request after unlock): create the note only
     // through the normal unlocked repository path, then open the editor.
@@ -120,6 +135,27 @@ fun NotesListScreen(
     // it never stores content, only the pending target id until the repository verifies.
     val reauth = rememberLockReauthController(repository, biometricPrompt)
 
+    val openPdfId = pdfItemId
+    if (openPdfId != null) {
+        PdfViewerScreen(
+            repository = repository,
+            itemId = openPdfId,
+            onClose = { pdfItemId = null },
+        )
+        return
+    }
+
+    val openCodeId = codeItemId
+    if (openCodeId != null) {
+        CodeEditorScreen(
+            repository = repository,
+            itemId = openCodeId,
+            onBack = { codeItemId = null },
+            biometricPrompt = biometricPrompt,
+        )
+        return
+    }
+
     val openItemId = editorItemId
     if (openItemId != null) {
         com.cipherwell.notezero.ui.editor.NoteEditorScreen(
@@ -127,6 +163,8 @@ fun NotesListScreen(
             itemId = openItemId,
             onClose = { editorItemId = null },
             biometricPrompt = biometricPrompt,
+            openDrawingOnStart = editorOpenDrawing,
+            onOpenDrawingConsumed = { editorOpenDrawing = false },
         )
         return
     }
@@ -137,9 +175,77 @@ fun NotesListScreen(
         reauth = reauth,
         onOpenCode = onOpenCode,
         onOpenEditor = { editorItemId = it },
+        onOpenPdf = { pdfItemId = it },
+        onOpenCodeItem = { codeItemId = it },
+        onShowCreateSheet = { showCreateSheet = true },
         onOpenSettings = onOpenSettings,
         exportTarget = noteExportTarget ?: rememberSafNoteExportTarget(repository),
     )
+
+    if (showCreateSheet) {
+        CreateSheet(
+            onDismiss = { showCreateSheet = false },
+            onCreateNote = {
+                showCreateSheet = false
+                createScope.launch {
+                    val created = viewModel.createNote(folderForCreate)
+                    if (created != null) editorItemId = created.id
+                }
+            },
+            onCreateDrawing = {
+                showCreateSheet = false
+                createScope.launch {
+                    val created = viewModel.createNote(folderForCreate)
+                    if (created != null) {
+                        editorOpenDrawing = true
+                        editorItemId = created.id
+                    }
+                }
+            },
+            onCreateCode = {
+                showCreateSheet = false
+                showNewCodeDialog = true
+            },
+            onCreatePdf = {
+                showCreateSheet = false
+                createScope.launch {
+                    val created = viewModel.createPdf(folderForCreate)
+                    if (created != null) pdfItemId = created.id
+                }
+            },
+        )
+    }
+
+    if (showNewCodeDialog) {
+        NewCodeFileDialog(
+            title = stringResource(R.string.create_code),
+            confirmLabel = stringResource(R.string.common_create),
+            onDismiss = { showNewCodeDialog = false },
+            validate = { name -> CodeTree.validateName(CodeTree.normalizeNewFileName(name)) },
+            onConfirm = { name ->
+                showNewCodeDialog = false
+                createScope.launch {
+                    val created = viewModel.createCodeFile(name, folderForCreate)
+                    if (created != null) codeItemId = created.id
+                }
+            },
+        )
+    }
+
+    if (createError) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissCreateError,
+            title = { Text(stringResource(R.string.create_sheet_title), style = NoteZeroType.Heading) },
+            text = { Text(stringResource(R.string.create_failed), style = NoteZeroType.Body) },
+            confirmButton = {
+                TextButton(onClick = viewModel::dismissCreateError) {
+                    Text(stringResource(R.string.common_close), style = NoteZeroType.Button)
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            shape = NoteZeroShapes.sheet,
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -149,6 +255,9 @@ private fun NotesListContent(
     viewModel: NotesViewModel,
     reauth: LockReauthController,
     onOpenEditor: (String) -> Unit,
+    onOpenPdf: (String) -> Unit,
+    onOpenCodeItem: (String) -> Unit,
+    onShowCreateSheet: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenCode: () -> Unit,
     exportTarget: NoteExportTarget,
@@ -183,14 +292,21 @@ private fun NotesListContent(
             NoteRow(
                 row = row,
                 onClick = {
+                    val open = { id: String ->
+                        when (row.item.kind) {
+                            ItemKind.PDF_FILE -> onOpenPdf(id)
+                            ItemKind.CODE_FILE -> onOpenCodeItem(id)
+                            else -> onOpenEditor(id)
+                        }
+                    }
                     if (row.masked) {
-                        // Tapping a mask must never open the editor: re-authenticate
-                        // first, then open the revealed note.
+                        // Tapping a mask must never open the content: re-authenticate
+                        // first, then open the revealed item.
                         reauth.request(LockedTarget(row.item.id, LockTargetKind.NOTE)) {
-                            onOpenEditor(row.item.id)
+                            open(row.item.id)
                         }
                     } else {
-                        onOpenEditor(row.item.id)
+                        open(row.item.id)
                     }
                 },
                 onTogglePin = { viewModel.togglePinned(row.item) },
@@ -279,23 +395,11 @@ private fun NotesListContent(
         },
         floatingActionButton = {
             if (!isTrash) {
-                ExtendedFloatingActionButton(
-                    onClick = {
-                        scope.launch {
-                            val folderId = if (state.section == NotesSection.FOLDERS) {
-                                state.currentFolderId
-                            } else {
-                                null
-                            }
-                            val created = viewModel.createNote(folderId)
-                            if (created != null) onOpenEditor(created.id)
-                        }
-                    },
+                NzFab(
+                    icon = Icons.Filled.Add,
+                    contentDescription = stringResource(R.string.cd_notes_create),
+                    onClick = onShowCreateSheet,
                     modifier = Modifier.testTag("new_note_button"),
-                    icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                    text = { Text(stringResource(R.string.notes_new_note), style = NoteZeroType.Callout) },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
                 )
             }
         },

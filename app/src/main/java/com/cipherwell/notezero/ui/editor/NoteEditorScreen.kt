@@ -95,6 +95,9 @@ fun NoteEditorScreen(
     attachmentController: AttachmentController? = null,
     /** Injectable only for tests; production uses the device presence prompt. */
     biometricPrompt: LockBiometricPrompt? = null,
+    /** Opened from "Create > Drawing": show the drawing canvas as soon as the note loads. */
+    openDrawingOnStart: Boolean = false,
+    onOpenDrawingConsumed: () -> Unit = {},
 ) {
     val items by repository.items.collectAsStateWithLifecycle()
     val verifiedLockedIds by repository.verifiedLockedIds.collectAsStateWithLifecycle()
@@ -360,6 +363,8 @@ fun NoteEditorScreen(
                         noteId = itemId,
                         attachments = attachments,
                         onOpen = { viewingAttachment = it },
+                        startDrawing = openDrawingOnStart,
+                        onStartDrawingConsumed = onOpenDrawingConsumed,
                     )
 
                     Row(

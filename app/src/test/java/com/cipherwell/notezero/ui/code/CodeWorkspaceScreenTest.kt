@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cipherwell.notezero.model.ItemKind
 import com.cipherwell.notezero.ui.theme.NoteZeroTheme
@@ -117,7 +118,7 @@ class CodeWorkspaceScreenTest {
         composeRule.onNodeWithTag(CodeTags.NEW_FILE).performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag(CodeTags.DIALOG_FIELD).assertExists()
-        composeRule.onNodeWithTag(CodeTags.DIALOG_FIELD).performTextInput("hello.kt")
+        composeRule.onNodeWithTag(CodeTags.DIALOG_FIELD).performTextReplacement("hello.kt")
         composeRule.onNodeWithTag(CodeTags.DIALOG_CONFIRM).performClick()
         composeRule.waitUntil(5_000) { repository.items.value.any { it.title == "hello.kt" } }
         composeRule.waitForIdle()
@@ -153,7 +154,7 @@ class CodeWorkspaceScreenTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("New file here").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag(CodeTags.DIALOG_FIELD).performTextInput("Nested.kt")
+        composeRule.onNodeWithTag(CodeTags.DIALOG_FIELD).performTextReplacement("Nested.kt")
         composeRule.onNodeWithTag(CodeTags.DIALOG_CONFIRM).performClick()
         composeRule.waitUntil(5_000) { repository.items.value.any { it.title == "Nested.kt" } }
         composeRule.waitForIdle()

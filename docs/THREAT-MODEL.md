@@ -134,7 +134,23 @@ any client library.
 
 ---
 
-### 3.9 Attachments (shipped in Phase 4/5; full detail in `docs/ATTACHMENTS.md` §9)
+### 3.9 Attachments and PDF rendering (shipped in Phase 4/5; detail in `docs/ATTACHMENTS.md` §9)
+
+**PDF documents (increment 8).** A `PDF_FILE` item stores a blank one-page PDF as an encrypted
+`NZAT` blob, so at rest nothing changes: ciphertext only, AEAD + AAD bound to item id and kind.
+Viewing uses the platform `PdfRenderer`, which requires a **seekable file descriptor**: the
+decrypted bytes are written to an app-private `cacheDir` file for the duration of the
+rasterisation and deleted in a `finally` block before the page images are shown. Exposure window
+is one render call, the file is excluded from backup/device-transfer, the cache is app-private
+and the rendered bitmaps are bounded (≤ 8 pages, ≤ 1600 px long edge) and recycled on dispose.
+An attacker with offline access to flash *between* the write and the delete could recover a
+plaintext PDF page — accepted as a bounded, explicit trade-off because Android offers no
+in-memory seekable PDF API (THREAT-MODEL §6 R7). The alternative (no PDF viewing) has no such
+window but removes the feature the owner asked for; the temp file is therefore the only
+plaintext-at-rest exception in the app, documented in DECISIONS #20 and guarded by the
+instrumented test that asserts no `pdf-render-*` file remains after rendering.
+
+### 3.9.1 Attachment boundaries
 
 | Attack | Mitigation | Residual |
 |---|---|---|
@@ -189,6 +205,14 @@ detailed per-blob design in `docs/ATTACHMENTS.md` §9 (audit D4).
 ---
 
 ## 6. Residual risks (accepted, with rationale)
+
+- **R7 — transient plaintext PDF while rendering.** The platform `PdfRenderer` needs a
+  seekable fd, so decrypted PDF bytes exist briefly in an app-private cache file during
+  rasterisation (deleted in `finally`; cache excluded from backup). A flash-recovery attacker
+  active in that window could read a page that is already visible on screen. Accepted under the
+  same assumption as screen privacy (device unlocked, attacker at the device) and documented in
+  §3.9; no other code path writes plaintext to disk.
+
 
 1. **VMK in RAM while unlocked** — inherent to an offline vault that must decrypt content
    on unlock. Mitigated by auto-lock, background/screen-off lock, and lock-on-task-switch

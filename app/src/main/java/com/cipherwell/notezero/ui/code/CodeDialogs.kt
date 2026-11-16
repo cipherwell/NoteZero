@@ -1,7 +1,14 @@
 package com.cipherwell.notezero.ui.code
 
 import com.cipherwell.notezero.R
+import com.cipherwell.notezero.code.CodeFormat
+import com.cipherwell.notezero.code.CodeFormats
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -27,6 +34,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 
+import com.cipherwell.notezero.ui.components.common.NzSelectableChip
 import com.cipherwell.notezero.ui.theme.NoteZeroSpacing
 import com.cipherwell.notezero.ui.theme.NoteZeroType
 
@@ -244,3 +252,125 @@ fun CodeMoveDialog(
         },
     )
 }
+
+/**
+ * New-code-file dialog: a name field plus a horizontal format picker (`.txt`, `.md`, `.html`,
+ * `.py`, `.kt`, …). Picking a format rewrites the extension of the typed name, so the created
+ * item always gets a well-known extension and the editor picks the matching syntax.
+ *
+ * Pure format rules live in [CodeFormats] (unit-tested); this composable only wires them to UI.
+ * Tags: [CodeTags.DIALOG_FIELD], [CodeTags.DIALOG_CONFIRM], [CodeTags.DIALOG_CANCEL],
+ * `code_format_<extension>` for each chip and `code_new_file_format_row` for the picker.
+ */
+@Composable
+fun NewCodeFileDialog(
+    title: String,
+    confirmLabel: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+    validate: (String) -> String?,
+    initialFormat: CodeFormat = CodeFormats.default,
+) {
+    var selectedExtension by rememberSaveable { mutableStateOf(initialFormat.extension) }
+    var name by rememberSaveable { mutableStateOf(CodeFormats.defaultName(initialFormat)) }
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
+
+    fun selectFormat(format: CodeFormat) {
+        name = CodeFormats.applyFormat(name, format)
+        selectedExtension = format.extension
+        error = null
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, style = NoteZeroType.Heading) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = {
+                        name = it
+                        error = null
+                    },
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.code_file_name), style = NoteZeroType.Callout) },
+                    placeholder = {
+                        Text(stringResource(R.string.code_untitled_placeholder), style = NoteZeroType.Callout)
+                    },
+                    isError = error != null,
+                    supportingText = {
+                        if (error != null) {
+                            Text(
+                                text = error.orEmpty(),
+                                style = NoteZeroType.Caption,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.testTag(CodeTags.DIALOG_ERROR),
+                            )
+                        }
+                    },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(CodeTags.DIALOG_FIELD),
+                )
+                Spacer(Modifier.size(NoteZeroSpacing.s))
+                Text(
+                    text = stringResource(R.string.code_new_file_format),
+                    style = NoteZeroType.FieldLabel,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.size(NoteZeroSpacing.xs))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .testTag("code_new_file_format_row"),
+                    horizontalArrangement = Arrangement.spacedBy(NoteZeroSpacing.xs),
+                ) {
+                    CodeFormats.all.forEach { format ->
+                        NzSelectableChip(
+                            label = ".${format.extension}",
+                            selected = format.extension == selectedExtension,
+                            onClick = { selectFormat(format) },
+                            modifier = Modifier.testTag("code_format_${format.extension}"),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val resolved = CodeFormats.resolveName(name, formatFor(selectedExtension))
+                    val problem = validate(resolved)
+                    if (problem == null) {
+                        onConfirm(resolved)
+                    } else {
+                        error = problem
+                    }
+                },
+                modifier = Modifier
+                    .heightIn(min = NoteZeroSpacing.minTarget)
+                    .testTag(CodeTags.DIALOG_CONFIRM),
+            ) {
+                Text(confirmLabel, style = NoteZeroType.Button)
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .heightIn(min = NoteZeroSpacing.minTarget)
+                    .testTag(CodeTags.DIALOG_CANCEL),
+            ) {
+                Text(stringResource(R.string.common_cancel), style = NoteZeroType.Button)
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        shape = com.cipherwell.notezero.ui.theme.NoteZeroShapes.sheet,
+    )
+}
+
+/** The currently selected format, falling back to the default when the tag is unknown. */
+private fun formatFor(extension: String): CodeFormat =
+    CodeFormats.forExtension(extension) ?: CodeFormats.default

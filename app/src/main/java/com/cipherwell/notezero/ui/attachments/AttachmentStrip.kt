@@ -34,6 +34,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -86,12 +87,23 @@ fun AttachmentStrip(
     attachments: List<AttachmentRef>,
     onOpen: (AttachmentRef) -> Unit,
     modifier: Modifier = Modifier,
+    /** True when the editor was opened by "Create > Drawing": open the canvas immediately. */
+    startDrawing: Boolean = false,
+    onStartDrawingConsumed: () -> Unit = {},
 ) {
     val state by controller.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var menuOpen by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<AttachmentRef?>(null) }
     var drawingOpen by remember(noteId) { mutableStateOf(false) }
+
+    // "Create > Drawing" opens a fresh note with the canvas already visible; the request is
+    // one-shot so a rotation/backout never re-opens it unexpectedly.
+    LaunchedEffect(startDrawing) {
+        if (!startDrawing) return@LaunchedEffect
+        drawingOpen = true
+        onStartDrawingConsumed()
+    }
 
     val photoLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),

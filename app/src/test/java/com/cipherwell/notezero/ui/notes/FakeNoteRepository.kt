@@ -3,10 +3,12 @@ package com.cipherwell.notezero.ui.notes
 import com.cipherwell.notezero.crypto.BiometricDecrypt
 import com.cipherwell.notezero.crypto.BiometricEnroll
 import com.cipherwell.notezero.data.BackupImportReport
+import com.cipherwell.notezero.data.AttachmentImport
 import com.cipherwell.notezero.data.NoteRepository
 import com.cipherwell.notezero.data.UnlockResult
 import com.cipherwell.notezero.data.VaultInfo
 import com.cipherwell.notezero.data.VaultStatus
+import com.cipherwell.notezero.model.AttachmentRef
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
@@ -171,6 +173,42 @@ class FakeNoteRepository : NoteRepository {
         )
         _items.value = _items.value + item
         return item
+    }
+
+    /** In-memory plaintext for the test-only attachment import/read path (never on disk). */
+    private val attachmentPlaintext = mutableMapOf<String, ByteArray>()
+
+    override suspend fun importAttachment(
+        noteId: String,
+        displayName: String,
+        mimeType: String,
+        source: InputStream,
+    ): AttachmentImport {
+        if (_status.value != VaultStatus.UNLOCKED) {
+            return AttachmentImport.Failure(com.cipherwell.notezero.data.AttachmentError.LOCKED)
+        }
+        val existing = itemById(noteId)
+            ?: return AttachmentImport.Failure(com.cipherwell.notezero.data.AttachmentError.LOCKED)
+        val bytes = source.readBytes()
+        val ref = AttachmentRef(
+            id = "att-${idCounter++}",
+            displayName = displayName,
+            mimeType = mimeType,
+            sizeBytes = bytes.size.toLong(),
+            createdAt = nextClock(),
+            sha256 = "0".repeat(64),
+        )
+        attachmentPlaintext[ref.id] = bytes
+        _items.value = _items.value.map {
+            if (it.id == existing.id) it.copy(attachments = it.attachments + ref) else it
+        }
+        return AttachmentImport.Success(ref)
+    }
+
+    override suspend fun attachmentBytes(noteId: String, attachmentId: String): ByteArray? {
+        val item = itemById(noteId) ?: return null
+        if (item.attachments.none { it.id == attachmentId }) return null
+        return attachmentPlaintext[attachmentId]?.copyOf()
     }
 
     override suspend fun saveItem(item: Item): Item {

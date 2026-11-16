@@ -288,22 +288,16 @@ private fun CodeTreeContent(
     // ---- Dialogs -------------------------------------------------------------
 
     if (showNewFile) {
-        CodeTextInputDialog(
+        NewCodeFileDialog(
             title = stringResource(R.string.code_new_file_title),
-            label = stringResource(R.string.code_file_name),
-            initialValue = "",
-            placeholder = stringResource(R.string.code_untitled_placeholder),
             confirmLabel = stringResource(R.string.common_create),
-            validate = { raw ->
-                val name = CodeTree.normalizeNewFileName(raw)
-                CodeTree.validateName(name)
-            },
+            validate = { name -> CodeTree.validateName(CodeTree.normalizeNewFileName(name)) },
             onDismiss = { showNewFile = false },
-            onConfirm = { raw ->
+            onConfirm = { name ->
                 val parent = newFileParent
                 showNewFile = false
                 scope.launch {
-                    val created = viewModel.createFile(raw, parent)
+                    val created = viewModel.createFile(name, parent)
                     if (created != null) onOpenFile(created.id, null)
                 }
             },

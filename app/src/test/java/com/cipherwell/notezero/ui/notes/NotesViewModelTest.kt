@@ -2,6 +2,7 @@ package com.cipherwell.notezero.ui.notes
 
 import com.cipherwell.notezero.data.VaultStatus
 import com.cipherwell.notezero.model.Folder
+import com.cipherwell.notezero.model.BlankPdf
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
 import kotlinx.coroutines.Dispatchers
@@ -375,5 +376,49 @@ class NotesViewModelTest {
         repository.setStatus(VaultStatus.UNLOCKED)
         advanceUntilIdle()
         assertFalse(viewModel.sessionStale.value)
+    }
+
+    @Test
+    fun `createCodeFile stores the resolved name as a code item`() = runTest(dispatcher) {
+        val viewModel = NotesViewModel(repository)
+
+        val created = viewModel.createCodeFile("script.py", folderId = null)
+
+        assertNotNull(created)
+        assertEquals(ItemKind.CODE_FILE, created!!.kind)
+        assertEquals("script.py", created.title)
+        assertEquals("script.py", repository.items.value.single().title)
+        assertFalse(viewModel.createError.value)
+    }
+
+    @Test
+    fun `createPdf stores a blank pdf attachment on a pdf item`() = runTest(dispatcher) {
+        val viewModel = NotesViewModel(repository)
+
+        val created = viewModel.createPdf(nowMillis = 1_700_000_000_000L)
+
+        assertNotNull(created)
+        assertEquals(ItemKind.PDF_FILE, created!!.kind)
+        assertEquals(BlankPdf.fileName(1_700_000_000_000L), created.title)
+        val attachment = created.attachments.single()
+        assertEquals(BlankPdf.MIME_TYPE, attachment.mimeType)
+        val bytes = repository.attachmentBytes(created.id, attachment.id)
+        assertNotNull(bytes)
+        assertTrue(String(bytes!!, Charsets.US_ASCII).startsWith("%PDF-1.4"))
+        assertFalse(viewModel.createError.value)
+        assertEquals(
+            "The created PDF is listed as a normal item",
+            ItemKind.PDF_FILE,
+            repository.items.value.single().kind,
+        )
+    }
+
+    @Test
+    fun `createPdf is refused while the vault is locked`() = runTest(dispatcher) {
+        repository.lock()
+        val viewModel = NotesViewModel(repository)
+
+        assertNull(viewModel.createPdf())
+        assertTrue(repository.items.value.isEmpty())
     }
 }

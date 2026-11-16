@@ -2,11 +2,13 @@ package com.cipherwell.notezero.ui
 
 import com.cipherwell.notezero.crypto.BiometricDecrypt
 import com.cipherwell.notezero.crypto.BiometricEnroll
+import com.cipherwell.notezero.data.AttachmentImport
 import com.cipherwell.notezero.data.BackupImportReport
 import com.cipherwell.notezero.data.NoteRepository
 import com.cipherwell.notezero.data.UnlockResult
 import com.cipherwell.notezero.data.VaultInfo
 import com.cipherwell.notezero.data.VaultStatus
+import com.cipherwell.notezero.model.AttachmentRef
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
@@ -276,6 +278,35 @@ class FakeNoteRepository(
 
     override suspend fun moveItem(id: String, folderId: String?) {
         updateItem(id) { it.copy(folderId = folderId) }
+    }
+
+    /** In-memory plaintext for the test-only attachment import/read path (never on disk). */
+    private val attachmentBytesById = mutableMapOf<String, ByteArray>()
+
+    override suspend fun importAttachment(
+        noteId: String,
+        displayName: String,
+        mimeType: String,
+        source: InputStream,
+    ): AttachmentImport {
+        val bytes = source.readBytes()
+        val ref = AttachmentRef(
+            id = "att-${idCounter++}",
+            displayName = displayName,
+            mimeType = mimeType,
+            sizeBytes = bytes.size.toLong(),
+            createdAt = clock,
+            sha256 = "0".repeat(64),
+        )
+        attachmentBytesById[ref.id] = bytes
+        updateItem(noteId) { it.copy(attachments = it.attachments + ref) }
+        return AttachmentImport.Success(ref)
+    }
+
+    override suspend fun attachmentBytes(noteId: String, attachmentId: String): ByteArray? {
+        val item = items.value.firstOrNull { it.id == noteId } ?: return null
+        if (item.attachments.none { it.id == attachmentId }) return null
+        return attachmentBytesById[attachmentId]?.copyOf()
     }
 
     private fun updateItem(id: String, transform: (Item) -> Item) {

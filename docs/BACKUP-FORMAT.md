@@ -121,6 +121,16 @@ The header embeds only standard `KeyEnvelope` blobs (documented in CRYPTO-SPEC �
 type/version/KDF/iterations/salt/wrapped-VMK — so the parsing rules and iteration bounds
 (`10_000 .. 10_000_000`) are identical to the live vault meta envelopes.
 
+### Item kinds and PDF documents
+
+Items are kind-agnostic on the wire: the kind lives **inside** the encrypted `ItemCodec` payload
+(ordinal 0 = `NOTE`, 1 = `CODE_FILE`, 2 = `PDF_FILE`), so backup v1/v2 files keep importing
+into this build and a `PDF_FILE` restores exactly like any other item — its single
+`application/pdf` attachment travels as an `NZAT` blob (layout in
+[ATTACHMENTS.md](ATTACHMENTS.md)) and is re-encrypted under the destination vault key during
+import. Restore never inspects or renders the PDF; duplicate-safe id matching and the
+missing/invalid-blob skip rules are unchanged.
+
 ## 4. Import algorithm (implemented by `EncryptedNoteRepository.importBackup`)
 
 Preconditions: the destination vault must be **unlocked** (imports are re-encrypted under

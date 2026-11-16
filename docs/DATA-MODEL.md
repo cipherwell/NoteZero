@@ -24,7 +24,7 @@ non-destructive `Migration`.
 | Column | SQLite type | Meaning |
 |---|---|---|
 | `id` | TEXT, PRIMARY KEY | Random UUID at creation, never derived from content. |
-| `kind` | TEXT | `ItemKind.name`: `NOTE` or `CODE_FILE`. |
+| `kind` | TEXT | `ItemKind.name`: `NOTE`, `CODE_FILE` or `PDF_FILE`. |
 | `created_at` | INTEGER | Epoch millis (structural). |
 | `updated_at` | INTEGER | Epoch millis, strictly increased on every save/flag change (structural; drives list order and backup duplicate detection). |
 | `ciphertext` | BLOB | `iv(12) || AES-256-GCM ciphertext || tag(16)` over an [ItemCodec](#2-itemcodec-envelope-payload) payload, AAD-bound to `id` + `kind`. |
@@ -86,7 +86,7 @@ Attachment metadata is described in [ATTACHMENTS.md](ATTACHMENTS.md) §3.
 offset size field
 0      4    magic "NZIT"
 4      1    envelope version = 1, 2 or 3 (3 is written)
-5      1    kind: ItemKind ordinal (0 = NOTE, 1 = CODE_FILE)
+5      1    kind: ItemKind ordinal (0 = NOTE, 1 = CODE_FILE, 2 = PDF_FILE)
 6      1    flags: bit0 folderId present, bit1 pinned, bit2 favourite, bit3 trashed
             (all other bits must be 0)
 7      8    createdAt  (i64 epoch millis)
@@ -129,6 +129,13 @@ add or drop a ref). Attachment **bytes** are not in the payload — they are the
 `Item.locked` is repository-owned the same way (see §7): `saveItem` preserves the stored
 flag and only `setItemLocked` changes it, so an editor autosave with a stale unlocked copy
 cannot silently reveal a locked note.
+
+`PDF_FILE` items are ordinary encrypted items whose payload carries exactly one
+`application/pdf` attachment (an `NZAT` blob holding a blank one-page PDF, see
+`model/BlankPdf`) and whose title is the document file name. They use the same AAD
+(`CryptoAad.item(id, kind)`), quota, trash/delete-forever, orphan-sweep and backup rules as
+attachments on notes; the viewer renders the decrypted blob and is the only consumer. New kinds
+are appended to the enum so older payloads keep decoding (ordinal stability).
 
 Why `id` and `kind` appear both in the row and the payload: the AAD binds the *row's*
 plaintext columns to the ciphertext, and the payload repeats them so the repository can

@@ -471,3 +471,59 @@ owner's vault data was preserved (same signing key re-installed over it, no unin
 | Device smoke after install | Unlocks with password + fingerprint; status bar readable; drawing tools visible at 1.15; biometric settings "Enabled"; attachment-only note kept; 0 FATAL/ANR in logcat |
 
 DECISIONS #19 records the policies behind D1–D6.
+
+---
+
+## 13. Increment 8 (same day): create menu, code formats, encrypted PDF documents
+
+Requested by the owner: the Notes "+" should be a pure plus that opens a menu (note, PDF,
+drawing, code) with well-known code formats; the chosen reinterpretation of "PDF" is a
+first-class blank PDF document item (see DECISIONS #20).
+
+### Build and tests
+
+| Command | Result |
+|---|---|
+| `./gradlew :app:testDebugUnitTest` | **BUILD SUCCESSFUL — 899 tests, 0 failures, 0 errors, 0 skipped (77 classes)** |
+| `./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -PallowScreenshots=true` | **BUILD SUCCESSFUL** |
+| `adb shell am instrument -w …AndroidJUnitRunner` (emulator) | **OK (12 tests)** — 10 previous + `PdfRenderInstrumentedTest` (2) |
+| E2E additions | create-note via sheet (screenshot `17-create-sheet`), create+view PDF (`18-pdf-viewer`), PDF item persists with an `application/pdf` attachment |
+| `./scripts/check-offline.sh --gradle` | exit 0 |
+| Release permissions (`aapt2 dump permissions`) | `USE_BIOMETRIC` only |
+
+New/changed tests (+23): `BlankPdfTest` (wire format/xref/trailer/determinism), `CodeFormatsTest`
+(catalog/lookup/extension rules), `NewCodeFileDialogTest` (default/rewrite/validation), 
+`PdfViewerScreenTest` (pages/title/back, clean error, export warning), `PayloadCodecTest`
+(PDF kind + attachment round trip), `NotesViewModelTest` (`createPdf`/`createCodeFile`, locked
+refusal), `NotesListScreenTest` (sheet options + all four create flows), `PdfRenderInstrumentedTest`
+(device-only real renderer).
+
+### Reproducibility
+
+| Check | Result |
+|---|---|
+| `./scripts/verify-reproducible.sh` (signed APK) | **REPRODUCIBLE** — both builds sha256 `4145c3577d6e98d12df472ce159a2a5255d1fa7615765db2f3104803e42fd705` |
+| `./scripts/verify-reproducible.sh --artifact aab` | **REPRODUCIBLE** — both builds sha256 `eff9e81fc60d14427c0ffa9c31e283ebf3827b89070b87e2fd28fe1e178840aa` |
+| published `releases/notezero-0.1.0-release.apk` | `4145c3577d6e98d12df472ce159a2a5255d1fa7615765db2f3104803e42fd705` |
+| published `releases/notezero-0.1.0-release.aab` | `eff9e81fc60d14427c0ffa9c31e283ebf3827b89070b87e2fd28fe1e178840aa` |
+| certificate | `CN=Cipherwell, O=Cipherwell, OU=NoteZero`, SHA-256 `FA:CA:DD:67:…:92:78` |
+
+### Device check (Pixel 9 Pro XL, Android 17, font scale 1.15)
+
+- **Plus FAB is icon-only** and opens the create sheet; after switching the sheet from a
+  full-screen `Dialog` to an in-window overlay (the dialog window was laid out taller than the
+  display, hiding the PDF option), all four options are visible and reachable at font scale
+  1.15, and the sheet scrolls/dismisses correctly.
+- **Note** creates a Markdown note; **Drawing** creates a note and opens the drawing canvas
+  immediately (drawn strokes saved as an encrypted PNG attachment, note kept after back-out);
+  **Code** shows the `.txt/.md/.html/.css/…` format picker, resolves typed extensions
+  (`script.py`), creates the file and opens the **code editor** with the matching lexer/format;
+  **PDF** creates `document-*.pdf` (431 B blank A4 page), renders page 1/1 in the viewer.
+- PDF export: explicit `UNENCRYPTED copy` warning → SAF `CreateDocument` → file written to
+  Downloads with the suggested name; pulled and validated with `pdfinfo` (**Pages: 1**,
+  **JavaScript: no**, valid header/xref/trailer). The file was removed from the device after
+  the check.
+- Code/PDF rows in Notes open their own viewers; the PDF item survives back-out and appears in
+  the list; the drawing-only note is not auto-trashed.
+- FLAG_SECURE release screencap still blank; 0 FATAL/ANR; QA items and exported files were
+  deleted from the device afterwards (owner's two items untouched).

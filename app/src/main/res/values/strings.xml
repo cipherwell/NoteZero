@@ -435,4 +435,27 @@
     <string name="editor_table_remove_row">Remove table row</string>
     <string name="editor_table_add_column">Add table column</string>
     <string name="editor_table_remove_column">Remove table column</string>
+    <!-- Create (plus) sheet: choose what to create from the Notes list. -->
+    <string name="cd_notes_create">Create</string>
+    <string name="create_sheet_title">Create</string>
+    <string name="create_note">Note</string>
+    <string name="create_note_subtitle">Text note with Markdown, tables and checklists</string>
+    <string name="create_drawing">Drawing</string>
+    <string name="create_drawing_subtitle">Hand-drawn page attached to a new note</string>
+    <string name="create_code">Code</string>
+    <string name="create_code_subtitle">Source file in any common language</string>
+    <string name="create_pdf">PDF</string>
+    <string name="create_pdf_subtitle">Blank PDF document</string>
+    <string name="create_failed">Could not create the item. Your vault is unchanged.</string>
+
+    <!-- Code file format picker (extensions are technical labels, not copy). -->
+    <string name="code_new_file_format">Format</string>
+
+    <!-- PDF viewer -->
+    <string name="pdf_loading">Opening the encrypted document…</string>
+    <string name="pdf_error">This document could not be opened. The vault copy is unchanged.</string>
+    <string name="pdf_page_indicator">%1$d / %2$d</string>
+    <string name="pdf_pages_capped">Showing the first %1$d pages.</string>
+    <string name="cd_pdf_back">Back</string>
+    <string name="cd_pdf_export">Export decrypted copy</string>
 </resources>

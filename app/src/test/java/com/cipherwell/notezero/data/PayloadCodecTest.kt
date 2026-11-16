@@ -82,6 +82,29 @@ class PayloadCodecTest {
     }
 
     @Test
+    fun `pdf items round trip with their attachment`() {
+        // PDF_FILE is kind ordinal 2 (appended after NOTE/CODE_FILE, so old payloads decode).
+        val pdf = attachment(
+            displayName = "document-20261115-221600.pdf",
+            mimeType = "application/pdf",
+            sizeBytes = 420L,
+        )
+        val original = note(
+            kind = ItemKind.PDF_FILE,
+            title = "document-20261115-221600.pdf",
+            body = "",
+            tags = emptyList(),
+            attachments = listOf(pdf),
+        )
+
+        val decoded = ItemCodec.decode(ItemCodec.encode(original))
+
+        assertEquals(original, decoded)
+        assertEquals(ItemKind.PDF_FILE, decoded?.kind)
+        assertEquals("application/pdf", decoded?.attachments?.single()?.mimeType)
+    }
+
+    @Test
     fun `item codec is deterministic`() {
         val item = note()
         assertArrayEquals(ItemCodec.encode(item), ItemCodec.encode(item))

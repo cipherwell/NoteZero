@@ -11,6 +11,13 @@ enum class ItemKind {
 
     /** Plain source file opened in the code editor. */
     CODE_FILE,
+
+    /**
+     * PDF document. Created as a blank, valid PDF stored as an encrypted
+     * `application/pdf` attachment on the item (same NZAT pipeline as images); opened in the
+     * PDF viewer and exportable through the explicit decrypted-copy path.
+     */
+    PDF_FILE,
 }
 
 /**

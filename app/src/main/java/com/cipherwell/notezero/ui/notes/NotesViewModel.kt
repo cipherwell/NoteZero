@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.cipherwell.notezero.data.NoteRepository
 import com.cipherwell.notezero.data.VaultStatus
+import com.cipherwell.notezero.data.AttachmentImport
+import com.cipherwell.notezero.model.BlankPdf
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
@@ -18,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import java.io.ByteArrayInputStream
 import kotlinx.coroutines.launch
 
 /**
@@ -33,6 +36,10 @@ class NotesViewModel(
 ) : ViewModel() {
 
     private val controls = MutableStateFlow(NotesControls())
+    private val _createError = MutableStateFlow(false)
+
+    /** True when the last create action failed (rare I/O/quota failure); non-secret copy. */
+    val createError: StateFlow<Boolean> = _createError.asStateFlow()
 
     val uiState: StateFlow<NotesUiState> = combine(
         repository.items,
@@ -157,6 +164,70 @@ class NotesViewModel(
     suspend fun createNote(folderId: String? = null): Item? {
         if (!isUnlocked()) return null
         return repository.createItem(ItemKind.NOTE, folderId)
+    }
+
+    /**
+     * Creates a code file titled [name] (the format dialog already resolved the extension) and
+     * returns it so the caller can open the code editor. Null when locked or on failure.
+     */
+    suspend fun createCodeFile(name: String, folderId: String? = null): Item? {
+        if (!isUnlocked()) return null
+        val title = name.trim()
+        if (title.isEmpty()) return null
+        return try {
+            val created = repository.createItem(ItemKind.CODE_FILE, folderId)
+            repository.saveItem(created.copy(title = title))
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            _createError.value = true
+            null
+        }
+    }
+
+    /**
+     * Creates a PDF item: a blank, valid one-page PDF stored as an encrypted
+     * `application/pdf` attachment through the normal attachment pipeline. The item is trashed
+     * again if the attachment import fails, so a failed create can never leave an empty PDF
+     * row (or an orphan blob) behind. Null when locked or on failure.
+     */
+    suspend fun createPdf(
+        folderId: String? = null,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): Item? {
+        if (!isUnlocked()) return null
+        val name = BlankPdf.fileName(nowMillis)
+        var created: Item? = null
+        return try {
+            // Title first, attachment second: the import adds its ref to the stored item.
+            val titled = repository.saveItem(repository.createItem(ItemKind.PDF_FILE, folderId).copy(title = name))
+            created = titled
+            val imported = repository.importAttachment(
+                noteId = titled.id,
+                displayName = name,
+                mimeType = BlankPdf.MIME_TYPE,
+                source = ByteArrayInputStream(BlankPdf.create()),
+            )
+            if (imported !is AttachmentImport.Success) {
+                repository.trashItem(titled.id)
+                _createError.value = true
+                null
+            } else {
+                // Return the stored item (with the new attachment ref), not the pre-import copy.
+                repository.items.value.firstOrNull { it.id == titled.id } ?: titled
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            created?.let { runCatching { repository.trashItem(it.id) } }
+            _createError.value = true
+            null
+        }
+    }
+
+    /** Dismisses the create-failure banner/dialog. */
+    fun dismissCreateError() {
+        _createError.value = false
     }
 
     fun togglePinned(item: Item) = mutate { repository.setPinned(item.id, !item.pinned) }

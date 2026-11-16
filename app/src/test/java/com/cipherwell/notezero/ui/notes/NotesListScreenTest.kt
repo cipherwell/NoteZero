@@ -7,9 +7,11 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.cipherwell.notezero.model.BlankPdf
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
@@ -106,10 +108,26 @@ class NotesListScreenTest {
     }
 
     @Test
-    fun `quick note button creates a note and opens the editor`() {
+    fun `plus button opens the create sheet with the four item types`() {
         setScreen()
 
         composeRule.onNodeWithTag("new_note_button").performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("create_sheet").assertExists()
+        composeRule.onNodeWithTag("create_note").assertExists()
+        composeRule.onNodeWithTag("create_drawing").assertExists()
+        composeRule.onNodeWithTag("create_code").assertExists()
+        composeRule.onNodeWithTag("create_pdf").assertExists()
+    }
+
+    @Test
+    fun `create note from the sheet creates a note and opens the editor`() {
+        setScreen()
+
+        composeRule.onNodeWithTag("new_note_button").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("create_note").performClick()
         composeRule.waitForIdle()
 
         composeRule.onNodeWithTag("editor_title").assertExists()
@@ -117,6 +135,62 @@ class NotesListScreenTest {
         composeRule.onNodeWithTag("editor_back").assertExists()
         assertEquals(1, repository.items.value.size)
         assertEquals(ItemKind.NOTE, repository.items.value.single().kind)
+    }
+
+    @Test
+    fun `create drawing opens a note with the drawing canvas already visible`() {
+        setScreen()
+
+        composeRule.onNodeWithTag("new_note_button").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("create_drawing").performClick()
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithTag("drawing_canvas").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        composeRule.onNodeWithTag("editor_title").assertExists()
+        composeRule.onNodeWithTag("drawing_canvas").assertExists()
+        assertEquals(ItemKind.NOTE, repository.items.value.single().kind)
+    }
+
+    @Test
+    fun `create code picks a format and creates the code file`() {
+        setScreen()
+
+        composeRule.onNodeWithTag("new_note_button").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("create_code").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("code_new_file_format_row").assertExists()
+
+        composeRule.onNodeWithTag("code_format_py").performScrollTo().performClick()
+        composeRule.onNodeWithTag("code_dialog_confirm").performClick()
+        composeRule.waitForIdle()
+
+        // Code files open the dedicated code editor (monospace + lexer), not the markdown editor.
+        composeRule.onNodeWithTag("code_editor").assertExists()
+        val created = repository.items.value.single()
+        assertEquals(ItemKind.CODE_FILE, created.kind)
+        assertEquals("untitled.py", created.title)
+    }
+
+    @Test
+    fun `create pdf stores an encrypted pdf attachment and opens the viewer`() {
+        setScreen()
+
+        composeRule.onNodeWithTag("new_note_button").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("create_pdf").performClick()
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithTag("pdf_viewer").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        composeRule.onNodeWithTag("pdf_viewer").assertExists()
+        val created = repository.items.value.single { it.kind == ItemKind.PDF_FILE }
+        assertEquals(1, created.attachments.size)
+        assertEquals("application/pdf", created.attachments.single().mimeType)
+        assertTrue(created.title.endsWith(".pdf"))
+        assertEquals(BlankPdf.MIME_TYPE, created.attachments.single().mimeType)
     }
 
     @Test
