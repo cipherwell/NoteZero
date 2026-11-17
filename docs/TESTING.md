@@ -44,6 +44,18 @@ CI runs `assembleDebug`, `testDebugUnitTest`, and `check-offline.sh --gradle` on
 | `ui.pdf.PdfAnnotationPaletteTest` | 8 | Token-derived colours/widths, index bounds, shared overlay/exporter palette |
 | Instrumented `PdfFlattenedExportInstrumentedTest` | 4 | Real `PdfDocument` output accepted by `PdfRenderer` with matching page count, hostile/oversized fail-closed, max-density export |
 
+## Increment-12 areas (drawing studio)
+
+| Area | Tests | What it proves |
+|---|---|---|
+| `data.SketchCodecTest` | 6 | Round-trips, bounds, corruption/truncation, 1,000-sample fuzz, dense-cap |
+| `data.PayloadCodecTest` / locked-boundary / encrypted repository | 8 | Payload v6 round-trip, v5/v4 compatibility, lock-byte boundaries, persist/preserve/locked-write/backup/clear |
+| `ui.sketch.SketchEditorStateTest` | 19 | Pure editing state machine: tools, bounds dropping, undo/redo, clear, template, lasso/eraser commits |
+| `ui.sketch.SketchRendererTest` | 8 | In-memory PNG render parity/bounds, templates, shapes/arrow heads, off-main-thread render |
+| `ui.sketch.SketchStudioScreenTest` | 17 | Studio composition, gestures (pen/highlighter/shape/eraser/lasso), template/colour/width, undo/redo, rename, autosave, back-flush preview import/replace, empty hint |
+| `ui.library` | 17 | Sketch rows/open-studio, New drawing action + failed-create cleanup, preview-less sketches, existing PDF/EPUB/drawing behaviour |
+| Instrumented `SketchRendererInstrumentedTest` | 4 | Real in-memory PNG decode/bounds, hostile/oversized document fail-closed |
+
 ## Backup-flow tests (Phase-2 SAF gap)
 
 | Test | What it proves | Tooling |
@@ -84,7 +96,7 @@ Commands:
 
 | Suite | Command | Result |
 |---|---|---|
-| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **1118 tests / 0 failures / 0 errors / 0 skipped** (95 classes) |
+| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **1177 tests / 0 failures / 0 errors / 0 skipped** (99 classes) |
 | Instrumented (emulator) | `adb shell am instrument -w com.cipherwell.notezero.test/androidx.test.runner.AndroidJUnitRunner` | **OK (15 tests)** incl. `NotePdfRenderInstrumentedTest`, `VaultFlowE2ETest` (notes + backup settings + code workspace + create sheet + PDF) and a real-`PdfRenderer` instrumented test |
 | Offline guarantee | `./scripts/check-offline.sh --gradle` | exit 0 |
 | Release signing | `apksigner verify --print-certs app-release.apk` | NoteZero upload key SHA-256 `FA:CA:DD:67:…:92:78` |

@@ -79,10 +79,12 @@ import com.cipherwell.notezero.model.ItemKind
 import com.cipherwell.notezero.model.ReadingState
 import com.cipherwell.notezero.ui.attachments.AttachmentImages
 import com.cipherwell.notezero.ui.attachments.DrawingFormat
+import com.cipherwell.notezero.ui.components.common.NzFab
 import com.cipherwell.notezero.ui.components.common.NzIconButton
 import com.cipherwell.notezero.ui.locks.LockVisibility
 import com.cipherwell.notezero.ui.pdf.PdfViewerScreen
 import com.cipherwell.notezero.ui.reader.BookReaderScreen
+import com.cipherwell.notezero.ui.sketch.SketchStudioScreen
 import com.cipherwell.notezero.ui.theme.NoteZeroShapes
 import com.cipherwell.notezero.ui.theme.NoteZeroSpacing
 import com.cipherwell.notezero.ui.theme.NoteZeroType
@@ -98,6 +100,7 @@ private const val EPUB_MIME = EpubParser.MIME
 private const val FALLBACK_PDF_NAME = "document.pdf"
 private const val FALLBACK_EPUB_NAME = "book.epub"
 private const val MAX_METADATA_CHARS = 256
+private const val PNG_MIME = "image/png"
 
 /** Shelf filter chips. */
 internal enum class LibraryFilter { ALL, BOOKS, PDFS, DRAWINGS }
@@ -105,10 +108,16 @@ internal enum class LibraryFilter { ALL, BOOKS, PDFS, DRAWINGS }
 /** Document kind of one shelf row. */
 internal enum class LibraryEntryType { PDF, BOOK, DRAWING }
 
-/** One document on the shelf: the owning item plus the attachment that opens it. */
+/**
+ * One document on the shelf: the owning item plus the attachment that opens it.
+ *
+ * [attachment] is nullable because a standalone `SKETCH_FILE` opens in the drawing studio and
+ * exists before its flattened PNG preview has ever been rendered: the sketch must be listed (and
+ * editable) even with no attachment yet. Note-owned drawings always carry one.
+ */
 internal data class LibraryEntry(
     val item: Item,
-    val attachment: AttachmentRef,
+    val attachment: AttachmentRef?,
     val type: LibraryEntryType,
 ) {
     val updatedAt: Long get() = item.updatedAt
@@ -149,9 +158,12 @@ fun LibraryScreen(
     var previewTarget by remember { mutableStateOf<LibraryEntry?>(null) }
     var previewImage by remember { mutableStateOf<ImageBitmap?>(null) }
     var previewFailed by remember { mutableStateOf(false) }
+    var openSketchId by remember { mutableStateOf<String?>(null) }
+    var creatingSketch by remember { mutableStateOf(false) }
 
     val importFailedNotice = stringResource(R.string.library_import_failed)
     val importUnsupportedNotice = stringResource(R.string.library_import_unsupported)
+    val sketchSaveFailedNotice = stringResource(R.string.sketch_save_failed)
 
     val entries = remember(flowItems, folders, verifiedLockedIds, filter) {
         buildLibraryEntries(flowItems, folders, verifiedLockedIds, filter)
@@ -217,12 +229,56 @@ fun LibraryScreen(
         if (launched.isFailure) repository.endExternalActivity()
     }
 
+    /**
+     * Creates, titles and opens a new standalone sketch.
+     *
+     * The item is created empty (repository `createItem`), titled with the next `Drawing N`
+     * number and saved before the studio opens. If the save throws, the just-created row is
+     * trashed exactly like the import failure path: a failed create never leaves an orphan row
+     * on the shelf. The studio itself owns the encrypted vector + preview from then on.
+     */
+    fun startNewSketch() {
+        importMenuOpen = false
+        if (creatingSketch || importing) return
+        if (repository.status.value != VaultStatus.UNLOCKED) return
+        creatingSketch = true
+        notice = null
+        scope.launch {
+            var createdId: String? = null
+            var opened = false
+            try {
+                val created = repository.createItem(ItemKind.SKETCH_FILE)
+                createdId = created.id
+                // Count includes the just-created row, so the first drawing is "Drawing 1".
+                val number = repository.items.value.count {
+                    it.kind == ItemKind.SKETCH_FILE && !it.trashed
+                }
+                val saved = repository.saveItem(
+                    created.copy(title = context.getString(R.string.sketch_new_name, number)),
+                )
+                openSketchId = saved.id
+                opened = true
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                notice = sketchSaveFailedNotice
+            } finally {
+                if (!opened) {
+                    createdId?.let { id -> trashQuietly(repository, id) }
+                }
+                creatingSketch = false
+            }
+        }
+    }
+
     LaunchedEffect(status) {
         if (status != VaultStatus.UNLOCKED) {
             openPdfId = null
             openBookId = null
+            openSketchId = null
             previewTarget = null
             importing = false
+            creatingSketch = false
         }
     }
 
@@ -230,7 +286,14 @@ fun LibraryScreen(
         when (entry.type) {
             LibraryEntryType.PDF -> openPdfId = entry.item.id
             LibraryEntryType.BOOK -> openBookId = entry.item.id
-            LibraryEntryType.DRAWING -> previewTarget = entry
+            LibraryEntryType.DRAWING -> {
+                if (entry.item.kind == ItemKind.SKETCH_FILE) {
+                    // A sketch is editable: open the studio, never the static preview.
+                    openSketchId = entry.item.id
+                } else if (entry.attachment != null) {
+                    previewTarget = entry
+                }
+            }
         }
     }
 
@@ -248,6 +311,7 @@ fun LibraryScreen(
     ) {
         val pdfId = openPdfId
         val bookId = openBookId
+        val sketchId = openSketchId
         when {
             pdfId != null -> PdfViewerScreen(
                 repository = repository,
@@ -259,6 +323,12 @@ fun LibraryScreen(
                 repository = repository,
                 itemId = bookId,
                 onClose = { openBookId = null },
+            )
+
+            sketchId != null -> SketchStudioScreen(
+                repository = repository,
+                itemId = sketchId,
+                onClose = { openSketchId = null },
             )
 
             else -> Column(
@@ -318,6 +388,20 @@ fun LibraryScreen(
                                 },
                                 onClick = { launchPicker(epub = true) },
                                 modifier = Modifier.testTag("library_import_epub"),
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = stringResource(R.string.library_new_sketch),
+                                        style = NoteZeroType.Callout,
+                                    )
+                                },
+                                onClick = { startNewSketch() },
+                                enabled = !creatingSketch && !importing,
+                                modifier = Modifier
+                                    .heightIn(min = NoteZeroSpacing.minTarget)
+                                    .testTag("library_new_sketch"),
                             )
                         }
                     }
@@ -418,13 +502,19 @@ fun LibraryScreen(
                             start = NoteZeroSpacing.m,
                             end = NoteZeroSpacing.m,
                             top = NoteZeroSpacing.xs,
-                            bottom = NoteZeroSpacing.xxxl,
+                            bottom = if (filter == LibraryFilter.DRAWINGS) {
+                                NoteZeroSpacing.xxxl + 72.dp
+                            } else {
+                                NoteZeroSpacing.xxxl
+                            },
                         ),
                         verticalArrangement = Arrangement.spacedBy(NoteZeroSpacing.xs),
                     ) {
                         items(
                             items = entries,
-                            key = { entry -> "${entry.type.name}_${entry.item.id}_${entry.attachment.id}" },
+                            key = { entry ->
+                                "${entry.type.name}_${entry.item.id}_${entry.attachment?.id ?: "no-preview"}"
+                            },
                         ) { entry ->
                             LibraryRow(
                                 entry = entry,
@@ -445,6 +535,23 @@ fun LibraryScreen(
                     }
                 }
             }
+        }
+
+        // New-drawing action mirrored as a FAB while the Drawings shelf is open; the same
+        // action also lives in the import menu for the other filters.
+        if (pdfId == null && bookId == null && sketchId == null && previewTarget == null &&
+            filter == LibraryFilter.DRAWINGS &&
+            status == VaultStatus.UNLOCKED
+        ) {
+            NzFab(
+                icon = Icons.Filled.Add,
+                contentDescription = stringResource(R.string.cd_library_new_sketch),
+                onClick = { startNewSketch() },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(NoteZeroSpacing.l)
+                    .testTag("library_new_sketch_fab"),
+            )
         }
 
         // Full-screen in-memory drawing preview: bytes are decoded from the vault into a
@@ -494,11 +601,12 @@ fun LibraryScreen(
 
         LaunchedEffect(previewTarget) {
             val target = previewTarget ?: return@LaunchedEffect
+            val attachment = target.attachment ?: return@LaunchedEffect
             previewImage = null
             previewFailed = false
             val bytes = withContext(Dispatchers.IO) {
                 runCatching {
-                    repository.attachmentBytes(target.item.id, target.attachment.id)
+                    repository.attachmentBytes(target.item.id, attachment.id)
                 }.getOrNull()
             }
             val bitmap = if (bytes == null) {
@@ -610,14 +718,26 @@ private fun LibraryRow(
     var menuOpen by remember { mutableStateOf(false) }
     val item = entry.item
     val readingState = item.readingState
+    // A standalone sketch row is a drawing too, but it is labelled as an editable sketch so the
+    // user can tell it apart from the static drawings attached to notes.
+    val isSketch = item.kind == ItemKind.SKETCH_FILE
     val typeLabel = when (entry.type) {
         LibraryEntryType.PDF -> stringResource(R.string.library_type_pdf)
         LibraryEntryType.BOOK -> stringResource(R.string.library_type_book)
-        LibraryEntryType.DRAWING -> stringResource(R.string.library_type_drawing)
+        LibraryEntryType.DRAWING ->
+            if (isSketch) {
+                stringResource(R.string.library_type_sketch)
+            } else {
+                stringResource(R.string.library_type_drawing)
+            }
     }
     val title = item.title.takeIf { it.isNotBlank() }
-        ?: entry.attachment.displayName.takeIf { it.isNotBlank() }
-        ?: typeLabel
+        ?: if (isSketch) {
+            // A sketch without a title is still editable; it appears before any preview exists.
+            stringResource(R.string.sketch_untitled)
+        } else {
+            entry.attachment?.displayName?.takeIf { it.isNotBlank() } ?: typeLabel
+        }
 
     Surface(
         modifier = Modifier
@@ -656,7 +776,8 @@ private fun LibraryRow(
                                 when (entry.type) {
                                     LibraryEntryType.PDF -> "library_type_pdf"
                                     LibraryEntryType.BOOK -> "library_type_book"
-                                    LibraryEntryType.DRAWING -> "library_type_drawing"
+                                    LibraryEntryType.DRAWING ->
+                                        if (isSketch) "library_type_sketch" else "library_type_drawing"
                                 },
                             )
                             .semantics(mergeDescendants = true) {},
@@ -828,6 +949,14 @@ internal fun buildLibraryEntries(
                         it.displayName.startsWith(DrawingFormat.FILE_PREFIX)
                 }
                 .forEach { entries += LibraryEntry(item, it, LibraryEntryType.DRAWING) }
+
+            ItemKind.SKETCH_FILE -> entries += LibraryEntry(
+                item = item,
+                // The flattened preview is optional: the sketch is listed (and editable) from
+                // the moment its encrypted vector is created, before any preview is rendered.
+                attachment = item.attachments.firstOrNull { it.mimeType == PNG_MIME },
+                type = LibraryEntryType.DRAWING,
+            )
 
             ItemKind.CODE_FILE -> Unit
         }

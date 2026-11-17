@@ -25,6 +25,14 @@ enum class ItemKind {
      * Enumeration order is frozen (payload ordinals), append new kinds only.
      */
     BOOK_FILE,
+
+    /**
+     * Standalone hand-drawn sketch (`ItemCodec` payload v6). [Item.sketch] stores the editable
+     * encrypted vector document; a flattened PNG preview is an encrypted image attachment
+     * rendered in memory. Opened in the drawing studio from the Library's Drawings shelf.
+     * Enumeration order is frozen (payload ordinals), append new kinds only.
+     */
+    SKETCH_FILE,
 }
 
 /**
@@ -97,6 +105,12 @@ data class Item(
      * `savePdfAnnotations` changes it; `saveItem` preserves the stored value.
      */
     val pdfAnnotations: PdfAnnotations? = null,
+    /**
+     * Encrypted standalone sketch document (`ItemCodec` payload v6, repository-owned like
+     * [pdfAnnotations]). `null` for non-sketch items / unread sketches; only `saveSketch`
+     * changes it and `saveItem` preserves the stored value.
+     */
+    val sketch: SketchDocument? = null,
 ) {
     val isBlank: Boolean get() = title.isBlank() && body.isBlank()
 }

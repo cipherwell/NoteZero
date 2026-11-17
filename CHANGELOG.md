@@ -3,6 +3,50 @@
 All notable changes to NoteZero are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [Unreleased] — drawing studio: encrypted standalone sketches (2026-11-17, increment 12)
+
+### Added
+
+**Encrypted sketch data model (`ItemCodec` payload v6)**
+- `model/SketchDocument`: blank/ruled/grid/dotted template, freehand `SketchStroke`s (normalised
+  points, 7 inks, 3 widths, pen/highlighter kind) and `SketchShape`s (line/rectangle/ellipse/
+  arrow); A4-portrait normalised geometry; bounds ≤2,000 strokes / ≤100,000 points / ≤500 shapes.
+- `data/SketchCodec` v1 (`"NZSK"`): deterministic 1/10,000-quantised binary codec, ≤4 MiB, null
+  (never throws) on corruption/trailing/oversize; 1,000-sample fuzz test.
+- Payload **v6** appends the sketch document after the annotation layer (presence byte + u32
+  length + codec); v1–v5 payloads still decode (`sketch = null`). `Item.sketch` is
+  repository-owned: `saveSketch` is the only writer (`null`/empty clears), `saveItem` preserves
+  it, backup v2 carries it, and a locked vault can neither read nor write it.
+- `ItemKind.SKETCH_FILE` appended after `BOOK_FILE` (ordinal 4; ordinals frozen).
+
+**Drawing studio**
+- Full-screen studio for `SKETCH_FILE` items: A4 page with blank/ruled/grid/dotted templates,
+  pen/highlighter/eraser/lasso/shape (line/rect/ellipse/arrow) tools, 7 token-derived inks,
+  3 widths, undo/redo (≥50 steps), clear-with-confirm, bounded pinch zoom/pan with fit/zoom
+  buttons, rename dialog and an empty-state hint.
+- Autosave of the encrypted vector after each committed mutation, flushed on exit; lasso/eraser
+  operate on the in-memory vector and are undoable.
+- In-memory flattened PNG preview rendered on exit and imported through the existing encrypted
+  attachment pipeline (previous preview replaced via `deleteAttachment`); no plaintext file or
+  cache, preview failures never affect the vector save.
+- Library integration: "New drawing" action creates + saves a default-titled sketch then opens
+  the studio; the Drawings shelf lists both note-owned drawings and sketches (preview-less
+  sketches included); tapping a sketch opens the studio; rename/lock/trash rules unchanged.
+
+### Verified (measured)
+- **1177 unit tests / 0 failures** (99 classes; +49: sketch data/codec/payload/repository, studio
+  editor/geometry/renderer/screen, library integration, updated v5 fixtures) and **23
+  instrumented tests OK** (+4 real renderer PNG/bounds/hostile cases).
+- Emulator QA: created a sketch from Library, pen stroke + green rectangle + grid template,
+  renamed, exited and reopened — vector restored exactly from the encrypted item; preview
+  attachment blob starts with `NZAT` (encrypted), no plaintext image files in app data.
+- `scripts/check-offline.sh --gradle` OK; token lint clean; no new permissions/dependencies;
+  no debug/logging leftovers (the Robolectric hang was traced to display qualifiers + AlertDialog
+  text fields, not product code; dialog tests now follow the known `@Config(sdk=[34])` rule).
+- New screenshots `31-drawing-studio`, `32-sketch-drawn`, `33-sketch-library`; docs:
+  `docs/CONTRACTS-PHASE11.md`, `docs/DRAWING-STUDIO.md`, DECISIONS #24, DATA-MODEL/BACKUP-FORMAT
+  v6, THREAT-MODEL §3.9.4, VERIFICATION §17.
+
 ## [Unreleased] — PDF annotation editor + flattened annotated export (2026-11-17, increment 11)
 
 ### Added

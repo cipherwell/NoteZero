@@ -13,6 +13,7 @@ import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
 import com.cipherwell.notezero.model.PdfAnnotations
+import com.cipherwell.notezero.model.SketchDocument
 import com.cipherwell.notezero.model.ReadingState
 import com.cipherwell.notezero.model.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -254,10 +255,18 @@ class FakeNoteRepository(
             // the encrypted reading position/bookmarks back.
             readingState = existing?.readingState ?: item.readingState,
             pdfAnnotations = existing?.pdfAnnotations ?: item.pdfAnnotations,
+            sketch = existing?.sketch ?: item.sketch,
         )
         allItems = allItems.map { if (it.id == saved.id) saved else it }
         refreshIndex()
         return saved
+    }
+
+    override suspend fun saveSketch(itemId: String, sketch: SketchDocument?): Boolean {
+        if (_status.value != VaultStatus.UNLOCKED) return false
+        if (allItems.none { it.id == itemId }) return false
+        updateItem(itemId) { it.copy(sketch = sketch?.takeUnless { doc -> doc.isEmpty }) }
+        return true
     }
 
     override suspend fun savePdfAnnotations(itemId: String, annotations: PdfAnnotations?): Boolean {

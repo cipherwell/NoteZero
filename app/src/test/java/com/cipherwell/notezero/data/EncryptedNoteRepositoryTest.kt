@@ -12,6 +12,15 @@ import com.cipherwell.notezero.model.PdfInkKind
 import com.cipherwell.notezero.model.PdfInkStroke
 import com.cipherwell.notezero.model.PdfNote
 import com.cipherwell.notezero.model.PdfPoint
+import com.cipherwell.notezero.model.SketchDocument
+import com.cipherwell.notezero.model.SketchInk
+import com.cipherwell.notezero.model.SketchInkKind
+import com.cipherwell.notezero.model.SketchPoint
+import com.cipherwell.notezero.model.SketchShape
+import com.cipherwell.notezero.model.SketchShapeKind
+import com.cipherwell.notezero.model.SketchStroke
+import com.cipherwell.notezero.model.SketchTemplate
+import com.cipherwell.notezero.model.SketchWidth
 import com.cipherwell.notezero.model.ReadingBookmark
 import com.cipherwell.notezero.model.ReadingState
 import com.cipherwell.notezero.model.ThemeMode
@@ -680,6 +689,79 @@ class EncryptedNoteRepositoryTest {
         // Passing an empty layer clears the stored annotations.
         assertTrue(repo.savePdfAnnotations(pdf.id, PdfAnnotations()))
         assertNull(repo.items.value.first { it.id == pdf.id }.pdfAnnotations)
+    }
+
+    @Test
+    fun sketchIsPersistedEncryptedAndRepositoryOwned() = runBlocking {
+        repo.setupVault(PASSWORD.toCharArray())
+        val item = repo.saveItem(repo.createItem(ItemKind.SKETCH_FILE).copy(title = "Sketch"))
+        val sketch = SketchDocument(
+            template = SketchTemplate.GRID,
+            strokes = listOf(
+                SketchStroke(
+                    points = listOf(SketchPoint(0.1f, 0.2f), SketchPoint(0.7f, 0.8f)),
+                    ink = SketchInk.GREEN,
+                    width = SketchWidth.BOLD,
+                    kind = SketchInkKind.PEN,
+                ),
+            ),
+            shapes = listOf(
+                SketchShape(
+                    SketchShapeKind.RECT,
+                    SketchPoint(0.2f, 0.3f),
+                    SketchPoint(0.6f, 0.9f),
+                    SketchInk.BLUE,
+                    SketchWidth.THIN,
+                ),
+            ),
+        )
+
+        assertTrue(repo.saveSketch(item.id, sketch))
+        assertEquals(sketch, repo.items.value.first { it.id == item.id }.sketch)
+
+        // saveItem is repository-owned: a stale copy cannot roll the sketch back.
+        repo.saveItem(repo.items.value.first { it.id == item.id }.copy(title = "Renamed"))
+        assertEquals(sketch, repo.items.value.first { it.id == item.id }.sketch)
+
+        // Locked vault rejects writes; unlock restores the encrypted document.
+        repo.lock()
+        assertFalse("locked vault must reject sketch writes", repo.saveSketch(item.id, sketch))
+        assertEquals(UnlockResult.SUCCESS, repo.unlock(PASSWORD.toCharArray()))
+        assertEquals(sketch, repo.items.value.first { it.id == item.id }.sketch)
+
+        // Clearing with an empty document removes the stored layer.
+        assertTrue(repo.saveSketch(item.id, SketchDocument()))
+        assertNull(repo.items.value.first { it.id == item.id }.sketch)
+    }
+
+    @Test
+    fun backupRoundTripCarriesSketchDocument() = runBlocking {
+        repo.setupVault(PASSWORD.toCharArray())
+        val item = repo.saveItem(repo.createItem(ItemKind.SKETCH_FILE).copy(title = "Portable sketch"))
+        val sketch = SketchDocument(
+            template = SketchTemplate.DOTTED,
+            shapes = listOf(
+                SketchShape(
+                    SketchShapeKind.LINE,
+                    SketchPoint(0f, 0f),
+                    SketchPoint(1f, 1f),
+                    SketchInk.PURPLE,
+                    SketchWidth.MEDIUM,
+                ),
+            ),
+        )
+        assertTrue(repo.saveSketch(item.id, sketch))
+
+        val exported = ByteArrayOutputStream()
+        assertTrue(repo.exportBackup(exported, null))
+        val bytes = exported.toByteArray()
+
+        val otherRepo = newRepository(database = newDatabase(), preferences = newPrefs())
+        otherRepo.setupVault("target password".toCharArray())
+        val report = otherRepo.importBackup(ByteArrayInputStream(bytes), PASSWORD.toCharArray())
+        assertNotNull(report)
+        assertEquals(1, report!!.imported)
+        assertEquals(sketch, otherRepo.items.value.single().sketch)
     }
 
     @Test

@@ -16,6 +16,7 @@ Features:
 - PDF reader with page jump, progress and bookmarks; reading positions and bookmarks are stored encrypted inside your vault
 - PDF annotation editor: ink, highlighter, highlight boxes, sticky notes, eraser, undo/redo and colour/width tools; annotations are encrypted with your vault and can be exported as a flattened annotated PDF copy
 - Draw sketches with finger or stylus; drawings are stored as encrypted PNG attachments, never as plaintext files
+- A drawing studio for standalone sketches: pen, highlighter, eraser, lasso, line/rectangle/ellipse/arrow shapes, 7 colours, 3 widths, blank/ruled/grid/dotted paper, undo/redo, zoom/pan and rename; sketches are encrypted vector documents with encrypted previews, editable at any size
 - Quick capture: a "New note" launcher shortcut works even while the vault is locked — the note is created only after you unlock
 - A local code editor: file tree, syntax highlighting for Kotlin/Java/JS/TS/Python/JSON/XML/Markdown/Shell, line numbers, find/replace, go-to-line, undo/redo, workspace-wide search, font size and wrap
 - Encrypted backup export/import through the system file picker, duplicate-safe and password-protected if you choose

@@ -163,6 +163,23 @@ its PendingIntent is immutable and its receiver is not exported. The only effect
 is the same pending quick-capture request as the launcher shortcut, which is honoured only
 after a successful unlock.
 
+### 3.9.4 Standalone sketches and the drawing studio (increment 12)
+
+A `SKETCH_FILE` item stores its editable **vector** document (`SketchDocument`: template, strokes,
+shapes) inside the item's AES-256-GCM envelope (`ItemCodec` payload v6 -> `SketchCodec` "NZSK"
+v1). Geometry is normalised and quantised, bounded (≤2,000 strokes / ≤100,000 points / ≤500
+shapes / ≤4 MiB) and the codec fails closed (null, never throws) on corruption/oversize; it is
+repository-owned like annotations/reading state (`saveSketch` only; `saveItem` preserves; empty
+clears), never a plaintext column, unavailable while locked, and carried by backup v2.
+
+The studio renders the document on a Compose canvas and produces the Library preview by
+rendering a bounded PNG **in memory** and importing it through the existing encrypted attachment
+pipeline (`image/png`, ≤10 MiB, same NZAT/AAD/quota rules). No plaintext bitmap/PNG file or cache
+is ever written; the replace-preview path deletes the previous attachment after the new one is
+imported. Rendering input is bounded by the model/codec, exported previews are capped in
+resolution, and no sketch content is logged. The lasso/eraser operate on the in-memory vector and
+are undoable; no new permissions or dependencies are introduced.
+
 ### 3.9.3 PDF annotation layer and flattened export (increment 11)
 
 **Annotation layer as content.** Ink/highlighter strokes, rectangle highlights and sticky notes
@@ -285,6 +302,10 @@ detailed per-blob design in `docs/ATTACHMENTS.md` §9 (audit D4).
 | A locked vault cannot read/write annotations | `savePdfAnnotations` false while locked; readers drop state on lock | repository tests + UI lock-reset tests |
 | Hostile annotation payloads cannot crash/allocate unbounded | model/codec bounds, 1,000-sample fuzz, codec null-on-corruption, exporter null-on-error and 32-page cap | `PdfAnnotationCodecTest`, `PdfFlattenedExportInstrumentedTest` |
 | Flattened PDF export is the same explicit plaintext-egress class as MD/HTML/PDF export | UNENCRYPTED warning + SAF CreateDocument only; in-memory render; vault re-check; no temp file; page bytes bounded | `ui.pdf` export tests + device QA (`pdfinfo` A4 3 pages) |
+| Standalone sketches are encrypted vector content only | `ItemCodec` v6 + `SketchCodec` inside the AEAD; repository-owned; no plaintext column/cache | `SketchCodecTest`, `PayloadCodecTest`, repository sketch tests |
+| A locked vault cannot read/write sketches | `saveSketch` false while locked; studio drops state on lock | repository tests + studio lock-reset tests |
+| Hostile sketch payloads cannot crash/allocate unbounded | model/codec bounds, 1,000-sample fuzz, null-on-corruption; bounded preview renderer | `SketchCodecTest`, instrumented renderer test |
+| Sketch previews never exist as plaintext files | in-memory bitmap/PNG only, imported through the NZAT pipeline; previous preview deleted | code review + attachment tests |
 
 ---
 

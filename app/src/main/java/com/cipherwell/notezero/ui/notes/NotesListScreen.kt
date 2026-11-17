@@ -316,6 +316,7 @@ private fun NotesListContent(
                             ItemKind.PDF_FILE -> onOpenPdf(id)
                             ItemKind.CODE_FILE -> onOpenCodeItem(id)
                             ItemKind.BOOK_FILE -> onOpenBook(id)
+                            ItemKind.SKETCH_FILE -> onOpenLibrary()
                             else -> onOpenEditor(id)
                         }
                     }

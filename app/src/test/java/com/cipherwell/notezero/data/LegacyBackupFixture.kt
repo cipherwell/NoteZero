@@ -101,12 +101,13 @@ internal object LegacyBackupFixture {
         require(item.attachments.isEmpty()) { "v1 backups cannot carry attachments" }
         require(item.readingState == null) { "v1 fixtures carry no reading state" }
         require(item.pdfAnnotations == null) { "v1 fixtures carry no annotations" }
+        require(item.sketch == null) { "v1 fixtures carry no sketches" }
         val encoded = ItemCodec.encode(item)
-        // v5 suffix: attachmentCount u16 (0) + lock byte + readingState presence (0) +
-        // annotation presence (0).
-        val withoutVersion2To5Suffix = encoded.copyOf(encoded.size - 5)
-        withoutVersion2To5Suffix[4] = 1
-        return withoutVersion2To5Suffix
+        // v6 suffix: attachmentCount u16 (0) + lock byte + presence bytes for reading state,
+        // annotations and sketch (all 0).
+        val withoutVersion2To6Suffix = encoded.copyOf(encoded.size - 6)
+        withoutVersion2To6Suffix[4] = 1
+        return withoutVersion2To6Suffix
     }
 
     /** Rebuilds the FolderCodec version-1 payload from a current encoding (drop the v2 lock byte). */

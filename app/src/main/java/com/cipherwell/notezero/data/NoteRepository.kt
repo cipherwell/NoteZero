@@ -7,6 +7,7 @@ import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.PdfAnnotations
 import com.cipherwell.notezero.model.ReadingState
+import com.cipherwell.notezero.model.SketchDocument
 import com.cipherwell.notezero.model.ItemKind
 import com.cipherwell.notezero.model.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -285,6 +286,13 @@ interface NoteRepository {
      * fail-secure (test doubles / alternative implementations).
      */
     suspend fun savePdfAnnotations(itemId: String, annotations: PdfAnnotations?): Boolean = false
+
+    /**
+     * Persists the encrypted standalone sketch document of [itemId]; `null`/empty clears it.
+     * Repository-owned like [savePdfAnnotations]: `saveItem` preserves the stored value, only
+     * this call changes it. Returns false while locked, for unknown ids or invalid bounds.
+     */
+    suspend fun saveSketch(itemId: String, sketch: SketchDocument?): Boolean = false
 
     /**
      * Locks/unlocks one folder and persists the flag inside the folder envelope

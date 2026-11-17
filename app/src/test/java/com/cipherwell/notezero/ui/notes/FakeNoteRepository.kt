@@ -13,6 +13,7 @@ import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
 import com.cipherwell.notezero.model.PdfAnnotations
+import com.cipherwell.notezero.model.SketchDocument
 import com.cipherwell.notezero.model.ReadingState
 import com.cipherwell.notezero.model.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -227,12 +228,29 @@ class FakeNoteRepository : NoteRepository {
             locked = existing?.locked ?: item.locked,
             readingState = existing?.readingState ?: item.readingState,
             pdfAnnotations = existing?.pdfAnnotations ?: item.pdfAnnotations,
+            sketch = existing?.sketch ?: item.sketch,
             updatedAt = nextClock(),
             version = maxOf(item.version, existing?.version ?: 0L) + 1,
         )
         _items.value = _items.value.map { if (it.id == saved.id) saved else it }
         savedItems += saved
         return saved
+    }
+
+    override suspend fun saveSketch(itemId: String, sketch: SketchDocument?): Boolean {
+        if (_status.value != VaultStatus.UNLOCKED) return false
+        val existing = itemById(itemId) ?: return false
+        _items.value = _items.value.map {
+            if (it.id == existing.id) {
+                it.copy(
+                    sketch = sketch?.takeUnless { doc -> doc.isEmpty },
+                    updatedAt = nextClock(),
+                )
+            } else {
+                it
+            }
+        }
+        return true
     }
 
     override suspend fun savePdfAnnotations(itemId: String, annotations: PdfAnnotations?): Boolean {

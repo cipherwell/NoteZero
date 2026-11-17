@@ -725,3 +725,72 @@ PDFs plus a flattened annotated-copy export. Contracts: `docs/CONTRACTS-PHASE10.
   to the rendered page; when zoom lands the same model renders correctly (normalised geometry).
 - Undo/redo and the in-flight gesture are in-memory only; at most the last gesture is lost on
   process death (persisted state is what was committed per mutation).
+
+---
+
+## 17. Increment 12 — drawing studio: encrypted standalone sketches (2026-11-17)
+
+Scope: phase 12 first slice (`docs/ROADMAP-ALL-IN-ONE.md`): standalone sketch documents,
+encrypted vector persistence + in-memory encrypted preview, and a real drawing toolset.
+Contracts: `docs/CONTRACTS-PHASE11.md`; UI details: `docs/DRAWING-STUDIO.md`; policy:
+DECISIONS #24.
+
+### 17.1 Data layer: encrypted sketch documents (`ItemCodec` payload v6)
+
+| Check | Result |
+|---|---|
+| Model | `SketchDocument` (template blank/ruled/grid/dotted; strokes with normalised points/7 inks/3 widths/pen-highlighter kind; line/rect/ellipse/arrow shapes; A4-portrait ratio); bounds ≤2,000 strokes / 2..2,000 pts/stroke / ≤100,000 total points / ≤500 shapes, constructor throws outside bounds |
+| Codec | `SketchCodec` v1 `"NZSK"`, 1/10,000 quantisation, deterministic, ≤4 MiB, null (never throws) on truncation/corruption/out-of-range/trailing; 1,000-sample fuzz test; dense-cap round-trip |
+| Storage | `ItemKind.SKETCH_FILE` appended (ordinal 4); `Item.sketch` inside payload **v6** (presence byte + u32 length + codec after annotations); v1–v5 still decode (`sketch = null`); repository-owned (`saveSketch` only, null/empty clears, `saveItem` preserves), locked vault cannot read/write, backup v2 carries it |
+| Tests | `SketchCodecTest` 6; payload v6 round-trip + v5/v4 compatibility; locked-boundary byte offsets updated for v6; `EncryptedNoteRepositoryTest.sketchIsPersistedEncryptedAndRepositoryOwned` + `backupRoundTripCarriesSketchDocument`; legacy v1 backup fixture still imports (v1 suffix now 6 bytes) |
+
+### 17.2 Drawing studio + Library integration
+
+| Check | Result |
+|---|---|
+| Studio | A4 page with blank/ruled/grid/dotted paper, pen/highlighter/eraser/lasso/shape (line/rect/ellipse/arrow), 7 token-derived inks, 3 widths, undo/redo (≥50), clear-with-confirm, bounded pinch zoom/pan + fit/zoom buttons, rename, empty-state hint; Back flushes pending save |
+| Persistence | vector autosaved after each committed mutation; on exit a flattened PNG is rendered in memory and imported as an encrypted image attachment (previous preview deleted via `deleteAttachment`); no plaintext file/cache; preview failures never affect the vector save |
+| Library | nullable `LibraryEntry.attachment` so preview-less sketches appear; "New drawing" action creates+saves a default-titled sketch and opens the studio (failed create trashes the placeholder); tap sketch opens studio; rename/lock/trash rules unchanged; note-owned drawings still listed |
+| Tests | `SketchEditorStateTest` 19, `SketchRendererTest` 8, `SketchStudioScreenTest` 17, Library 17; full unit suite **1,177 tests / 0 failures / 99 classes**; **23 instrumented tests OK** (+4 `SketchRendererInstrumentedTest`: real in-memory PNG decode/bounds, hostile/oversized fail-closed) |
+
+### 17.3 Emulator device QA (measured)
+
+| Step | Evidence |
+|---|---|
+| Creation | Library → + → "New drawing": studio opened on a blank A4 page with the full tool/colour/template palette and empty-state hint, title "Drawing 1" |
+| Drawing | pen stroke drawn; colour switched to green; shape menu → Rectangle drawn; paper switched to Grid; strokes/shapes/template rendered correctly |
+| Rename | top-bar rename dialog updated the encrypted item title (verified in the studio and Library row) |
+| Persistence | left the studio (Back flush) → Library listed the sketch under Drawings → reopened it: grid template, black stroke and green rectangle restored exactly from `Item.sketch` |
+| Encryption | app-private attachments: preview blob `4679eb0b…nzb` 34,009 B starts with `NZAT` (encrypted envelope), not a PNG signature; no `.png/.jpg/.webp/.pdf/.epub` files anywhere under `files/` or `cache/` |
+| Crashes | 0 NoteZero FATAL/ANR during the session |
+| Screenshots | `31-drawing-studio`, `32-sketch-drawn`, `33-sketch-library` |
+
+### 17.4 Security + release verification
+
+| Check | Result |
+|---|---|
+| Offline guard | `./scripts/check-offline.sh --gradle` → `OK: NoteZero is offline by construction.` |
+| Token lint | `ui/sketch` 7 Kotlin files token-clean; no raw hex outside the token-derived palette |
+| Hygiene | no TEMP DEBUG/TODO/FIXME/Log/println/sketchdbg leftovers in `ui/sketch`/Library; no network imports; no new dependencies/permissions (release APK: `USE_BIOMETRIC` only + generated dynamic-receiver permission) |
+| Reproducible APK | **REPRODUCIBLE** — both builds sha256 `16e2753b7180c1483d6a72d1413fa2b551c082dda4786b186e08b36bbce481de` |
+| Reproducible AAB | **REPRODUCIBLE** — both builds sha256 `36a2ae5e9d40c6a86fca24b6e0d4bd89431615964ee19fba8b785d3115f101fe` |
+| Artifacts | `releases/notezero-0.1.0-release.apk` / `.aab` replaced; `releases/SHA256SUMS` updated |
+| Certificate | `CN=Cipherwell, O=Cipherwell, OU=NoteZero, C=US`, SHA-256 `FA:CA:DD:67:…:92:78` (unchanged) |
+| Owner phone | release APK installed over the existing vault (data/biometrics intact, `firstInstallTime` unchanged); phone at lockscreen so no UI interaction this pass; 0 crash entries; left locked |
+
+### 17.5 Residual notes
+
+- Drawing studio v1 has no layers, pressure/tilt curves, brush textures, per-element selection/move,
+  sketch export, or shape editing after commit. The lasso deletes enclosed elements (no move);
+  shapes are commutative/undoable snapshots. These are phase-12 follow-ups.
+- The preview PNG is refreshed on studio exit (not live); the Library row still shows the type
+  label rather than a thumbnail (consistent with existing PDF/book rows).
+- Note-owned drawings created from the note editor remain flattened encrypted PNG attachments by
+  design; only `SKETCH_FILE` items are editable vector sketches. A shared stroke surface between
+  notes/PDF annotations and the studio is a later roadmap item.
+- Test-harness gotcha (not product code): a Robolectric `@Config` **display qualifier** combined
+  with an AlertDialog text field caused an infinite-idle `ShadowLineBreaker` OOM; removing the
+  qualifiers fixed it (the project rule is `@Config(sdk=[34])` only for dialog tests). One
+  temporary debug SideEffect was removed before the final runs.
+- Rename automation via `adb input text` typed only the first token; the feature itself was
+  verified by the title update and unit tests, not by the full typed string.

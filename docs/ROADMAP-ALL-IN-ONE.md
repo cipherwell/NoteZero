@@ -49,7 +49,7 @@ Deliver:
   thumbnails, rotate/delete/insert/reorder page operations, text-layer search/extraction (needs a
   vetted PDF text engine) and rendering sticky-note text into flattened copies.
 
-## Phase 12 — Drawing studio
+## Phase 12 — Drawing studio (shipped, increment 12)
 
 - Standalone sketch documents (encrypted PNG/vector layer) in the Library's Drawings filter.
 - Professional notebook tools learned from Goodnotes: pen/pencil/highlighter/eraser/lasso, shapes
@@ -58,6 +58,13 @@ Deliver:
   stylus pressure when the device reports it.
 - Notes/PDF annotation can reuse the same canvas surface (shared stroke model + renderer).
 - Preserve the existing no-plaintext rule: renders stay in memory, imported as encrypted PNG.
+- **Shipped in increment 12:** standalone encrypted vector sketches (`ItemKind.SKETCH_FILE`,
+  payload v6), the full studio (pen/highlighter/eraser/lasso/shapes, templates, colours/widths,
+  undo/redo, clear, zoom/pan, rename, autosave + back-flush), in-memory encrypted preview
+  pipeline, Library "New drawing" integration, codec/geometry/editor/renderer/studio/library
+  tests and document QA. **Still queued:** layers, pressure/tilt curves, brush textures,
+  per-element selection/move, sketch export, and a shared stroke surface with note drawings/PDF
+  annotations.
 
 ## Phase 13 — "IDE" file workspace
 

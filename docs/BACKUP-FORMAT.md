@@ -130,10 +130,11 @@ single `application/pdf` or `application/epub+zip` attachment travels as an `NZA
 [ATTACHMENTS.md](ATTACHMENTS.md)) and is re-encrypted under the destination vault key during
 import. Restore never inspects or renders the document; duplicate-safe id matching and the
 missing/invalid-blob skip rules are unchanged. Item payload **v4** also carries the encrypted reading state (position/progress/bookmarks/book
-metadata) and payload **v5** additionally carries the PDF annotation layer (ink, highlights,
-sticky notes), all inside the same ciphertext, so a restored PDF or book resumes exactly where it
-was left on the source vault and keeps its annotations; older (v1–v4) payloads decode with no
-reading state/annotations.
+metadata), payload **v5** additionally carries the PDF annotation layer (ink, highlights,
+sticky notes) and payload **v6** the standalone sketch document (drawing-studio vectors), all
+inside the same ciphertext, so a restored PDF/book resumes exactly where it was and a restored
+sketch re-opens fully editable; older (v1–v5) payloads decode with no reading
+state/annotations/sketch.
 
 ## 4. Import algorithm (implemented by `EncryptedNoteRepository.importBackup`)
 

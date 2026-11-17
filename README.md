@@ -10,7 +10,7 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 [VaultZero](https://github.com/cipherwell/Vault-Zero) with an independent package
 (`com.cipherwell.notezero`), independent signing key and independent threat model.
 
-> Status: **Phase 5 — all-in-one workspace (increment 11)** — 2026-11-17.
+> Status: **Phase 5 — all-in-one workspace (increment 12)** — 2026-11-17.
 > Security core, notes MVP, encrypted SAF backup/restore, code editor (workspace
 > search/copy/export/indent), encrypted attachments (images/files/**drawings**),
 > **locked notes/folders**, **Markdown/HTML/PDF note export**, **table editing**,
@@ -23,7 +23,7 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 > phased plan (PDF annotation, drawing studio, universal file workspace, more formats) are
 > in [docs/ROADMAP-ALL-IN-ONE.md](docs/ROADMAP-ALL-IN-ONE.md), grounded in
 > [docs/RESEARCH-ALL-IN-ONE-2026-11-17.md](docs/RESEARCH-ALL-IN-ONE-2026-11-17.md).
-> Builds are green, **1118 unit tests + 19 device tests**, and **signed APK + AAB release
+> Builds are green, **1177 unit tests + 23 device tests**, and **signed APK + AAB release
 > builds are byte-for-byte reproducible**; an independent security audit previously found
 > no HIGH/CRITICAL issues and its findings are remediated. Device QA on a Pixel 9 Pro XL
 > (Android 17) and the emulator covered import, TOC, search, bookmarks, themes and
@@ -53,8 +53,10 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 | ![Library](docs/screenshots/23-library.png) | ![EPUB reader](docs/screenshots/24-epub-reader.png) | ![PDF tools](docs/screenshots/25-pdf-viewer-tools.png) |
 | **Night reading theme + encrypted bookmarks** | **PDF annotate tools** | **Encrypted annotations** |
 | ![Reader night](docs/screenshots/26-reader-bookmarks-night.png) | ![Ann tools](docs/screenshots/27-pdf-annotate-tools.png) | ![Annotations](docs/screenshots/28-pdf-annotations.png) |
-| **Annotated export choice** | **Flattened annotated copy (page 1)** | |
-| ![Export choice](docs/screenshots/29-pdf-export-choice.png) | ![Flattened](docs/screenshots/30-pdf-flattened-page.png) | |
+| **Annotated export choice** | **Flattened annotated copy (page 1)** | **Drawing studio** |
+| ![Export choice](docs/screenshots/29-pdf-export-choice.png) | ![Flattened](docs/screenshots/30-pdf-flattened-page.png) | ![Drawing studio](docs/screenshots/31-drawing-studio.png) |
+| **Sketch: pen + shapes + grid** | **Sketch in the Library** | |
+| ![Sketch drawn](docs/screenshots/32-sketch-drawn.png) | ![Sketch library](docs/screenshots/33-sketch-library.png) | |
 
 Screenshots are real emulator captures from the instrumented E2E run (debug build with
 `-PallowScreenshots=true`; normal builds set FLAG_SECURE, which makes `screencap` return a
@@ -103,6 +105,26 @@ Screenshots are real emulator captures from the instrumented E2E run (debug buil
   annotated copy: `pdfinfo` → **3 pages, 595×842 pt A4, 70,333 B**, and the rendered page shows
   the highlight box/highlighter/marker over the original text. 1118 unit tests / 0 failures
   (95 classes) and **19 instrumented tests** green.
+
+## Drawing studio (2026-11-17)
+
+- **Standalone sketches** are first-class encrypted items (`ItemKind.SKETCH_FILE`): the editable
+  source is a normalised **vector document** (`SketchDocument`: blank/ruled/grid/dotted page,
+  pen/highlighter strokes, line/rect/ellipse/arrow shapes, 7 inks, 3 widths) sealed in the item
+  envelope through `SketchCodec`/`ItemCodec` payload v6; reopening is lossless at any size.
+- **Studio**: pen, highlighter, eraser, lasso (point-in-polygon delete), shapes, colour/width
+  palette, paper templates, undo/redo, clear-with-confirm, bounded pinch zoom/pan + fit,
+  rename, and autosave after each committed change with a flush on exit. The Library gets a
+  **New drawing** action and lists sketches alongside note-owned drawings.
+- **Preview**: rendered in memory to a bounded PNG and imported through the existing encrypted
+  attachment pipeline (replacing the old preview); no plaintext PNG/file/cache ever exists —
+  device QA confirmed the attachment blob starts with the encrypted `NZAT` magic and no image
+  files exist in app data.
+- **Measured QA** (emulator, Android 17 image): created "Drawing 1" from the Library, drew a pen
+  stroke, switched to green, created a rectangle from the shape menu, switched to the grid
+  template, renamed it, left and reopened it — the vector document restored exactly (grid,
+  stroke, rectangle) from the encrypted item; preview blob 34,009 B encrypted `NZAT`. 1177 unit
+  tests / 0 failures (99 classes) and **23 instrumented tests** green.
 
 ## Verified end to end (2026-11-15)
 

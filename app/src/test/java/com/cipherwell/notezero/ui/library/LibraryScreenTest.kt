@@ -10,6 +10,7 @@ import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cipherwell.notezero.book.EpubParser
+import com.cipherwell.notezero.data.NoteRepository
 import com.cipherwell.notezero.model.AttachmentRef
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
@@ -18,6 +19,8 @@ import com.cipherwell.notezero.ui.FakeNoteRepository
 import com.cipherwell.notezero.ui.UiTestBase
 import com.cipherwell.notezero.ui.reader.EpubTestData
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -93,7 +96,36 @@ class LibraryScreenTest : UiTestBase() {
         ),
     )
 
-    private fun showLibrary(repository: FakeNoteRepository, onBack: () -> Unit = {}) {
+    /**
+     * Thin wrapper that makes the encrypted-save step fail for sketches only, so the
+     * new-drawing failure path can be asserted without touching the shared fake.
+     */
+    private class FailingSketchSaveRepository(
+        private val delegate: NoteRepository,
+    ) : NoteRepository by delegate {
+        override suspend fun saveItem(item: Item): Item {
+            if (item.kind == ItemKind.SKETCH_FILE) throw IllegalStateException("simulated save failure")
+            return delegate.saveItem(item)
+        }
+    }
+
+    private fun sketchItem(
+        id: String,
+        title: String,
+        updatedAt: Long = 1_000L,
+        preview: AttachmentRef? = null,
+    ): Item = Item(
+        id = id,
+        kind = ItemKind.SKETCH_FILE,
+        title = title,
+        body = "",
+        createdAt = updatedAt,
+        updatedAt = updatedAt,
+        version = 1,
+        attachments = listOfNotNull(preview),
+    )
+
+    private fun showLibrary(repository: NoteRepository, onBack: () -> Unit = {}) {
         setThemedContent {
             LibraryScreen(repository = repository, onBack = onBack)
         }
@@ -334,15 +366,22 @@ class LibraryScreenTest : UiTestBase() {
             pdfItem(id = "pdf-1", title = "PDF Doc", updatedAt = 3_000L),
             bookItem(id = "book-1", title = "Book Doc", updatedAt = 2_000L),
             drawingItem(id = "drawing-1", title = "Sketch note", updatedAt = 1_000L),
+            sketchItem(id = "sketch-1", title = "Editable sketch", updatedAt = 500L),
             pdfItem(id = "pdf-locked", title = "Hidden", locked = true),
         )
         val all = buildLibraryEntries(items, emptyList(), emptySet(), LibraryFilter.ALL)
-        assertEquals(listOf("PDF Doc", "Book Doc", "Sketch note"), all.map { it.item.title })
+        assertEquals(
+            listOf("PDF Doc", "Book Doc", "Sketch note", "Editable sketch"),
+            all.map { it.item.title },
+        )
         assertTrue(all.none { it.item.title == "Hidden" })
 
         val drawings = buildLibraryEntries(items, emptyList(), emptySet(), LibraryFilter.DRAWINGS)
-        assertEquals(1, drawings.size)
-        assertEquals(LibraryEntryType.DRAWING, drawings.single().type)
+        assertEquals(2, drawings.size)
+        assertTrue(drawings.all { it.type == LibraryEntryType.DRAWING })
+        // A standalone sketch is listed before any flattened preview exists.
+        val sketchEntry = drawings.single { it.item.kind == ItemKind.SKETCH_FILE }
+        assertNull(sketchEntry.attachment)
 
         val books = buildLibraryEntries(items, emptyList(), emptySet(), LibraryFilter.BOOKS)
         assertEquals(1, books.size)
@@ -350,5 +389,111 @@ class LibraryScreenTest : UiTestBase() {
 
         val pdfs = buildLibraryEntries(items, emptyList(), emptySet(), LibraryFilter.PDFS)
         assertEquals(LibraryEntryType.PDF, pdfs.single().type)
+    }
+
+    // =========================================================================
+    // Standalone drawings (drawing studio integration)
+    // =========================================================================
+
+    @Test
+    fun `a sketch without a preview is listed and opens the studio`() {
+        val repository = EpubTestData.unlockedRepository(
+            listOf(sketchItem(id = "sketch-1", title = "Editable sketch")),
+        )
+        showLibrary(repository)
+
+        composeRule.onNodeWithTag("library_filter_drawings").performClick()
+        composeRule.waitForIdle()
+        assertEquals(1, rowCount())
+        composeRule.onNodeWithText("Editable sketch").assertExists()
+        composeRule.onNodeWithText("Drawing").assertExists()
+
+        composeRule.onNodeWithTag("library_item").performClick()
+        waitForTag("sketch_studio")
+        waitForTag("sketch_page")
+        composeRule.onNodeWithTag("sketch_back").performClick()
+        waitForTag("library_item")
+        composeRule.onNodeWithTag("library_screen").assertExists()
+    }
+
+    @Test
+    fun `the new drawing menu action creates a titled sketch and opens the studio`() {
+        val repository = EpubTestData.unlockedRepository()
+        showLibrary(repository)
+
+        composeRule.onNodeWithTag("library_import").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("library_new_sketch").performClick()
+
+        waitForTag("sketch_studio")
+        composeRule.waitUntil(5_000) {
+            repository.items.value.any { it.kind == ItemKind.SKETCH_FILE && it.title.isNotBlank() }
+        }
+        val sketch = repository.items.value.single { it.kind == ItemKind.SKETCH_FILE }
+        assertFalse(sketch.trashed)
+        assertEquals("Drawing 1", sketch.title)
+
+        // Opening the studio rotates into the drawing route; back returns to the shelf.
+        composeRule.onNodeWithTag("sketch_back").performClick()
+        waitForTag("library_item")
+        composeRule.onNodeWithTag("library_filter_drawings").performClick()
+        composeRule.waitForIdle()
+        assertEquals(1, rowCount())
+        composeRule.onNodeWithText("Drawing 1").assertExists()
+    }
+
+    @Test
+    fun `the drawings filter offers a new drawing fab`() {
+        val repository = EpubTestData.unlockedRepository()
+        showLibrary(repository)
+
+        composeRule.onNodeWithTag("library_new_sketch_fab").assertDoesNotExist()
+        composeRule.onNodeWithTag("library_filter_drawings").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("library_new_sketch_fab").assertExists()
+
+        composeRule.onNodeWithTag("library_new_sketch_fab").performClick()
+        waitForTag("sketch_studio")
+        composeRule.waitUntil(5_000) {
+            repository.items.value.any { it.kind == ItemKind.SKETCH_FILE }
+        }
+    }
+
+    @Test
+    fun `a failed new drawing save leaves no orphan row`() {
+        val fake = EpubTestData.unlockedRepository()
+        val repository = FailingSketchSaveRepository(fake)
+        showLibrary(repository)
+
+        composeRule.onNodeWithTag("library_import").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("library_new_sketch").performClick()
+
+        // The failure is surfaced and the just-created row is trashed, not left on the shelf.
+        composeRule.waitUntil(5_000) {
+            fake.items.value.none { it.kind == ItemKind.SKETCH_FILE && !it.trashed }
+        }
+        composeRule.waitForIdle()
+        assertEquals(0, rowCount())
+        composeRule.onNodeWithTag("library_notice").assertExists()
+        composeRule.onNodeWithTag("sketch_studio").assertDoesNotExist()
+    }
+
+    @Test
+    fun `a sketch preview attachment is used as the row attachment when present`() {
+        val preview = attachment("att-preview", "sketch-1700000000000.png", "image/png")
+        val repository = EpubTestData.unlockedRepository(
+            listOf(sketchItem(id = "sketch-1", title = "Drawn page", preview = preview)),
+        )
+        showLibrary(repository)
+
+        composeRule.onNodeWithTag("library_filter_drawings").performClick()
+        composeRule.waitForIdle()
+        assertEquals(1, rowCount())
+        composeRule.onNodeWithText("Drawn page").assertExists()
+        // A sketch row still opens the editable studio, not the static preview overlay.
+        composeRule.onNodeWithTag("library_item").performClick()
+        waitForTag("sketch_studio")
+        composeRule.onNodeWithTag("library_preview").assertDoesNotExist()
     }
 }

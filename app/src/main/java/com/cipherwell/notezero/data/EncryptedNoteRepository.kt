@@ -19,6 +19,7 @@ import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
 import com.cipherwell.notezero.model.PdfAnnotations
 import com.cipherwell.notezero.model.ReadingState
+import com.cipherwell.notezero.model.SketchDocument
 import com.cipherwell.notezero.model.ItemQueries
 import com.cipherwell.notezero.model.ThemeMode
 import kotlinx.coroutines.CoroutineDispatcher
@@ -857,6 +858,23 @@ class EncryptedNoteRepository(
             }
         }
 
+    override suspend fun saveSketch(itemId: String, sketch: SketchDocument?): Boolean =
+        withContext(ioDispatcher) {
+            try {
+                mutex.withLock {
+                    val key = vmk ?: return@withLock false
+                    val item = itemsById[itemId] ?: return@withLock false
+                    val stored = sketch?.takeUnless { it.isEmpty }
+                    if (item.sketch == stored) return@withLock true
+                    saveItemLocked(item.copy(sketch = stored), key, preserveSketch = false)
+                    afterItemMutationLocked()
+                    true
+                }
+            } catch (e: IllegalArgumentException) {
+                false
+            }
+        }
+
     override suspend fun setFolderLocked(id: String, locked: Boolean): Boolean =
         withContext(ioDispatcher) {
             mutex.withLock {
@@ -1555,6 +1573,7 @@ class EncryptedNoteRepository(
         preserveLock: Boolean = true,
         preserveReadingState: Boolean = true,
         preservePdfAnnotations: Boolean = true,
+        preserveSketch: Boolean = true,
     ): Item {
         val existing = itemsById[item.id]
         val now = clock()
@@ -1572,6 +1591,11 @@ class EncryptedNoteRepository(
             existing?.pdfAnnotations ?: item.pdfAnnotations
         } else {
             item.pdfAnnotations
+        }
+        val sketch = if (preserveSketch) {
+            existing?.sketch ?: item.sketch
+        } else {
+            item.sketch
         }
         val attachments = when {
             !preserveAttachments -> item.attachments
@@ -1591,6 +1615,7 @@ class EncryptedNoteRepository(
             locked = locked,
             readingState = readingState,
             pdfAnnotations = pdfAnnotations,
+            sketch = sketch,
         )
         persistItemLocked(saved, vmkBytes)
         itemsById[saved.id] = saved

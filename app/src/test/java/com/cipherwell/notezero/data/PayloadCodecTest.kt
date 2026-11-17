@@ -10,6 +10,14 @@ import com.cipherwell.notezero.model.PdfInkKind
 import com.cipherwell.notezero.model.PdfInkStroke
 import com.cipherwell.notezero.model.PdfNote
 import com.cipherwell.notezero.model.PdfPoint
+import com.cipherwell.notezero.model.SketchDocument
+import com.cipherwell.notezero.model.SketchInk
+import com.cipherwell.notezero.model.SketchPoint
+import com.cipherwell.notezero.model.SketchShape
+import com.cipherwell.notezero.model.SketchShapeKind
+import com.cipherwell.notezero.model.SketchStroke
+import com.cipherwell.notezero.model.SketchTemplate
+import com.cipherwell.notezero.model.SketchWidth
 import com.cipherwell.notezero.model.ReadingBookmark
 import com.cipherwell.notezero.model.ReadingState
 import org.junit.Assert.assertArrayEquals
@@ -43,6 +51,7 @@ class PayloadCodecTest {
         attachments: List<AttachmentRef> = emptyList(),
         readingState: ReadingState? = null,
         pdfAnnotations: PdfAnnotations? = null,
+        sketch: SketchDocument? = null,
     ) = Item(
         id = id,
         kind = kind,
@@ -59,6 +68,7 @@ class PayloadCodecTest {
         attachments = attachments,
         readingState = readingState,
         pdfAnnotations = pdfAnnotations,
+        sketch = sketch,
     )
 
     private fun attachment(
@@ -142,10 +152,10 @@ class PayloadCodecTest {
     @Test
     fun `version 3 payloads decode with no reading state`() {
         val original = note(kind = ItemKind.PDF_FILE, readingState = null)
-        val encodedV5 = ItemCodec.encode(original)
-        // Envelope layout: 4-byte magic, then the version byte. v5 with null state and null
-        // annotations appends two presence bytes at the end; strip both for a v3 payload.
-        val legacy = encodedV5.copyOf(encodedV5.size - 2)
+        val encodedV6 = ItemCodec.encode(original)
+        // Envelope layout: 4-byte magic, then the version byte. v6 with null state, null
+        // annotations and null sketch appends three presence bytes; strip all for a v3 payload.
+        val legacy = encodedV6.copyOf(encodedV6.size - 3)
         legacy[4] = 3
 
         val decoded = ItemCodec.decode(legacy)
@@ -190,14 +200,60 @@ class PayloadCodecTest {
     @Test
     fun `version 4 payloads decode without annotations`() {
         val state = ReadingState(position = 1, total = 4)
-        val encodedV5 = ItemCodec.encode(note(kind = ItemKind.BOOK_FILE, readingState = state))
-        // v5 wraps the annotation presence byte at the end; dropping it yields a valid v4
-        // payload that must still decode its reading state.
-        val v4 = encodedV5.copyOf(encodedV5.size - 1)
+        val encodedV6 = ItemCodec.encode(note(kind = ItemKind.BOOK_FILE, readingState = state))
+        // v6 wraps the annotation + sketch presence bytes at the end; dropping both yields a
+        // valid v4 payload that must still decode its reading state.
+        val v4 = encodedV6.copyOf(encodedV6.size - 2)
         v4[4] = 4
         val decoded = ItemCodec.decode(v4)
         assertEquals(state, decoded?.readingState)
         assertNull(decoded?.pdfAnnotations)
+    }
+
+    @Test
+    fun `item codec round trips the encrypted sketch document`() {
+        val sketch = SketchDocument(
+            template = SketchTemplate.GRID,
+            strokes = listOf(
+                SketchStroke(
+                    points = listOf(SketchPoint(0.1f, 0.2f), SketchPoint(0.3f, 0.4f)),
+                    ink = SketchInk.GREEN,
+                    width = SketchWidth.BOLD,
+                ),
+            ),
+            shapes = listOf(
+                SketchShape(
+                    kind = SketchShapeKind.ARROW,
+                    start = SketchPoint(0.5f, 0.5f),
+                    end = SketchPoint(0.9f, 0.9f),
+                    ink = SketchInk.RED,
+                    width = SketchWidth.THIN,
+                ),
+            ),
+        )
+        val original = note(kind = ItemKind.SKETCH_FILE, sketch = sketch)
+
+        val decoded = ItemCodec.decode(ItemCodec.encode(original))
+
+        assertEquals(original, decoded)
+        assertEquals(sketch, decoded?.sketch)
+        assertEquals(ItemKind.SKETCH_FILE, decoded?.kind)
+    }
+
+    @Test
+    fun `version 5 payloads decode without a sketch but keep annotations`() {
+        val annotations = PdfAnnotations(
+            notes = listOf(PdfNote(page = 0, x = 0.5f, y = 0.5f, text = "kept")),
+        )
+        val encodedV6 = ItemCodec.encode(
+            note(kind = ItemKind.PDF_FILE, pdfAnnotations = annotations, sketch = SketchDocument()),
+        )
+        // Strip only the v6 sketch-presence byte.
+        val v5 = encodedV6.copyOf(encodedV6.size - 1)
+        v5[4] = 5
+        val decoded = ItemCodec.decode(v5)
+        assertEquals(annotations, decoded?.pdfAnnotations)
+        assertNull(decoded?.sketch)
     }
 
     @Test

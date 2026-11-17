@@ -7,6 +7,7 @@ import com.cipherwell.notezero.model.ItemKind
 import com.cipherwell.notezero.model.PdfAnnotations
 import com.cipherwell.notezero.model.ReadingBookmark
 import com.cipherwell.notezero.model.ReadingState
+import com.cipherwell.notezero.model.SketchDocument
 
 /**
  * Versioned binary payload stored **inside** the AES-256-GCM item envelope.
@@ -21,7 +22,7 @@ import com.cipherwell.notezero.model.ReadingState
  * Encoding (all integers big-endian):
  * ```
  * magic        4 bytes  "NZIT"
- * envelope     1 byte   1, 2, 3, 4 or 5 (5 is written; 1-4 are still decoded)
+ * envelope     1 byte   1, 2, 3, 4, 5 or 6 (6 is written; 1-5 are still decoded)
  * kind         1 byte   ItemKind ordinal
  * flags        1 byte   bit0 folderId present, bit1 pinned, bit2 favourite, bit3 trashed
  * createdAt    8 bytes  i64 epoch millis
@@ -58,6 +59,10 @@ import com.cipherwell.notezero.model.ReadingState
  * hasAnnotations 1 byte 0 = none, 1 = present
  * annotationLen  4 bytes u32 byte length (<= PdfAnnotationCodec.MAX_BYTES), then that many
  *                        bytes of the PdfAnnotationCodec "NZPA" v1 blob
+ * -- envelope version 6 appends the encrypted standalone sketch document: --
+ * hasSketch      1 byte 0 = none, 1 = present
+ * sketchLen      4 bytes u32 byte length (<= SketchCodec.MAX_BYTES), then that many bytes
+ *                        of the SketchCodec "NZSK" v1 blob
  * ```
  * Version compatibility (no re-encryption/migration; the next save writes the newest
  * version): a version-1 payload has no attachment list and no lock byte and decodes to
@@ -67,7 +72,8 @@ import com.cipherwell.notezero.model.ReadingState
  * bookmarks, book author/language); a version-3 payload decodes to `readingState = null`.
  * Version 5 appends the PDF annotation layer (ink/highlighter strokes, rectangle highlights,
  * sticky notes encoded by [PdfAnnotationCodec]); a version-4 payload decodes to
- * `pdfAnnotations = null`.
+ * `pdfAnnotations = null`. Version 6 appends the standalone sketch document encoded by
+ * [SketchCodec]; a version-5 payload decodes to `sketch = null`.
  * All of it is content — inside the GCM envelope, never in a plaintext Room column, and none of
  * it changes the VMK or the AAD.
  *
@@ -78,7 +84,7 @@ import com.cipherwell.notezero.model.ReadingState
 object ItemCodec {
 
     /** Version written by this implementation. */
-    const val ENVELOPE_VERSION: Int = 5
+    const val ENVELOPE_VERSION: Int = 6
 
     /** Oldest payload version still accepted (pre-attachments vaults). */
     const val MIN_DECODE_VERSION: Int = 1
@@ -234,6 +240,16 @@ object ItemCodec {
                 u8(1)
                 lenPrefixedU32(blob, PdfAnnotationCodec.MAX_BYTES)
             }
+            // Envelope version 6 appends the standalone sketch document.
+            val sketch = item.sketch
+            if (sketch == null || sketch.isEmpty) {
+                u8(0)
+            } else {
+                val blob = SketchCodec.encode(sketch)
+                require(blob.size <= SketchCodec.MAX_BYTES) { "sketch exceeds limit" }
+                u8(1)
+                lenPrefixedU32(blob, SketchCodec.MAX_BYTES)
+            }
         }.toByteArray()
     }
 
@@ -325,6 +341,19 @@ object ItemCodec {
             } else {
                 null
             }
+            val sketch = if (envelopeVersion >= 6) {
+                when (reader.u8()) {
+                    0 -> null
+                    1 -> {
+                        val length = reader.u32()
+                        if (length > SketchCodec.MAX_BYTES) return null
+                        SketchCodec.decode(reader.bytes(length.toInt())) ?: return null
+                    }
+                    else -> return null
+                }
+            } else {
+                null
+            }
             reader.requireFullyConsumed()
             Item(
                 id = id,
@@ -343,6 +372,7 @@ object ItemCodec {
                 locked = locked,
                 readingState = readingState,
                 pdfAnnotations = pdfAnnotations,
+                sketch = sketch,
             )
         } catch (t: Throwable) {
             null

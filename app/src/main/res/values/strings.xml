@@ -570,4 +570,47 @@
     <string name="pdf_annotation_empty">No annotations yet.</string>
     <string name="pdf_annotation_count">%1$d annotations</string>
 
+    <!-- Drawing studio (standalone sketches) -->
+    <string name="library_new_sketch">New drawing</string>
+    <string name="cd_library_new_sketch">New drawing</string>
+    <string name="sketch_title">Drawing</string>
+    <string name="sketch_untitled">Untitled drawing</string>
+    <string name="cd_sketch_back">Back</string>
+    <string name="sketch_saved">Saved</string>
+    <string name="sketch_save_failed">Drawing could not be saved.</string>
+    <string name="sketch_hint">Draw on the page. Tap Done to keep scrolling.</string>
+    <string name="sketch_tool_pen">Pen</string>
+    <string name="sketch_tool_highlighter">Highlighter</string>
+    <string name="sketch_tool_eraser">Eraser</string>
+    <string name="sketch_tool_lasso">Lasso</string>
+    <string name="sketch_tool_shape">Shape</string>
+    <string name="sketch_shape_line">Line</string>
+    <string name="sketch_shape_rect">Rectangle</string>
+    <string name="sketch_shape_ellipse">Ellipse</string>
+    <string name="sketch_shape_arrow">Arrow</string>
+    <string name="sketch_undo">Undo</string>
+    <string name="sketch_redo">Redo</string>
+    <string name="sketch_template">Paper</string>
+    <string name="sketch_template_blank">Blank</string>
+    <string name="sketch_template_ruled">Ruled</string>
+    <string name="sketch_template_grid">Grid</string>
+    <string name="sketch_template_dotted">Dotted</string>
+    <string name="sketch_colour">Colour</string>
+    <string name="sketch_width">Width</string>
+    <string name="sketch_rename">Rename drawing</string>
+    <string name="sketch_rename_hint">Drawing name</string>
+    <string name="sketch_rename_save">Rename</string>
+    <string name="sketch_empty_hint">Start drawing with a pen or add a shape.</string>
+    <string name="sketch_zoom_in">Zoom in</string>
+    <string name="sketch_zoom_out">Zoom out</string>
+    <string name="sketch_zoom_reset">Fit page</string>
+    <string name="sketch_lasso_hint">Circle strokes to select and delete them.</string>
+    <string name="sketch_clear">Clear page</string>
+    <string name="sketch_clear_confirm">Clear the whole drawing? This can be undone.</string>
+    <string name="sketch_clear_action">Clear</string>
+    <string name="sketch_cleared">Drawing cleared. Undo to restore.</string>
+    <string name="sketch_new_name">Drawing %1$d</string>
+    <string name="library_type_sketch">Drawing</string>
+    <string name="library_new_sketch_desc">Create an editable drawing with pen, shapes, highlights and paper templates.</string>
+
 </resources>
