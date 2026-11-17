@@ -14,10 +14,11 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 > Security core, notes MVP, encrypted SAF backup/restore, code editor (workspace
 > search/copy/export/indent), encrypted attachments (images/files/**drawings**),
 > **locked notes/folders**, **Markdown/HTML note export**, **table editing** and
-> **quick-capture launcher shortcut**, a **create menu (Note / Drawing / Code / PDF)** and
-> **blank encrypted PDF documents** are in; an independent security audit found
+> **quick-capture launcher shortcut**, a **create menu (Note / Drawing / Code / PDF)**,
+> **blank encrypted PDF documents**, **PDF export of notes** and a **quick-note home-screen
+> widget** are in; an independent security audit found
 > **no HIGH/CRITICAL issues** and its findings are remediated. Builds green,
-> **899 unit tests + 12 device tests**, UI is translation-ready, and **signed APK + AAB
+> **913 unit tests + 15 device tests**, UI is translation-ready, and **signed APK + AAB
 > release builds are byte-for-byte reproducible**. A device-QA pass on a Pixel 9 Pro XL
 > (Android 17) found and fixed system-bar, large-font drawing, biometric-copy and
 > empty-note bugs. What ships now, evidence and the remaining Phase-5 tail: [docs/VERIFICATION-2026-11-15.md](docs/VERIFICATION-2026-11-15.md).
@@ -39,9 +40,10 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 | ![Table](docs/screenshots/14-table-insert.png) | ![Drawing](docs/screenshots/15-drawing-canvas.png) | ![Quick capture](docs/screenshots/16-quick-capture.png) |
 | **Locked note masked in the list** | **Re-auth with master password** | **Revealed after verification** |
 | ![Locked](docs/screenshots/11-locked-note-masked.png) | ![Re-auth](docs/screenshots/12-reauth-dialog.png) | ![Revealed](docs/screenshots/13-locked-note-revealed.png) |
-| **Create menu: Note / Drawing / Code / PDF** | **Blank PDF document viewer** | **Encrypted PDF stored as an attachment** |
-| ![Create menu](docs/screenshots/17-create-sheet.png) | ![PDF viewer](docs/screenshots/18-pdf-viewer.png) | ![PDF in list](docs/screenshots/18-pdf-viewer.png) |
-| ![Device status bar](docs/screenshots/20-device-status-bar-light.png) | ![Device drawing](docs/screenshots/21-device-drawing-canvas-1-15x.png) | *(last row: Pixel 9 Pro XL, Android 17, font scale 1.15 — device QA)* |
+| **Create menu: Note / Drawing / Code / PDF** | **Blank PDF document viewer** | **Export note as PDF** |
+| ![Create menu](docs/screenshots/17-create-sheet.png) | ![PDF viewer](docs/screenshots/18-pdf-viewer.png) | ![Export PDF](docs/screenshots/19-export-pdf.png) |
+| **Home-screen quick-note widget** | **Device status bar (light)** | **Device drawing at 1.15 font** |
+| ![Widget picker](docs/screenshots/20-widget-picker.png) | ![Device status bar](docs/screenshots/21-device-status-bar-light.png) | ![Device drawing](docs/screenshots/22-device-drawing-canvas-1-15x.png) |
 
 Screenshots are real emulator captures from the instrumented E2E run (debug build with
 `-PallowScreenshots=true`; normal builds set FLAG_SECURE, which makes `screencap` return a
@@ -49,7 +51,7 @@ Screenshots are real emulator captures from the instrumented E2E run (debug buil
 
 ## Verified end to end (2026-11-15)
 
-- 899 unit tests / 0 failures (77 classes); 12 instrumented tests on a real emulator.
+- 913 unit tests / 0 failures (79 classes); 15 instrumented tests on a real emulator.
 - Real Android crypto: setup → BIP-39 phrase → lock/unlock; **password change leaves note
   ciphertext byte-identical**; recovery reset invalidates the old password; a raw SQLite scan
   of the database files (main + WAL + SHM) finds no plaintext title/body/phrase — including a
@@ -68,6 +70,18 @@ Screenshots are real emulator captures from the instrumented E2E run (debug buil
   note id + attachment id, SHA-256 verified on read, 10 MiB/file, 100/note, 512 MiB quota;
   in-memory thumbnails only (no plaintext cache); decrypted export only behind an explicit
   "writes an UNENCRYPTED copy" confirmation. Backups (v2) carry the attachment bytes.
+- **PDF export**: the note row menu exports an unencrypted **PDF (.pdf)** alongside Markdown
+  and HTML, through the same explicit "writes an UNENCRYPTED copy" warning + SAF
+  `CreateDocument` flow. Rendering happens entirely in memory (`android.graphics.pdf`) into A4
+  pages with styled headings, bold/italic/inline-code/links, lists, checklists, fenced code,
+  quotes, tables and page numbers; the bytes go straight to the user-chosen file and are never
+  cached. Large documents are bounded (input/page/table caps) and renderer failure maps to the
+  existing non-secret export error.
+- **Quick-note widget**: a static home-screen tile ("New note") that launches quick capture
+  through the same `SHORTCUT_NEW_NOTE` request as the launcher shortcut. The widget shows **no
+  vault content** (counts/titles/body) because home screens are visible while locked; it is
+  never polled (`updatePeriodMillis=0`), the receiver is not exported and the PendingIntent is
+  immutable.
 - **Create menu**: the Notes "+" opens a sheet to create a **Note** (Markdown), a
   **Drawing** (editor opens with the canvas ready), a **Code** file (name + picker with 27
   well-known extensions: `.txt .md .html .css .js .ts .json .xml .yml .toml .py .kt .java .c

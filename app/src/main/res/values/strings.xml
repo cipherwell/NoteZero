@@ -412,6 +412,7 @@
     <string name="note_export_format_message">Choose a format for the unencrypted copy.</string>
     <string name="note_export_markdown">Markdown (.md)</string>
     <string name="note_export_html">HTML (.html)</string>
+    <string name="note_export_pdf">PDF (.pdf)</string>
     <string name="note_export_warning_title">Write an UNENCRYPTED copy?</string>
     <string name="note_export_warning_message">This writes an UNENCRYPTED copy of this note outside the vault, where other apps, cloud backups and anyone with access to that file can read it. The encrypted note in your vault stays unchanged.</string>
     <string name="note_export_confirm">Export unencrypted copy</string>
@@ -458,4 +459,7 @@
     <string name="pdf_pages_capped">Showing the first %1$d pages.</string>
     <string name="cd_pdf_back">Back</string>
     <string name="cd_pdf_export">Export decrypted copy</string>
+    <!-- Quick-capture home-screen widget: label shown on the tile, no vault content. -->
+    <string name="widget_quick_note_label">New note</string>
+    <string name="widget_quick_note_description">Create a new encrypted note</string>
 </resources>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget tile: static (no light/dark switch), so it uses the existing launcher ground
+     colour instead of duplicating a new hex value. White glyph/label passes AA on it. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/notezero_icon_background" />
+    <corners android:radius="20dp" />
+</shape>

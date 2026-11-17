@@ -112,6 +112,7 @@ class NoteExportScreenTest {
         // Format choice exists before the warning and no export has happened yet.
         composeRule.onNodeWithTag("note_export_markdown").assertExists()
         composeRule.onNodeWithTag("note_export_html").assertExists()
+        composeRule.onNodeWithTag("note_export_pdf").assertExists()
         assertEquals(0, target.calls)
 
         composeRule.onNodeWithTag("note_export_markdown").performClick()
@@ -148,6 +149,24 @@ class NoteExportScreenTest {
 
         composeRule.onNodeWithTag("note_export_status").assertExists()
         composeRule.onNodeWithText("Unencrypted copy written outside the vault.").assertExists()
+    }
+
+    @Test
+    fun `choosing pdf exports a pdf request`() {
+        seed(title = "Alpha", body = "pdf body")
+        setScreen()
+        openMenu()
+        composeRule.onNodeWithTag("note_export_action").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("note_export_pdf").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("note_export_confirm").performClick()
+        composeRule.waitForIdle()
+
+        val request = target.requests.single()
+        assertEquals(NoteExportFormat.PDF, request.format)
+        assertEquals("Alpha.pdf", request.suggestedName)
+        assertTrue(request.content.startsWith("# Alpha"))
     }
 
     @Test

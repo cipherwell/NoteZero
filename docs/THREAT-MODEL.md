@@ -150,6 +150,19 @@ window but removes the feature the owner asked for; the temp file is therefore t
 plaintext-at-rest exception in the app, documented in DECISIONS #20 and guarded by the
 instrumented test that asserts no `pdf-render-*` file remains after rendering.
 
+**PDF export (increment 9).** Exporting a note as PDF is the same explicit plaintext-egress
+class as Markdown/HTML export: the user picks the target through SAF after an explicit
+"UNENCRYPTED copy" warning, the renderer writes only into memory and the chosen
+`OutputStream`, and the session is re-checked after rendering. No temp file is created for this
+path (unlike PDF *viewing*, which needs a seekable descriptor).
+
+**Quick-note widget (increment 9).** The home-screen tile is content-free by design because a
+home screen is visible while the vault is locked. It renders only a glyph and the static label
+"New note", never reads the repository, has no periodic update and no configuration activity;
+its PendingIntent is immutable and its receiver is not exported. The only effect of tapping it
+is the same pending quick-capture request as the launcher shortcut, which is honoured only
+after a successful unlock.
+
 ### 3.9.1 Attachment boundaries
 
 | Attack | Mitigation | Residual |

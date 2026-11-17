@@ -56,6 +56,49 @@ All notable changes to NoteZero are documented here. Format follows
   PDF export, encrypted per-note version history, translations, and the F-Droid window
   (2027-02-15).
 
+## [Unreleased] — PDF export and quick-note widget (2026-11-17, increment 9)
+
+### Added
+
+**Export note as PDF**
+- A third export format: row menu → **Export note** → Markdown / HTML / **PDF (.pdf)** → the
+  same explicit "writes an UNENCRYPTED copy" warning → SAF `CreateDocument`. The PDF is rendered
+  in memory by `NotePdfRenderer` (`android.graphics.pdf.PdfDocument`): A4 pages with the title
+  heading, styled inline text (bold/italic/`code`/strikethrough/link labels), bullet/numbered
+  lists, checklists (`[ ]`/`[x]`), fenced code with a light background, quotes, rules, simple
+  tables and page numbers. Bytes go once to the user-chosen file — no temp PDF, no cache, no log.
+- Bounds: 1,000,000 input chars, 200 content pages (+ a truncation notice page), 8 table
+  columns / 200 rows, 200,000 chars per code block; any renderer failure (including OOM) maps to
+  the existing non-secret export-failed status. Rendering runs off the main thread and the
+  session/lock is re-checked before writing.
+- `PdfInlineMarkdown` (pure Kotlin, JVM-tested) parses the inline grammar with bounded
+  runs/depth and degrades unclosed/unknown markers to literal text.
+
+**Quick-note home-screen widget**
+- Static "New note" tile (`QuickNoteWidgetProvider`) whose click launches `MainActivity` with the
+  existing `SHORTCUT_NEW_NOTE` quick-capture action: the request survives a locked vault and the
+  note is only created after unlock. The tile shows **no vault content** (a home screen is
+  visible while locked), never reads the repository, has `updatePeriodMillis=0`, an immutable
+  PendingIntent, a non-exported receiver and no configuration activity. No new permissions.
+
+### Verified (measured)
+
+- **913 unit tests / 0 failures** (79 classes; +14 over increment 8): `PdfInlineMarkdownTest` (9),
+  PDF request/selector tests in the export ViewModel/UI suites (2), widget tests (3: intent
+  contract, RemoteViews inflation, static metadata).
+- **15 instrumented tests OK** on the emulator, including `NotePdfRenderInstrumentedTest` (3):
+  a full multi-page note renders into a PDF that the real `PdfRenderer` accepts (≥2 pages, real
+  pixels), an empty note is a valid 1-page PDF, and hostile inputs never throw.
+- Device validation: exported PDF from the emulator (94,980 B, A4, 1 page; `pdftotext` shows the
+  title, heading, checklist markers, code line and page number) and from the owner's phone
+  (11,791 B, A4, 1 page; file removed afterwards). Widget provider is registered and parsed by
+  the system on both devices (`updatePeriodMillis=0`, `widgetCategory=1`, `resizeMode=1`,
+  `initialLayout`); the tile appears in the launcher widget picker (screenshot
+  `20-widget-picker`). Export dialog screenshot `19-export-pdf`.
+- Reproducibility re-verified for the release artifacts (hashes in VERIFICATION §14); release
+  permissions remain `USE_BIOMETRIC` only and FLAG_SECURE blank capture was re-checked on the
+  final release install.
+
 ## [Unreleased] — Create menu, code formats and encrypted PDF documents (2026-11-15, increment 8)
 
 ### Added

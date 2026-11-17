@@ -49,6 +49,19 @@
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
+        <!-- Quick-capture home-screen tile. Not exported: only the system AppWidget service
+             may address it; the tile shows no vault content (see widget/QuickNoteWidgetProvider). -->
+        <receiver
+            android:name=".widget.QuickNoteWidgetProvider"
+            android:exported="false"
+            android:label="@string/widget_quick_note_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/quick_note_widget_info" />
+        </receiver>
     </application>
 
 </manifest>

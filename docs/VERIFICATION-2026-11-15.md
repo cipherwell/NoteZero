@@ -527,3 +527,60 @@ refusal), `NotesListScreenTest` (sheet options + all four create flows), `PdfRen
   the list; the drawing-only note is not auto-trashed.
 - FLAG_SECURE release screencap still blank; 0 FATAL/ANR; QA items and exported files were
   deleted from the device afterwards (owner's two items untouched).
+
+---
+
+## 14. Increment 9 (2026-11-17): PDF export of notes + quick-note widget
+
+### Build and tests
+
+| Command | Result |
+|---|---|
+| `./gradlew :app:testDebugUnitTest` | **BUILD SUCCESSFUL — 913 tests, 0 failures, 0 errors, 0 skipped (79 classes)** |
+| `./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -PallowScreenshots=true` | **BUILD SUCCESSFUL** |
+| `adb shell am instrument -w …AndroidJUnitRunner` (emulator) | **OK (15 tests)** — 12 previous + `NotePdfRenderInstrumentedTest` (3) |
+| `./scripts/check-offline.sh --gradle` | exit 0 |
+| Release permissions (`aapt2 dump permissions`) | `USE_BIOMETRIC` only |
+
+New tests (+14): `PdfInlineMarkdownTest` (9: inline grammar, escapes, links, hostile input, run
+bounds), PDF request in `NoteExportViewModelTest`, PDF option in `NoteExportScreenTest`,
+`QuickNoteWidgetProviderTest` (3: intent contract, RemoteViews inflation, static metadata).
+Instrumented: `NotePdfRenderInstrumentedTest` (3): multi-page note accepted by the real
+`PdfRenderer` (≥2 pages, real pixels), empty note = valid 1-page PDF, hostile input never
+throws.
+
+### PDF export validation (real files)
+
+| Environment | Result |
+|---|---|
+| Emulator, note with headings/checklist/code/table | 94,980 B file; `pdfinfo`: **Pages 1**, **Page size 595×842 pts (A4)**, **JavaScript no**; `pdftotext` extracts title, "Heading", `[ ] unchecked task`, `[x] done task`, code line and page number `1` |
+| Owner's phone (Pixel 9 Pro XL, Android 17) | 11,791 B file; `pdfinfo`: Pages 1, A4, JavaScript no; `pdftotext` extracts the note text; file deleted after the check |
+| Export path | row menu → Export note → **PDF (.pdf)** → explicit UNENCRYPTED warning → SAF `CreateDocument`; no temp PDF/cache created; session re-checked after rendering |
+
+### Widget validation
+
+| Check | Result |
+|---|---|
+| Package receiver | `dumpsys package` / `aapt2`: `QuickNoteWidgetProvider` registered with `APPWIDGET_UPDATE` and provider metadata |
+| AppWidget service | `dumpsys appwidget` lists the provider on emulator and phone; parsed info: `updatePeriodMillis=0`, `widgetCategory=1`, `resizeMode=1`, `initialLayout=#7f0b002a` |
+| Launcher | tile appears in the widget picker as "New note", "2 × 1" (screenshot `20-widget-picker`); tap-to-add is a user gesture, automated drag not part of CI |
+| Content policy | tile shows only glyph + "New note"; no repository access in the provider; click launches the existing quick-capture request (lock-safe) |
+
+### Reproducibility
+
+| Check | Result |
+|---|---|
+| `./scripts/verify-reproducible.sh` (signed APK) | **REPRODUCIBLE** — both builds sha256 `c72b7cc981712b9d71c98dc88d299c8ab500d51e7350fd226fffbcc546e060ac` |
+| `./scripts/verify-reproducible.sh --artifact aab` | **REPRODUCIBLE** — both builds sha256 `b6c900aac80e4a2f33ae36e3fcc0ca2719eac2a7cc477e4d5468a06281e6384b` |
+| published `releases/notezero-0.1.0-release.apk` / `.aab` | same hashes as above (`releases/SHA256SUMS`) |
+| certificate | `FA:CA:DD:67:…:92:78` unchanged |
+
+### Device state after verification
+
+- Owner's phone: increment-9 release installed over the existing vault (data/biometrics intact),
+  app left **locked**, FLAG_SECURE capture blank, **0 NoteZero FATAL/ANR** (the only FATAL in
+  logcat was an unrelated app); QA notes and exported files removed from the device.
+- Emulator: 15 instrumented tests OK; screenshots `17-create-sheet`, `18-pdf-viewer`,
+  `19-export-pdf`, `20-widget-picker` refreshed/added.
+
+DECISIONS #21 records the PDF-export and widget policies.

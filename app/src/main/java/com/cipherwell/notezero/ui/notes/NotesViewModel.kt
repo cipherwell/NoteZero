@@ -322,6 +322,8 @@ class NotesViewModel(
         val content = when (format) {
             NoteExportFormat.MARKDOWN -> NoteExport.toMarkdown(current.title, current.body)
             NoteExportFormat.HTML -> NoteExport.toHtml(current.title, current.body)
+            // The PDF renderer consumes Markdown (title as a level-1 heading) and styles it.
+            NoteExportFormat.PDF -> NoteExport.toMarkdown(current.title, current.body)
         }
         val request = NoteExportRequest(
             itemId = current.id,

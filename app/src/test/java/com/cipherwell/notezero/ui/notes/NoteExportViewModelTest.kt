@@ -116,6 +116,24 @@ class NoteExportViewModelTest {
     }
 
     @Test
+    fun `pdf export keeps the markdown content and uses a pdf name`() = runTest(dispatcher) {
+        val item = note(title = "Quarterly plan", body = "# Plan\n\n- [x] ship")
+        repository.setItems(listOf(item))
+        val viewModel = viewModel()
+        advanceUntilIdle()
+
+        viewModel.exportNote(item, NoteExportFormat.PDF, target)
+
+        val request = target.requests.single()
+        assertEquals(NoteExportFormat.PDF, request.format)
+        assertEquals("application/pdf", request.format.mimeType)
+        assertEquals("Quarterly plan.pdf", request.suggestedName)
+        // The renderer consumes Markdown: the title heading must be present.
+        assertTrue(request.content.startsWith("# Quarterly plan"))
+        assertTrue(request.content.contains("- [x] ship"))
+    }
+
+    @Test
     fun `locked vault exports nothing and reports a locked status`() = runTest(dispatcher) {
         val item = note()
         repository.setItems(listOf(item))

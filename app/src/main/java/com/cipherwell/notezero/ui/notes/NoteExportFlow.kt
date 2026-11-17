@@ -30,6 +30,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.rememberCoroutineScope
+import com.cipherwell.notezero.ui.pdf.NotePdfRenderer
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.cipherwell.notezero.R
 import com.cipherwell.notezero.data.NoteRepository
 import com.cipherwell.notezero.data.VaultStatus
@@ -41,6 +46,9 @@ import com.cipherwell.notezero.ui.theme.NoteZeroType
 enum class NoteExportFormat(val mimeType: String, val extension: String) {
     MARKDOWN(mimeType = "text/markdown", extension = "md"),
     HTML(mimeType = "text/html", extension = "html"),
+
+    /** Rendered from the same Markdown content; bytes are produced in memory by NotePdfRenderer. */
+    PDF(mimeType = "application/pdf", extension = "pdf"),
 }
 
 /**
@@ -155,6 +163,8 @@ internal fun rememberSafNoteExportTarget(repository: NoteRepository): NoteExport
         if (status != VaultStatus.UNLOCKED) pending.value = null
     }
 
+    val scope = rememberCoroutineScope()
+
     fun finish(uri: Uri?, expected: NoteExportFormat) {
         val requestAndCallback = pending.value
         pending.value = null
@@ -165,15 +175,32 @@ internal fun rememberSafNoteExportTarget(repository: NoteRepository): NoteExport
         val (request, onResult) = requestAndCallback
         if (request.format != expected) {
             onResult(NoteExportResult.Cancelled)
+            repository.endExternalActivity()
         } else if (uri == null) {
             onResult(NoteExportResult.Cancelled)
+            repository.endExternalActivity()
         } else if (!canWriteNoteExport(repository, request.itemId)) {
             onResult(NoteExportResult.Locked)
+            repository.endExternalActivity()
+        } else if (request.format == NoteExportFormat.PDF) {
+            // PDF layout/rendering is CPU work: render on a background thread, then write the
+            // bytes with a final session re-check. Nothing is cached; the bytes only exist in
+            // memory and in the user-picked destination.
+            scope.launch {
+                val bytes = withContext(Dispatchers.Default) {
+                    NotePdfRenderer().render(request.content)
+                }
+                val written = bytes != null &&
+                    canWriteNoteExport(repository, request.itemId) &&
+                    writeNoteExportBytes(context.contentResolver, uri, bytes)
+                onResult(if (written) NoteExportResult.Written else NoteExportResult.Failed)
+                repository.endExternalActivity()
+            }
         } else {
             val written = writeNoteExportCopy(context.contentResolver, uri, request.content)
             onResult(if (written) NoteExportResult.Written else NoteExportResult.Failed)
+            repository.endExternalActivity()
         }
-        repository.endExternalActivity()
     }
 
     val markdownLauncher = rememberLauncherForActivityResult(
@@ -184,8 +211,12 @@ internal fun rememberSafNoteExportTarget(repository: NoteRepository): NoteExport
         contract = ActivityResultContracts.CreateDocument(NoteExportFormat.HTML.mimeType),
         onResult = { uri -> finish(uri, NoteExportFormat.HTML) },
     )
+    val pdfLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument(NoteExportFormat.PDF.mimeType),
+        onResult = { uri -> finish(uri, NoteExportFormat.PDF) },
+    )
 
-    return remember(markdownLauncher, htmlLauncher, repository, context) {
+    return remember(markdownLauncher, htmlLauncher, pdfLauncher, repository, context, scope) {
         NoteExportTarget { request, onResult ->
             if (!canWriteNoteExport(repository, request.itemId)) {
                 onResult(NoteExportResult.Locked)
@@ -203,6 +234,7 @@ internal fun rememberSafNoteExportTarget(repository: NoteRepository): NoteExport
                 when (request.format) {
                     NoteExportFormat.MARKDOWN -> markdownLauncher.launch(request.suggestedName)
                     NoteExportFormat.HTML -> htmlLauncher.launch(request.suggestedName)
+                    NoteExportFormat.PDF -> pdfLauncher.launch(request.suggestedName)
                 }
             }
             if (launched.isFailure) {
@@ -228,6 +260,23 @@ internal fun writeNoteExportCopy(
         ?: resolver.openOutputStream(uri)
         ?: return@runCatching false
     stream.use { out -> out.write(content.toByteArray(Charsets.UTF_8)) }
+    true
+}.getOrDefault(false)
+
+/**
+ * Writes pre-rendered [bytes] (e.g. a PDF) to the user-chosen [uri]. Binary-safe: the stream is
+ * opened in truncate mode and the bytes are written exactly once. Returns false on any I/O
+ * problem. Kept separate from [writeNoteExportCopy] so the text path keeps its UTF-8 contract.
+ */
+internal fun writeNoteExportBytes(
+    resolver: ContentResolver,
+    uri: Uri,
+    bytes: ByteArray,
+): Boolean = runCatching {
+    val stream = resolver.openOutputStream(uri, "wt")
+        ?: resolver.openOutputStream(uri)
+        ?: return@runCatching false
+    stream.use { out -> out.write(bytes) }
     true
 }.getOrDefault(false)
 
@@ -264,6 +313,13 @@ internal fun NoteExportFormatDialog(
                         .heightIn(min = NoteZeroSpacing.minTarget)
                         .testTag("note_export_html"),
                 ) { Text(stringResource(R.string.note_export_html), style = NoteZeroType.Callout) }
+                TextButton(
+                    onClick = { onSelect(NoteExportFormat.PDF) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = NoteZeroSpacing.minTarget)
+                        .testTag("note_export_pdf"),
+                ) { Text(stringResource(R.string.note_export_pdf), style = NoteZeroType.Callout) }
             }
         },
         confirmButton = {},

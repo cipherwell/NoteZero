@@ -62,21 +62,25 @@ Commands:
 
 | Suite | Command | Result |
 |---|---|---|
-| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **899 tests / 0 failures / 0 errors / 0 skipped** (77 classes) |
-| Instrumented (emulator) | `adb shell am instrument -w com.cipherwell.notezero.test/androidx.test.runner.AndroidJUnitRunner` | **OK (12 tests)** incl. `VaultFlowE2ETest` (notes + backup settings + code workspace + create sheet + PDF) and a real-`PdfRenderer` instrumented test |
+| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **913 tests / 0 failures / 0 errors / 0 skipped** (79 classes) |
+| Instrumented (emulator) | `adb shell am instrument -w com.cipherwell.notezero.test/androidx.test.runner.AndroidJUnitRunner` | **OK (15 tests)** incl. `NotePdfRenderInstrumentedTest`, `VaultFlowE2ETest` (notes + backup settings + code workspace + create sheet + PDF) and a real-`PdfRenderer` instrumented test |
 | Offline guarantee | `./scripts/check-offline.sh --gradle` | exit 0 |
 | Release signing | `apksigner verify --print-certs app-release.apk` | NoteZero upload key SHA-256 `FA:CA:DD:67:…:92:78` |
 
 Per-area counts: crypto 61, data 125, model 65, security 5, code engine 143, ui code 121,
-ui attachments 88, ui notes 89, ui editor 74, other UI 62, backup 33, ui locks 18, ui screens 12,
-ui pdf 3.
+ui attachments 88, ui notes 91, ui editor 74, other UI 62, backup 33, ui locks 18, ui screens 12,
+ui pdf 12, widget 3.
 Audit remediation added 24 regression tests (editor state wipe on lock/re-arm, code editor
 locked gate, export status gating, stale-session handling, recovery-reset boundaries).
 Device QA (Pixel 9 Pro XL, Android 17, font scale 1.15) added 10: biometric prompt-error
 mapping + enrolled-flag gating (VaultViewModel/AppRoot) and the empty-note-on-leave predicate
-(attachments count as content). The create-menu/PDF increment added 13 more: blank-PDF wire
+(attachments count as content). The create-menu/PDF increment added 13: blank-PDF wire
 format, code-format name rules, PDF item codec round trip, create sheet/viewer Robolectric
 tests, `NotesViewModel.createPdf/createCodeFile`, and the device-only real-`PdfRenderer` test.
+The PDF-export/widget increment added 14: `PdfInlineMarkdownTest` (9), PDF request/selector
+tests in the export ViewModel/UI suites, PDF content extraction via the export path, the
+device-only `NotePdfRenderInstrumentedTest` (3, real `PdfRenderer`) and 3 widget tests
+(intent contract, RemoteViews inflation, static metadata).
 Highlights: code engine includes 200 KB lexer performance (Kotlin 6.42 ms, JS 7.85 ms,
 XML 3.21 ms), fuzz invariants and `CodeSearch`; attachments cover NZAT blob format,
 import limits/quota, AAD note/id swap rejection, tamper + SHA mismatch, trash-vs-delete
