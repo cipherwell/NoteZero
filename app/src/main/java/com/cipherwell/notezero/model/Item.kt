@@ -18,6 +18,13 @@ enum class ItemKind {
      * PDF viewer and exportable through the explicit decrypted-copy path.
      */
     PDF_FILE,
+
+    /**
+     * E-book (EPUB 2/3) stored as an encrypted `application/epub+zip` attachment. The EPUB is
+     * parsed in memory when opened; [Item.readingState] keeps the encrypted position/bookmarks.
+     * Enumeration order is frozen (payload ordinals), append new kinds only.
+     */
+    BOOK_FILE,
 }
 
 /**
@@ -77,6 +84,13 @@ data class Item(
     val attachments: List<AttachmentRef> = emptyList(),
     /** Locked note: text/tags/preview stay hidden until the session re-authenticates. */
     val locked: Boolean = false,
+    /**
+     * Encrypted reading position/bookmarks for documents and books (`ItemCodec` payload v4,
+     * repository-owned like [attachments]). `null` for items that have never been read. Only
+     * `saveReadingState` changes it; `saveItem` preserves the stored value so a stale UI copy
+     * cannot roll the reader back.
+     */
+    val readingState: ReadingState? = null,
 ) {
     val isBlank: Boolean get() = title.isBlank() && body.isBlank()
 }

@@ -24,7 +24,7 @@ non-destructive `Migration`.
 | Column | SQLite type | Meaning |
 |---|---|---|
 | `id` | TEXT, PRIMARY KEY | Random UUID at creation, never derived from content. |
-| `kind` | TEXT | `ItemKind.name`: `NOTE`, `CODE_FILE` or `PDF_FILE`. |
+| `kind` | TEXT | `ItemKind.name`: `NOTE`, `CODE_FILE`, `PDF_FILE` or `BOOK_FILE` (EPUB). |
 | `created_at` | INTEGER | Epoch millis (structural). |
 | `updated_at` | INTEGER | Epoch millis, strictly increased on every save/flag change (structural; drives list order and backup duplicate detection). |
 | `ciphertext` | BLOB | `iv(12) || AES-256-GCM ciphertext || tag(16)` over an [ItemCodec](#2-itemcodec-envelope-payload) payload, AAD-bound to `id` + `kind`. |
@@ -86,7 +86,7 @@ Attachment metadata is described in [ATTACHMENTS.md](ATTACHMENTS.md) §3.
 offset size field
 0      4    magic "NZIT"
 4      1    envelope version = 1, 2 or 3 (3 is written)
-5      1    kind: ItemKind ordinal (0 = NOTE, 1 = CODE_FILE, 2 = PDF_FILE)
+5      1    kind: ItemKind ordinal (0 = NOTE, 1 = CODE_FILE, 2 = PDF_FILE, 3 = BOOK_FILE)
 6      1    flags: bit0 folderId present, bit1 pinned, bit2 favourite, bit3 trashed
             (all other bits must be 0)
 7      8    createdAt  (i64 epoch millis)

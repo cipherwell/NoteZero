@@ -10,19 +10,24 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 [VaultZero](https://github.com/cipherwell/Vault-Zero) with an independent package
 (`com.cipherwell.notezero`), independent signing key and independent threat model.
 
-> Status: **Phase 4 complete, Phase 5 hardening** — 2026-11-15.
+> Status: **Phase 5 — all-in-one workspace (increment 10)** — 2026-11-17.
 > Security core, notes MVP, encrypted SAF backup/restore, code editor (workspace
 > search/copy/export/indent), encrypted attachments (images/files/**drawings**),
-> **locked notes/folders**, **Markdown/HTML note export**, **table editing** and
+> **locked notes/folders**, **Markdown/HTML/PDF note export**, **table editing**,
 > **quick-capture launcher shortcut**, a **create menu (Note / Drawing / Code / PDF)**,
-> **blank encrypted PDF documents**, **PDF export of notes** and a **quick-note home-screen
-> widget** are in; an independent security audit found
-> **no HIGH/CRITICAL issues** and its findings are remediated. Builds green,
-> **913 unit tests + 15 device tests**, UI is translation-ready, and **signed APK + AAB
-> release builds are byte-for-byte reproducible**. A device-QA pass on a Pixel 9 Pro XL
-> (Android 17) found and fixed system-bar, large-font drawing, biometric-copy and
-> empty-note bugs. What ships now, evidence and the remaining Phase-5 tail: [docs/VERIFICATION-2026-11-15.md](docs/VERIFICATION-2026-11-15.md).
-> Delivery phases: [SPEC.md](SPEC.md).
+> **blank encrypted PDF documents**, a **quick-note home-screen widget**, and now a
+> **Library** with **encrypted EPUB/PDF readers**: document import (EPUB 2/3 + PDF),
+> table of contents, in-book search, bookmarks, paper/sepia/night themes with typography
+> controls, page navigation, and an **encrypted reading state** (position, progress,
+> bookmarks) that survives lock/unlock, backup and restart. The product direction and
+> phased plan (PDF annotation, drawing studio, universal file workspace, more formats) are
+> in [docs/ROADMAP-ALL-IN-ONE.md](docs/ROADMAP-ALL-IN-ONE.md), grounded in
+> [docs/RESEARCH-ALL-IN-ONE-2026-11-17.md](docs/RESEARCH-ALL-IN-ONE-2026-11-17.md).
+> Builds are green, **1068 unit tests + 15 device tests**, and **signed APK + AAB release
+> builds are byte-for-byte reproducible**; an independent security audit previously found
+> no HIGH/CRITICAL issues and its findings are remediated. Device QA on a Pixel 9 Pro XL
+> (Android 17) and the emulator covered import, TOC, search, bookmarks, themes and
+> resume-after-lock. Evidence: [docs/VERIFICATION-2026-11-15.md](docs/VERIFICATION-2026-11-15.md).
 
 
 ## What exists today
@@ -44,10 +49,36 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 | ![Create menu](docs/screenshots/17-create-sheet.png) | ![PDF viewer](docs/screenshots/18-pdf-viewer.png) | ![Export PDF](docs/screenshots/19-export-pdf.png) |
 | **Home-screen quick-note widget** | **Device status bar (light)** | **Device drawing at 1.15 font** |
 | ![Widget picker](docs/screenshots/20-widget-picker.png) | ![Device status bar](docs/screenshots/21-device-status-bar-light.png) | ![Device drawing](docs/screenshots/22-device-drawing-canvas-1-15x.png) |
+| **Library (books, PDFs, drawings)** | **EPUB reader (TOC/search/bookmarks)** | **PDF reader tools (progress/bookmarks)** |
+| ![Library](docs/screenshots/23-library.png) | ![EPUB reader](docs/screenshots/24-epub-reader.png) | ![PDF tools](docs/screenshots/25-pdf-viewer-tools.png) |
+| **Night reading theme + encrypted bookmarks** | | |
+| ![Reader night](docs/screenshots/26-reader-bookmarks-night.png) | | |
 
 Screenshots are real emulator captures from the instrumented E2E run (debug build with
 `-PallowScreenshots=true`; normal builds set FLAG_SECURE, which makes `screencap` return a
 0-byte file — verified).
+
+## All-in-one reading (2026-11-17)
+
+- **Library**: one encrypted shelf for PDFs, EPUB books and drawings; import through SAF
+  (MIME-tolerant picker with parser validation), progress/Continue, rename/lock/trash rules
+  shared with notes, masked items never listed.
+- **EPUB engine**: dependency-free EPUB 2/3 parser (ZIP + XML, XXE-off, bounded entries,
+  DRM refused, no scripts/CSS), native Compose rendering (headings, inline styles, lists,
+  quotes, code, images), rendered entirely in memory — no plaintext cover/cache.
+- **Reader tools**: TOC, in-book search (1-result verified on device), bookmarks, font
+  size/line spacing/margins, paper/sepia/night themes (night code-block contrast fixed
+  during device QA), tap zones and progress.
+- **PDF tools**: page slider/jump, bookmark add/list/delete, resume position, with the
+  existing encrypted-attachment and SAF export rules unchanged.
+- **Encrypted reading state** (`ItemCodec` payload v4): position, fraction, total, bookmarks
+  and book author/language live inside the AES-GCM item envelope and travel with backup v2;
+  repository-owned so autosave cannot roll them back.
+- **Measured QA** (emulator, Android 17 image): imported a 2-chapter EPUB (title/author/TOC/
+  image/search/bookmark/night theme), imported a 3-page PDF (page jump, bookmark at 66%
+  `Page 2 of 3`), killed and relaunched the app + re-unlocked the vault, confirmed bookmarks
+  and positions persisted; 1068 unit tests / 0 failures (91 classes) and 15 instrumented
+  tests green.
 
 ## Verified end to end (2026-11-15)
 

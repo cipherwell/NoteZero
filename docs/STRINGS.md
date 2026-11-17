@@ -1,11 +1,12 @@
 # NoteZero UI strings
 
-All user-visible Compose copy lives in `app/src/main/res/values/strings.xml` (404 strings);
+All user-visible Compose copy lives in `app/src/main/res/values/strings.xml` (478 strings);
 count strings live in `app/src/main/res/values/plurals.xml` (7 plurals). Composables read them through
 `stringResource(...)` / `pluralStringResource(...)`. There is no one-off string
 constant for UI copy in a screen as of the extraction pass (exceptions below).
 
-Create-sheet option labels and the PDF viewer copy are resources like every other screen string.
+Create-sheet option labels, the PDF viewer copy, and the Library/EPUB-reader copy
+(`library_*`, `book_*`, `pdf_*` reading tools) are resources like every other screen string.
 The code-format chips are **technical labels** (`.py`, `.html`, …) derived from
 `code/CodeFormats`, not localisable copy — the same convention as language names in the code
 editor status bar.

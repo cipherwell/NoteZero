@@ -170,15 +170,16 @@ class LockedPayloadCodecTest {
     }
 
     @Test
-    fun `item codec v3 round trips the locked flag and writes version 3`() {
+    fun `item codec round trips the locked flag and writes the current version`() {
         val locked = note(locked = true, attachments = listOf(attachment()))
         val encoded = ItemCodec.encode(locked)
-        assertEquals(3, ItemCodec.ENVELOPE_VERSION)
-        assertEquals(3, encoded[4].toInt())
+        assertEquals(4, ItemCodec.ENVELOPE_VERSION)
+        assertEquals(ItemCodec.ENVELOPE_VERSION, encoded[4].toInt())
         val decoded = ItemCodec.decode(encoded)
         assertEquals(locked, decoded)
         assertTrue(decoded!!.locked)
         assertEquals(1, decoded.attachments.size)
+        assertNull("no reading state was encoded", decoded.readingState)
 
         val unlocked = note(locked = false, attachments = listOf(attachment()))
         val decodedUnlocked = ItemCodec.decode(ItemCodec.encode(unlocked))
@@ -187,17 +188,31 @@ class LockedPayloadCodecTest {
     }
 
     @Test
-    fun `item codec v3 lock byte is the last byte and rejects non-boolean values`() {
+    fun `version 3 item payloads still decode as unlocked without reading state`() {
+        val encodedV4 = ItemCodec.encode(note(locked = true, attachments = emptyList()))
+        // v4 suffix is [lock byte][reading-state presence byte]; strip the state byte and
+        // declare the envelope as version 3.
+        val v3 = encodedV4.copyOf(encodedV4.size - 1)
+        v3[4] = 3
+        val decoded = ItemCodec.decode(v3)
+        assertNotNull("v3 payload must stay decodable", decoded)
+        assertTrue(decoded!!.locked)
+        assertNull(decoded.readingState)
+    }
+
+    @Test
+    fun `item codec lock byte is followed only by the reading-state presence byte`() {
         val encoded = ItemCodec.encode(note(locked = true, attachments = emptyList()))
-        assertEquals(1, encoded.last().toInt())
+        assertEquals("reading-state presence byte", 0, encoded.last().toInt())
+        assertEquals("lock byte", 1, encoded[encoded.size - 2].toInt())
 
         val corrupt = encoded.copyOf()
-        corrupt[corrupt.size - 1] = 2
+        corrupt[corrupt.size - 2] = 2
         assertNull("lock byte must be exactly 0 or 1", ItemCodec.decode(corrupt))
 
-        // A v3 payload missing the lock byte is truncated, not silently unlocked.
+        // Missing bytes (lock or state) are truncated, never silently unlocked.
         assertNull(ItemCodec.decode(encoded.copyOf(encoded.size - 1)))
-        // Trailing bytes after the lock flag are still rejected.
+        // Trailing bytes after the reading-state presence byte are rejected.
         assertNull(ItemCodec.decode(encoded + byteArrayOf(0)))
     }
 
@@ -210,8 +225,8 @@ class LockedPayloadCodecTest {
         for (index in unlocked.indices) {
             if (unlocked[index] != locked[index]) differences++
         }
-        assertEquals("only the trailing locked byte may differ", 1, differences)
-        assertEquals(unlocked.size - 1, unlocked.indices.last { unlocked[it] != locked[it] })
+        assertEquals("only the lock byte may differ", 1, differences)
+        assertEquals(unlocked.size - 2, unlocked.indices.last { unlocked[it] != locked[it] })
     }
 
     // ---- FolderCodec version table ------------------------------------------

@@ -12,6 +12,7 @@ import com.cipherwell.notezero.model.AttachmentRef
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
+import com.cipherwell.notezero.model.ReadingState
 import com.cipherwell.notezero.model.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -223,12 +224,22 @@ class FakeNoteRepository : NoteRepository {
             // Mirrors the real repository: only setItemLocked changes the flag, so a stale
             // editor autosave can never unlock a locked note.
             locked = existing?.locked ?: item.locked,
+            readingState = existing?.readingState ?: item.readingState,
             updatedAt = nextClock(),
             version = maxOf(item.version, existing?.version ?: 0L) + 1,
         )
         _items.value = _items.value.map { if (it.id == saved.id) saved else it }
         savedItems += saved
         return saved
+    }
+
+    override suspend fun saveReadingState(itemId: String, state: ReadingState): Boolean {
+        if (_status.value != VaultStatus.UNLOCKED) return false
+        val existing = itemById(itemId) ?: return false
+        _items.value = _items.value.map {
+            if (it.id == existing.id) it.copy(readingState = state, updatedAt = nextClock()) else it
+        }
+        return true
     }
 
     override suspend fun trashItem(id: String) {

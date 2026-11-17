@@ -76,15 +76,29 @@ class OfflineGuaranteeTest {
 
     @Test
     fun `no plaintext URL literals in app sources`() {
+        // XML parser property/feature URI identifiers are namespaced constants, not fetch
+        // targets (and the app has no INTERNET permission, so they can never be requested).
+        // Every other URL literal in app sources must stay absent: this test exists to keep
+        // network endpoints out of the offline app.
         val url = Regex("""https?://[A-Za-z]""")
+        val namespaceUri = Regex(
+            """https?://(?:javax\.xml\.XMLConstants|xml\.org/sax|apache\.org/xml|www\.w3\.org|www\.idpf\.org|purl\.org)/[^\s"')]*""",
+        )
         val offenders = File(appDir, "src/main/java")
             .walkTopDown()
             .filter { it.isFile && (it.extension == "kt" || it.extension == "java") }
-            .filter { file -> file.readLines().any { line -> !isComment(line) && url.containsMatchIn(line) } }
+            .filter { file ->
+                file.readLines().any { rawLine ->
+                    if (isComment(rawLine)) return@any false
+                    val line = namespaceUri.replace(rawLine, "")
+                    url.containsMatchIn(line)
+                }
+            }
             .map { it.name }
             .toList()
         assertTrue("URL literals in app sources: $offenders", offenders.isEmpty())
     }
+
 
     private fun isComment(line: String): Boolean {
         val t = line.trimStart()

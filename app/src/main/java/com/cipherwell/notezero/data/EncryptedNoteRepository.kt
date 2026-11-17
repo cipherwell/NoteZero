@@ -17,6 +17,7 @@ import com.cipherwell.notezero.model.AttachmentRef
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
+import com.cipherwell.notezero.model.ReadingState
 import com.cipherwell.notezero.model.ItemQueries
 import com.cipherwell.notezero.model.ThemeMode
 import kotlinx.coroutines.CoroutineDispatcher
@@ -816,6 +817,23 @@ class EncryptedNoteRepository(
             }
         }
 
+    override suspend fun saveReadingState(itemId: String, state: ReadingState): Boolean =
+        withContext(ioDispatcher) {
+            try {
+                mutex.withLock {
+                    val key = vmk ?: return@withLock false
+                    val item = itemsById[itemId] ?: return@withLock false
+                    if (item.readingState == state) return@withLock true
+                    saveItemLocked(item.copy(readingState = state), key, preserveReadingState = false)
+                    afterItemMutationLocked()
+                    true
+                }
+            } catch (e: IllegalArgumentException) {
+                // Out-of-bounds state (labels/counts/position) fails closed, never persists.
+                false
+            }
+        }
+
     override suspend fun setFolderLocked(id: String, locked: Boolean): Boolean =
         withContext(ioDispatcher) {
             mutex.withLock {
@@ -1512,6 +1530,7 @@ class EncryptedNoteRepository(
         vmkBytes: ByteArray,
         preserveAttachments: Boolean = true,
         preserveLock: Boolean = true,
+        preserveReadingState: Boolean = true,
     ): Item {
         val existing = itemsById[item.id]
         val now = clock()
@@ -1520,6 +1539,11 @@ class EncryptedNoteRepository(
         val updatedAt = maxOf(now, (existing?.updatedAt ?: item.updatedAt) + 1L)
         val version = maxOf(existing?.version ?: -1L, item.version) + 1L
         val locked = if (preserveLock) existing?.locked ?: item.locked else item.locked
+        val readingState = if (preserveReadingState) {
+            existing?.readingState ?: item.readingState
+        } else {
+            item.readingState
+        }
         val attachments = when {
             !preserveAttachments -> item.attachments
             existing != null -> existing.attachments
@@ -1536,6 +1560,7 @@ class EncryptedNoteRepository(
             version = version,
             attachments = attachments,
             locked = locked,
+            readingState = readingState,
         )
         persistItemLocked(saved, vmkBytes)
         itemsById[saved.id] = saved

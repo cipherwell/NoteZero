@@ -32,6 +32,7 @@ import com.cipherwell.notezero.ui.components.common.NzInfoBanner
 import com.cipherwell.notezero.ui.components.common.NzTextButton
 import com.cipherwell.notezero.ui.components.common.rememberBiometricAvailability
 import com.cipherwell.notezero.ui.code.CodeWorkspaceScreen
+import com.cipherwell.notezero.ui.library.LibraryScreen
 import com.cipherwell.notezero.ui.components.common.rememberBiometricPromptLauncher
 import com.cipherwell.notezero.ui.notes.NotesListScreen
 import com.cipherwell.notezero.ui.screens.recovery.RecoveryScreen
@@ -220,6 +221,11 @@ fun AppRoot(
                                     onBack = { unlockedRoute = ROUTE_NOTES },
                                 )
 
+                                ROUTE_LIBRARY -> LibraryScreen(
+                                    repository = repository,
+                                    onBack = { unlockedRoute = ROUTE_NOTES },
+                                )
+
                                 else -> NotesListScreen(
                                     repository = repository,
                                     onOpenSettings = {
@@ -229,6 +235,7 @@ fun AppRoot(
                                         unlockedRoute = ROUTE_SETTINGS
                                     },
                                     onOpenCode = { unlockedRoute = ROUTE_CODE },
+                                    onOpenLibrary = { unlockedRoute = ROUTE_LIBRARY },
                                     startNewNote = pendingNewNote,
                                     onStartNewNoteConsumed = {
                                         pendingNewNote = false
@@ -305,3 +312,4 @@ private const val ROUTE_RECOVERY = "recovery"
 private const val ROUTE_NOTES = "notes"
 private const val ROUTE_SETTINGS = "settings"
 private const val ROUTE_CODE = "code"
+private const val ROUTE_LIBRARY = "library"

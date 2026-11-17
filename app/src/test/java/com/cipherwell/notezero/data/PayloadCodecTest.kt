@@ -4,10 +4,13 @@ import com.cipherwell.notezero.model.AttachmentRef
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
+import com.cipherwell.notezero.model.ReadingBookmark
+import com.cipherwell.notezero.model.ReadingState
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.random.Random
@@ -32,6 +35,7 @@ class PayloadCodecTest {
         updatedAt: Long = 1_700_000_123_000L,
         version: Long = 7L,
         attachments: List<AttachmentRef> = emptyList(),
+        readingState: ReadingState? = null,
     ) = Item(
         id = id,
         kind = kind,
@@ -46,6 +50,7 @@ class PayloadCodecTest {
         updatedAt = updatedAt,
         version = version,
         attachments = attachments,
+        readingState = readingState,
     )
 
     private fun attachment(
@@ -102,6 +107,68 @@ class PayloadCodecTest {
         assertEquals(original, decoded)
         assertEquals(ItemKind.PDF_FILE, decoded?.kind)
         assertEquals("application/pdf", decoded?.attachments?.single()?.mimeType)
+    }
+
+    @Test
+    fun `item codec round trips encrypted reading state`() {
+        val state = ReadingState(
+            position = 7,
+            fraction = 0.42f,
+            total = 24,
+            bookmarks = listOf(
+                ReadingBookmark(position = 2, label = "Chapter 2 start", createdAt = 1_700_000_500_000L),
+                ReadingBookmark(position = 5, label = "Quote", createdAt = 1_700_000_600_000L),
+            ),
+            author = "Ada Lovelace",
+            language = "en",
+        )
+        val original = note(kind = ItemKind.BOOK_FILE, readingState = state)
+
+        val decoded = ItemCodec.decode(ItemCodec.encode(original))
+
+        assertEquals(original, decoded)
+        assertEquals(state, decoded?.readingState)
+        assertEquals(ItemKind.BOOK_FILE, decoded?.kind)
+    }
+
+    @Test
+    fun `version 3 payloads decode with no reading state`() {
+        val original = note(kind = ItemKind.PDF_FILE, readingState = null)
+        val encodedV4 = ItemCodec.encode(original)
+        // Envelope layout: 4-byte magic, then the version byte; v4 with a null state appends
+        // exactly one "no state" byte at the end.
+        val legacy = encodedV4.copyOf(encodedV4.size - 1)
+        legacy[4] = 3
+
+        val decoded = ItemCodec.decode(legacy)
+
+        assertEquals(original, decoded)
+        assertNull(decoded?.readingState)
+    }
+
+    @Test
+    fun `reading state bounds are enforced`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            ReadingState(position = -1)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ReadingState(fraction = 1.5f)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ReadingState(fraction = Float.NaN)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ReadingState(bookmarks = List(ReadingState.MAX_BOOKMARKS + 1) {
+                ReadingBookmark(position = 0, label = "x", createdAt = 0L)
+            })
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ReadingState(bookmarks = listOf(ReadingBookmark(0, "x".repeat(ReadingState.MAX_LABEL_BYTES + 1), 0L)))
+        }
+        // Encoding an out-of-range position fails closed instead of writing it.
+        assertThrows(IllegalArgumentException::class.java) {
+            ItemCodec.encode(note(kind = ItemKind.BOOK_FILE, readingState = ReadingState(position = Int.MAX_VALUE)))
+        }
     }
 
     @Test

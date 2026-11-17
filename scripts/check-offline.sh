@@ -57,9 +57,13 @@ if rg -n --no-heading -g '*.kt' -g '*.java' \
   fail "network API imported in app sources (see lines above)"
 fi
 
-# URL literals are allowed only in comments/docs; flag them in code lines.
+# URL literals are allowed only in comments/docs; flag them in code lines. XML parser
+# property/feature/namespace identifiers (http://javax.xml.XMLConstants/...,
+# http://xml.org/sax/..., http://www.w3.org/...) are namespaced constants, not fetch
+# targets: the app has no INTERNET permission, so no code path could request them.
 if rg -n --no-heading -g '*.kt' -g '*.java' -e 'https?://[A-Za-z]' "$MAIN_SRC" 2>/dev/null \
-    | grep -vE '^\s*[^:]+:[0-9]+:\s*(//|\*|/\*)' >/dev/null; then
+    | grep -vE '^\s*[^:]+:[0-9]+:\s*(//|\*|/\*)' \
+    | grep -vE 'https?://(javax\.xml\.XMLConstants|xml\.org/sax|apache\.org/xml|www\.w3\.org|www\.idpf\.org|purl\.org)/' >/dev/null; then
   fail "URL literal found in app source (move it to docs/ or a comment)"
 fi
 

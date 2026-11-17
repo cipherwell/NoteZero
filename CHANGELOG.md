@@ -3,6 +3,68 @@
 All notable changes to NoteZero are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [Unreleased] — all-in-one workspace: Library, EPUB/PDF readers, encrypted reading state (2026-11-17, increment 10)
+
+### Added
+
+**Library (one encrypted shelf)**
+- New `Library` screen reachable from the Notes top bar (book glyph, `library_button`):
+  All / Books / PDFs / Drawings filters, progress + Continue per document, one-tap opening,
+  and the shared rename/lock/trash rules from the notes list. Locked+unverified documents are
+  never listed (same fail-closed masking as the code workspace).
+- Import through SAF `OpenDocument` (MIME-tolerant picker, parser is the validator): a PDF is
+  stored as an encrypted `application/pdf` attachment; an EPUB is parsed first (title/author/
+  language/chapter count) and stored as an encrypted `application/epub+zip` attachment under
+  `ItemKind.BOOK_FILE`. Unsupported/DRM-protected/corrupt files are rejected with a non-secret
+  message and the placeholder item is removed — no orphan rows. The picker is bracketed with
+  the external-activity API so a background stop does not lock the vault mid-import.
+
+**EPUB 2/3 reader (dependency-free engine + native Compose rendering)**
+- Pure-Kotlin/JVM engine in `book/` (2,200 LoC, no new dependencies): container/OPF/spine,
+  EPUB3 nav and EPUB2 NCX TOC, metadata, cover, XHTML → semantic block model (headings,
+  paragraphs, lists, quotes, code, rules, images, inline bold/italic/code/link), bounded ZIP
+  (≤10k entries, 128 MiB total, 16 MiB/entry, path-traversal rejection) and XXE-hardened XML,
+  DRM refusal, `close()` lifecycle; **104 JVM tests** with generated EPUB fixtures including a
+  1,000-sample fuzz/malformed-input suite.
+- Reader UI: chapter list with rendered blocks/images (decoded in memory only), TOC dialog,
+  in-book search with snippets, bookmarks, appearance sheet (font size, line spacing, margins,
+  paper/sepia/night), progress bar/percent, tap zones, resume to the last chapter. Non-secret
+  reader preferences in app-private SharedPreferences.
+- Bookmarks/position persisted through the encrypted reading state (below) and verified across
+  app restart + vault lock/unlock on device.
+- Fixed during device QA: duplicate chapter heading when a chapter's `<h1>` already carries the
+  title, and night-theme code-block contrast.
+
+**PDF reader tools**
+- Page slider/jump (`Go to page` with validation), bookmark add/list/delete with jump, resume
+  position; existing encrypted-attachment rendering, SAF export and FLAG_SECURE behaviour
+  unchanged.
+
+**Encrypted reading state (`ItemCodec` payload v4)**
+- `ItemKind.BOOK_FILE` appended after `PDF_FILE` (ordinals frozen). New `ReadingState`
+  (position, fraction, total, bookmarks, book author/language) lives inside the AES-GCM item
+  envelope, is repository-owned like attachments/locks (a stale autosave cannot roll it back),
+  travels with backup v2, and is never in a plaintext column. Payload v1–v3 still decode.
+
+### Changed
+- `ItemCodec.ENVELOPE_VERSION` 3 → 4 (v1–v3 decode preserved); backup v1 fixtures and lock-byte
+  invariants re-tested against the new layout.
+- Notes list row routing: `BOOK_FILE` opens the reader; `PDF_FILE` keeps the upgraded viewer.
+- Offline guarantee test now allow-lists XML parser namespace identifiers (not fetch targets)
+  while still failing on any real URL literal in app sources.
+
+### Verified (measured)
+- **1068 unit tests / 0 failures / 0 errors** (91 classes; +155: EPUB engine 104, Library/reader
+  UI 40, PDF tools 5, reading-state data 6); **15 instrumented tests OK** on the emulator.
+- Emulator (Android 17 image) device QA: imported a 2-chapter EPUB (`The Quiet Library`, author
+  Ada Test) → TOC, search ("secret" → 1 result), bookmarks, night theme + larger font, image
+  rendering; imported a 3-page PDF → page jump, bookmark on page 2 (`Page 2 of 3`, 66%),
+  progress persisted after force-stop + unlock; library row progress reflected both documents.
+- No new permissions: release surface remains `USE_BIOMETRIC` only; offline guard, FLAG_SECURE
+  and reproducible builds re-run for the release commit (hashes in VERIFICATION §15).
+- New screenshots: `23-library`, `24-epub-reader`, `25-pdf-viewer-tools`,
+  `26-reader-bookmarks-night`.
+
 ## [Unreleased] — Phase 4 complete: drawing canvas, note export, tables, quick capture (2026-11-15, increment 6)
 
 ### Added

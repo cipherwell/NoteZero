@@ -584,3 +584,80 @@ throws.
   `19-export-pdf`, `20-widget-picker` refreshed/added.
 
 DECISIONS #21 records the PDF-export and widget policies.
+
+---
+
+## 15. Increment 10 — Library + EPUB/PDF readers + encrypted reading state (2026-11-17)
+
+Scope: the first slice of the all-in-one direction (`docs/ROADMAP-ALL-IN-ONE.md` phase 10).
+Research basis: `docs/RESEARCH-ALL-IN-ONE-2026-11-17.md`; policies: DECISIONS #22; contracts:
+`docs/CONTRACTS-PHASE9.md`; engine details: `docs/EPUB-ENGINE.md`; reader details:
+`docs/READER-UI.md`.
+
+### 15.1 Data layer: encrypted reading state (`ItemCodec` payload v4)
+
+| Check | Result |
+|---|---|
+| New item kind | `ItemKind.BOOK_FILE` appended (ordinal 3); existing ordinals frozen; EPUB stored as an encrypted `application/epub+zip` `NZAT` attachment |
+| Reading state | `ReadingState(position, fraction, total, bookmarks, author, language)` inside the AES-GCM item envelope; payload v4; v1–v3 still decode (`readingState = null`); repository-owned (`saveItem` preserves it; only `saveReadingState` mutates) |
+| Tests | `PayloadCodecTest` v4 round-trip + v3 compatibility + bounds; `EncryptedNoteRepositoryTest.readingStateIsPersistedEncryptedAndRepositoryOwned` asserts persistence through lock/unlock, no plaintext bookmark label/author in Room ciphertext, `saveItem` cannot roll it back; `backupRoundTripCarriesReadingState`; legacy v1 backup fixtures still import |
+| Backup | Reading state travels inside the existing backup v2 item payload; no format bump outside the envelope |
+
+### 15.2 EPUB engine (pure JVM, no new dependencies)
+
+| Check | Result |
+|---|---|
+| Delivered | `book/` package: `EpubParser`, `EpubDocument`, block model, ZIP reader, secure XML, TOC/metadata/cover, image resources, `close()` |
+| Support | EPUB 2/3, spine order, EPUB3 nav + EPUB2 NCX, derived titles, images/cover; no scripts/CSS; tables/lists approximate by design |
+| Safety | bounded entries (≤10k), total ≤128 MiB, entry ≤16 MiB, path traversal rejected, duplicate names first-wins, truncated/ZIP64 rejected, XXE/DTD/external entities disabled, DRM refused (`encryption.xml`/`rights.xml`), never throws on hostile input |
+| Tests | **104 JVM tests / 0 failures** (Epub3 23, Epub2 8, ChapterBlocks 21, Security 19, Limits 15, Paths 7, Lifecycle 6, Block model 5), including a 1,000-sample random/malformed fuzz corpus; no temporary files written |
+
+### 15.3 Library + readers (UI)
+
+| Check | Result |
+|---|---|
+| Library | All/Books/PDFs/Drawings filters, progress + Continue, SVG-free in-memory drawing preview, rename/lock/trash rules shared with notes, masked items hidden; SAF import with generic MIME list (providers report EPUB inconsistently) and parser validation; failed import trashes its placeholder item |
+| EPUB reader | TOC, in-book search with snippets, bookmarks, appearance (font/line spacing/margins, paper/sepia/night), progress, tap zones, resume; duplicate chapter-heading artefact found on device and fixed; night code-block contrast found on device and fixed |
+| PDF reader | page progress/slider, jump dialog with validation, bookmark add/list/delete, resume position |
+| Tests | **40 Library/reader Robolectric tests** (LibraryScreen 12, BookReader 16, helpers 7, prefs 5) + **5 PDF reading-tools tests**; total unit suite **1068 tests / 0 failures / 91 classes**; **15 instrumented tests OK** on the emulator |
+
+### 15.4 Emulator device QA (measured)
+
+| Step | Evidence |
+|---|---|
+| EPUB import | SAF picker → `quiet-library.epub` imported as `BOOK_FILE`; shelf showed title **The Quiet Library**, author Ada Test, `Chapter 1 of 2`, 50% progress |
+| EPUB reader | chapter headings (deduplicated), bold/italic/code inline styles, lists, quote, code block, inline PNG image all rendered; TOC dialog listed both chapters |
+| Search | query `secret` → **1 result** in *The Middle* with snippet and navigation |
+| Reading tools | enlarged font, night theme applied; bookmark `Saved` added on chapter 1 and **still present after force-stop + unlock**; night code block readable after the contrast fix |
+| PDF import | SAF picker → `reader-sample-3p.pdf` (4,231 B, 3 pages) imported as `PDF_FILE` |
+| PDF tools | progress `1 / 3` → jump to page 3 → bookmark saved (`Page 2` at 66%, shown as `Page 2 / 3` after resume) → **bookmark and position persisted after force-stop + vault unlock** |
+| Library progress | after restarts the shelf showed `qc-3page` = Page 2 of 3 / 66% and the EPUB = Chapter 1 of 2 / 50% |
+| Crashes | 0 NoteZero FATAL/ANR during the session (logcat clean) |
+| Screenshots | `23-library`, `24-epub-reader`, `25-pdf-viewer-tools`, `26-reader-bookmarks-night` |
+
+### 15.5 Security + release verification
+
+| Check | Result |
+|---|---|
+| Offline guard | `./scripts/check-offline.sh --gradle` → `OK: NoteZero is offline by construction.` (test updated to allow XML parser namespace identifiers while still failing any real URL literal; engine/reader imports contain no network API) |
+| Permissions | release APK: `USE_BIOMETRIC` only (plus the generated dynamic-receiver permission); no INTERNET/STORAGE/CAMERA additions |
+| Token lint | `vault_token_lint` clean for `ui/reader` (3 files); no raw hex/ARGB in new library/reader code; no TODO/FIXME/Log/println in `book/`, `ui/library/`, `ui/reader/` |
+| FLAG_SECURE | unchanged default path; release builds keep it on (no screenshot exemption added in this increment; `allowScreenshots` remains debug-only) |
+| Reproducible APK | **REPRODUCIBLE** — both builds sha256 `fea43e9f918611980738f2d64c9e17d321678ced3130d274270a7b35fb48c3c5` |
+| Reproducible AAB | **REPRODUCIBLE** — both builds sha256 `303b187ac6a6dbe67bbdbedde734392f78add3db039bf6e8c78bbcbaee6886f5` |
+| Artifacts | `releases/notezero-0.1.0-release.apk` / `.aab` replaced with these builds; `releases/SHA256SUMS` updated |
+| Certificate | `CN=Cipherwell, O=Cipherwell, OU=NoteZero, C=US`; SHA-256 digest `FA:CA:DD:67:B2:82:AF:A5:E7:F4:C9:C4:70:61:71:80:C9:EF:9E:2D:12:39:AD:F1:0C:29:C4:F9:95:AA:92:78` (unchanged) |
+| Owner phone | release APK installed over the existing vault (data/biometrics intact, `firstInstallTime` unchanged); phone was locked at the lockscreen so no UI interaction was possible in this pass — no app crash was logged; the pushed QA PDF was removed from Downloads; phone left locked |
+
+### 15.6 Residual notes
+
+- Reader percent is chapter/page-granular (e.g. `Chapter 1 of 2` with a 50% bar); exact
+  intra-chapter percentage is deferred with the annotation/positions phase.
+- EPUB rendering is semantic, not CSS-faithful (documented in `docs/EPUB-ENGINE.md`); complex
+  CSS layouts, scripts, footnotes and SVG are out of scope until a vetted renderer decision.
+- PDF bookmarks default label duplicates the position line in the list (cosmetic; label field
+  lets the user name it).
+- On the emulator, a freshly adb-pushed `.epub` was initially shown disabled by DocumentsUI
+  until MediaStore indexed it; after the media scan it imported normally. Real downloads go
+  through the download manager and are indexed automatically. The picker tolerates generic
+  MIME types; the parser is the validator.

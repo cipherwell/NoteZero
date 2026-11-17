@@ -22,6 +22,17 @@ export JAVA_HOME=/usr/lib/jvm/java-17-openjdk
 
 CI runs `assembleDebug`, `testDebugUnitTest`, and `check-offline.sh --gradle` on every push.
 
+## Increment-10 areas (Library + readers)
+
+| Area | Tests | What it proves |
+|---|---|---|
+| `book.*` (EPUB engine, plain JVM) | 104 | EPUB 2/3 container/OPF/spine/TOC/metadata/cover parsing; XHTML → block model; bounded ZIP/XML, XXE-off, traversal/duplicate/truncation handling; DRM refusal; fuzz/malformed input never throws; `close()` lifecycle and image/cover bounds |
+| `ui.library.*` (Robolectric) | 12 | Shelf rows/filters/progress/empty state, masked documents hidden, open→reader routing, rename/trash rules, import menu |
+| `ui.reader.*` (Robolectric) | 28 | Loading→content, block rendering, TOC scroll, in-book search hit/empty/scroll, bookmark add/delete/persist, appearance theme+font persistence, corrupt/DRM `book_error`, debounced progress save + restore |
+| `ui.pdf.*` reading tools | 5 | Page total persisted after render, bookmark add/list/delete, out-of-range page-jump validation, resume from encrypted position |
+| `data.*` reading state | 6 | Payload v4 round-trip, v3 compatibility, bounds enforcement, repository persistence through lock/unlock, backup round-trip, no plaintext bookmark/author in Room ciphertext |
+| Instrumented E2E | 15 | Unchanged flows still pass with the new Library route; real Keystore/SAF/FLAG_SECURE coverage |
+
 ## Backup-flow tests (Phase-2 SAF gap)
 
 | Test | What it proves | Tooling |
@@ -62,7 +73,7 @@ Commands:
 
 | Suite | Command | Result |
 |---|---|---|
-| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **913 tests / 0 failures / 0 errors / 0 skipped** (79 classes) |
+| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **1068 tests / 0 failures / 0 errors / 0 skipped** (91 classes) |
 | Instrumented (emulator) | `adb shell am instrument -w com.cipherwell.notezero.test/androidx.test.runner.AndroidJUnitRunner` | **OK (15 tests)** incl. `NotePdfRenderInstrumentedTest`, `VaultFlowE2ETest` (notes + backup settings + code workspace + create sheet + PDF) and a real-`PdfRenderer` instrumented test |
 | Offline guarantee | `./scripts/check-offline.sh --gradle` | exit 0 |
 | Release signing | `apksigner verify --print-certs app-release.apk` | NoteZero upload key SHA-256 `FA:CA:DD:67:…:92:78` |

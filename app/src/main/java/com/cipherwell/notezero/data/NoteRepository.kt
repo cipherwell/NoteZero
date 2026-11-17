@@ -5,6 +5,7 @@ import com.cipherwell.notezero.crypto.BiometricEnroll
 import com.cipherwell.notezero.model.AttachmentRef
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
+import com.cipherwell.notezero.model.ReadingState
 import com.cipherwell.notezero.model.ItemKind
 import com.cipherwell.notezero.model.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -266,6 +267,15 @@ interface NoteRepository {
      * Default is fail-secure (`false`) for test doubles / alternative implementations.
      */
     suspend fun setItemLocked(id: String, locked: Boolean): Boolean = false
+
+    /**
+     * Persists the encrypted reading state (position, progress, bookmarks and book metadata)
+     * of [itemId]. The state is repository-owned like [attachments]: `saveItem` preserves the
+     * stored value, only this call changes it, so a stale reader autosave can never roll the
+     * position back. Returns false while locked, for unknown ids or invalid state bounds; the
+     * default is fail-secure (test doubles / alternative implementations).
+     */
+    suspend fun saveReadingState(itemId: String, state: ReadingState): Boolean = false
 
     /**
      * Locks/unlocks one folder and persists the flag inside the folder envelope

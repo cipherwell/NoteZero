@@ -52,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -76,6 +77,7 @@ import com.cipherwell.notezero.ui.locks.ReauthDialog
 import com.cipherwell.notezero.ui.locks.rememberLockReauthController
 import com.cipherwell.notezero.ui.components.common.NzFab
 import com.cipherwell.notezero.ui.pdf.PdfViewerScreen
+import com.cipherwell.notezero.ui.reader.BookReaderScreen
 import com.cipherwell.notezero.ui.notes.components.FolderRow
 import com.cipherwell.notezero.ui.notes.components.MoveToFolderDialog
 import com.cipherwell.notezero.ui.notes.components.NoteRow
@@ -103,6 +105,7 @@ fun NotesListScreen(
     repository: NoteRepository,
     onOpenSettings: () -> Unit,
     onOpenCode: () -> Unit = {},
+    onOpenLibrary: () -> Unit = {},
     /** Injectable only for tests; production uses the device presence prompt. */
     biometricPrompt: LockBiometricPrompt? = null,
     /** Injectable only for tests; production uses the SAF `CreateDocument` target. */
@@ -117,6 +120,7 @@ fun NotesListScreen(
     var editorItemId by rememberSaveable { mutableStateOf<String?>(null) }
     var pdfItemId by rememberSaveable { mutableStateOf<String?>(null) }
     var codeItemId by rememberSaveable { mutableStateOf<String?>(null) }
+    var bookItemId by rememberSaveable { mutableStateOf<String?>(null) }
     var editorOpenDrawing by rememberSaveable { mutableStateOf(false) }
     var showCreateSheet by rememberSaveable { mutableStateOf(false) }
     var showNewCodeDialog by rememberSaveable { mutableStateOf(false) }
@@ -156,6 +160,16 @@ fun NotesListScreen(
         return
     }
 
+    val openBookId = bookItemId
+    if (openBookId != null) {
+        BookReaderScreen(
+            repository = repository,
+            itemId = openBookId,
+            onClose = { bookItemId = null },
+        )
+        return
+    }
+
     val openItemId = editorItemId
     if (openItemId != null) {
         com.cipherwell.notezero.ui.editor.NoteEditorScreen(
@@ -174,9 +188,11 @@ fun NotesListScreen(
         viewModel = viewModel,
         reauth = reauth,
         onOpenCode = onOpenCode,
+        onOpenLibrary = onOpenLibrary,
         onOpenEditor = { editorItemId = it },
         onOpenPdf = { pdfItemId = it },
         onOpenCodeItem = { codeItemId = it },
+        onOpenBook = { bookItemId = it },
         onShowCreateSheet = { showCreateSheet = true },
         onOpenSettings = onOpenSettings,
         exportTarget = noteExportTarget ?: rememberSafNoteExportTarget(repository),
@@ -257,9 +273,11 @@ private fun NotesListContent(
     onOpenEditor: (String) -> Unit,
     onOpenPdf: (String) -> Unit,
     onOpenCodeItem: (String) -> Unit,
+    onOpenBook: (String) -> Unit,
     onShowCreateSheet: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenCode: () -> Unit,
+    onOpenLibrary: () -> Unit,
     exportTarget: NoteExportTarget,
 ) {
     var renameTarget by remember { mutableStateOf<Item?>(null) }
@@ -276,6 +294,7 @@ private fun NotesListContent(
 
     val isTrash = state.section == NotesSection.TRASH
     val codeWorkspaceLabel = stringResource(R.string.cd_notes_code_workspace)
+    val libraryLabel = stringResource(R.string.cd_library)
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
 
     BackHandler(enabled = isTrash) { viewModel.leaveTrash() }
@@ -296,6 +315,7 @@ private fun NotesListContent(
                         when (row.item.kind) {
                             ItemKind.PDF_FILE -> onOpenPdf(id)
                             ItemKind.CODE_FILE -> onOpenCodeItem(id)
+                            ItemKind.BOOK_FILE -> onOpenBook(id)
                             else -> onOpenEditor(id)
                         }
                     }
@@ -360,6 +380,18 @@ private fun NotesListContent(
                                 modifier = Modifier.testTag("trash_empty_button"),
                             ) { Text(stringResource(R.string.notes_empty_trash)) }
                         } else {
+                            IconButton(
+                                onClick = onOpenLibrary,
+                                modifier = Modifier
+                                    .testTag("library_button")
+                                    .semantics { contentDescription = libraryLabel },
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_library),
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                             IconButton(
                                 onClick = onOpenCode,
                                 modifier = Modifier

@@ -12,6 +12,7 @@ import com.cipherwell.notezero.model.AttachmentRef
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
+import com.cipherwell.notezero.model.ReadingState
 import com.cipherwell.notezero.model.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -244,10 +245,24 @@ class FakeNoteRepository(
     }
 
     override suspend fun saveItem(item: Item): Item {
-        val saved = item.copy(updatedAt = ++clock, version = item.version + 1)
+        val existing = allItems.firstOrNull { it.id == item.id }
+        val saved = item.copy(
+            updatedAt = ++clock,
+            version = item.version + 1,
+            // Repository-owned like the real implementation: a stale editor copy cannot roll
+            // the encrypted reading position/bookmarks back.
+            readingState = existing?.readingState ?: item.readingState,
+        )
         allItems = allItems.map { if (it.id == saved.id) saved else it }
         refreshIndex()
         return saved
+    }
+
+    override suspend fun saveReadingState(itemId: String, state: ReadingState): Boolean {
+        if (_status.value != VaultStatus.UNLOCKED) return false
+        if (allItems.none { it.id == itemId }) return false
+        updateItem(itemId) { it.copy(readingState = state) }
+        return true
     }
 
     override suspend fun trashItem(id: String) {

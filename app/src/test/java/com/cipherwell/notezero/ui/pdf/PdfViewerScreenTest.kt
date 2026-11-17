@@ -3,10 +3,14 @@ package com.cipherwell.notezero.ui.pdf
 import android.graphics.Bitmap
 import android.graphics.Color
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import com.cipherwell.notezero.data.VaultStatus
 import com.cipherwell.notezero.model.BlankPdf
 import com.cipherwell.notezero.model.ItemKind
+import com.cipherwell.notezero.model.ReadingState
 import com.cipherwell.notezero.ui.FakeNoteRepository
 import com.cipherwell.notezero.ui.UiTestBase
 import kotlinx.coroutines.runBlocking
@@ -108,5 +112,135 @@ class PdfViewerScreenTest : UiTestBase() {
         composeRule.onNodeWithTag("pdf_export").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("pdf_export_warning").assertExists()
+    }
+
+    @Test
+    fun `opening a pdf stores the page total in encrypted reading state`() {
+        val (repository, itemId) = repositoryWithPdf()
+        setThemedContent {
+            PdfViewerScreen(
+                repository = repository,
+                itemId = itemId,
+                onClose = {},
+                renderer = fakeRenderer(pages = 3, total = 3),
+            )
+        }
+
+        composeRule.waitUntil(5_000) {
+            repository.items.value.firstOrNull { it.id == itemId }?.readingState?.total == 3
+        }
+        composeRule.waitForIdle()
+        val state = repository.items.value.first { it.id == itemId }.readingState
+        assertEquals(3, state?.total)
+        assertEquals(0, state?.position)
+    }
+
+    @Test
+    fun `adding a bookmark persists it in the encrypted reading state`() {
+        val (repository, itemId) = repositoryWithPdf()
+        setThemedContent {
+            PdfViewerScreen(
+                repository = repository,
+                itemId = itemId,
+                onClose = {},
+                renderer = fakeRenderer(pages = 3, total = 3),
+            )
+        }
+        composeRule.waitUntil(5_000) {
+            repository.items.value.firstOrNull { it.id == itemId }?.readingState?.total == 3
+        }
+
+        composeRule.onNodeWithTag("pdf_bookmark_add").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("pdf_bookmark_dialog").assertExists()
+        composeRule.onNodeWithTag("pdf_bookmark_label").performTextInput("My page")
+        composeRule.onNodeWithTag("pdf_bookmark_save").performClick()
+
+        composeRule.waitUntil(5_000) {
+            repository.items.value.firstOrNull { it.id == itemId }
+                ?.readingState?.bookmarks?.any { it.label == "My page" } == true
+        }
+        val bookmark = repository.items.value.first { it.id == itemId }.readingState!!.bookmarks.single()
+        assertEquals(0, bookmark.position)
+        assertEquals("My page", bookmark.label)
+    }
+
+    @Test
+    fun `bookmarks list can jump and delete`() {
+        val (repository, itemId) = repositoryWithPdf()
+        runBlocking {
+            repository.saveReadingState(
+                itemId,
+                ReadingState(
+                    position = 1,
+                    total = 3,
+                    bookmarks = listOf(
+                        com.cipherwell.notezero.model.ReadingBookmark(position = 2, label = "Last page", createdAt = 1L),
+                    ),
+                ),
+            )
+        }
+        setThemedContent {
+            PdfViewerScreen(
+                repository = repository,
+                itemId = itemId,
+                onClose = {},
+                renderer = fakeRenderer(pages = 3, total = 3),
+            )
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("pdf_bookmarks_open").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("pdf_bookmarks_dialog").assertExists()
+        composeRule.onNodeWithTag("pdf_bookmark_row").assertExists()
+
+        composeRule.onNodeWithTag("pdf_bookmark_delete").performClick()
+        composeRule.waitUntil(5_000) {
+            repository.items.value.firstOrNull { it.id == itemId }?.readingState?.bookmarks?.isEmpty() == true
+        }
+    }
+
+    @Test
+    fun `page jump rejects an out of range page`() {
+        val (repository, itemId) = repositoryWithPdf()
+        setThemedContent {
+            PdfViewerScreen(
+                repository = repository,
+                itemId = itemId,
+                onClose = {},
+                renderer = fakeRenderer(pages = 2, total = 2),
+            )
+        }
+        composeRule.waitUntil(5_000) {
+            repository.items.value.firstOrNull { it.id == itemId }?.readingState?.total == 2
+        }
+
+        composeRule.onNodeWithTag("pdf_page_progress").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("pdf_page_jump_dialog").assertExists()
+        composeRule.onNodeWithTag("pdf_page_field").performTextInput("999")
+        composeRule.onNodeWithTag("pdf_page_jump_confirm").performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("pdf_page_error", useUnmergedTree = true).assertExists()
+    }
+
+    @Test
+    fun `resumes from the saved encrypted page`() {
+        val (repository, itemId) = repositoryWithPdf()
+        runBlocking { repository.saveReadingState(itemId, ReadingState(position = 1, total = 3)) }
+        setThemedContent {
+            PdfViewerScreen(
+                repository = repository,
+                itemId = itemId,
+                onClose = {},
+                renderer = fakeRenderer(pages = 3, total = 3),
+            )
+        }
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithText("2 / 3").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("2 / 3").assertExists()
     }
 }

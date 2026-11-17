@@ -94,14 +94,17 @@ internal object LegacyBackupFixture {
 
     /**
      * Rebuilds the ItemCodec version-1 payload from a current encoding: drop the appended
-     * attachment count (u16, always 0 for fixture items) **and** the v3 lock byte, then set
-     * the envelope version byte to 1.
+     * attachment count (u16, always 0 for fixture items), the v3 lock byte **and** the v4
+     * reading-state presence byte, then set the envelope version byte to 1.
      */
     private fun legacyV1ItemPayload(item: Item): ByteArray {
+        require(item.attachments.isEmpty()) { "v1 backups cannot carry attachments" }
+        require(item.readingState == null) { "v1 fixtures carry no reading state" }
         val encoded = ItemCodec.encode(item)
-        val withoutV2AndV3Suffix = encoded.copyOf(encoded.size - 3)
-        withoutV2AndV3Suffix[4] = 1
-        return withoutV2AndV3Suffix
+        // v4 suffix: attachmentCount u16 (0) + lock byte + readingState presence byte (0).
+        val withoutV2V3V4Suffix = encoded.copyOf(encoded.size - 4)
+        withoutV2V3V4Suffix[4] = 1
+        return withoutV2V3V4Suffix
     }
 
     /** Rebuilds the FolderCodec version-1 payload from a current encoding (drop the v2 lock byte). */

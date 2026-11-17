@@ -19,6 +19,7 @@
     <string name="common_close">Close</string>
     <string name="common_create">Create</string>
     <string name="common_delete">Delete</string>
+    <string name="common_go">Go</string>
     <string name="common_dismiss">Dismiss</string>
     <string name="common_edit">Edit</string>
     <string name="common_preview">Preview</string>
@@ -28,6 +29,7 @@
     <string name="common_verifying">Verifying…</string>
     <string name="common_undo">Undo</string>
     <string name="common_redo">Redo</string>
+    <string name="common_save">Save</string>
     <string name="common_saved">Saved</string>
     <string name="common_saving">Saving…</string>
     <string name="common_loading">Loading…</string>
@@ -462,4 +464,81 @@
     <!-- Quick-capture home-screen widget: label shown on the tile, no vault content. -->
     <string name="widget_quick_note_label">New note</string>
     <string name="widget_quick_note_description">Create a new encrypted note</string>
+    <!-- Library (all-in-one document shelf) -->
+    <string name="library_title">Library</string>
+    <string name="cd_library">Library</string>
+    <string name="cd_library_back">Back</string>
+    <string name="library_import">Import</string>
+    <string name="library_import_pdf">PDF document</string>
+    <string name="library_import_epub">E-book (EPUB)</string>
+    <string name="library_filter_all">All</string>
+    <string name="library_filter_books">Books</string>
+    <string name="library_filter_pdfs">PDFs</string>
+    <string name="library_filter_drawings">Drawings</string>
+    <string name="library_empty_title">Your library is empty</string>
+    <string name="library_empty_message">Import a PDF or an EPUB, or create a drawing from the notes list.</string>
+    <string name="library_importing">Importing…</string>
+    <string name="library_import_failed">The document could not be imported. Nothing in your vault changed.</string>
+    <string name="library_import_unsupported">This file is not a supported, DRM-free document.</string>
+    <string name="library_type_pdf">PDF</string>
+    <string name="library_type_book">EPUB</string>
+    <string name="library_type_drawing">Drawing</string>
+    <string name="library_continue">Continue</string>
+    <string name="library_page_progress">Page %1$d of %2$d</string>
+    <string name="library_chapter_progress">Chapter %1$d of %2$d</string>
+    <string name="library_progress_percent">%1$d%%</string>
+    <string name="library_actions">Document actions</string>
+    <string name="library_open">Open</string>
+    <string name="library_no_preview">No preview available</string>
+
+    <!-- E-book reader -->
+    <string name="cd_reader_back">Back</string>
+    <string name="book_reader_loading">Opening book…</string>
+    <string name="book_reader_error">This book could not be opened. It may be unsupported, DRM-protected or corrupted.</string>
+    <string name="book_toc">Contents</string>
+    <string name="book_toc_empty">This book has no table of contents.</string>
+    <string name="book_bookmarks">Bookmarks</string>
+    <string name="book_bookmarks_empty">No bookmarks yet. Add one to return to this spot later.</string>
+    <string name="book_bookmark_add">Add bookmark</string>
+    <string name="book_bookmark_label">Bookmark name</string>
+    <string name="book_bookmark_save">Save bookmark</string>
+    <string name="book_bookmark_default">Page mark</string>
+    <string name="book_bookmark_added">Bookmark added.</string>
+    <string name="book_bookmark_deleted">Bookmark removed.</string>
+    <string name="book_search">Search in book</string>
+    <string name="book_search_hint">Search this book</string>
+    <string name="book_search_empty">No matches.</string>
+    <string name="book_search_results">%1$d result(s)</string>
+    <string name="book_appearance">Appearance</string>
+    <string name="book_text_size">Text size</string>
+    <string name="book_font_increase">Increase text size</string>
+    <string name="book_font_decrease">Decrease text size</string>
+    <string name="book_line_spacing">Line spacing</string>
+    <string name="book_margins">Margins</string>
+    <string name="book_theme">Theme</string>
+    <string name="book_theme_paper">Paper</string>
+    <string name="book_theme_sepia">Sepia</string>
+    <string name="book_theme_night">Night</string>
+    <string name="book_progress_percent">%1$d%%</string>
+    <string name="book_chapter_progress">Chapter %1$d of %2$d</string>
+    <string name="book_page_progress">%1$d / %2$d</string>
+    <string name="book_chapter_label">Chapter %1$d</string>
+    <string name="book_image_error">Image could not be displayed</string>
+    <string name="book_previous_chapter">Previous chapter</string>
+    <string name="book_next_chapter">Next chapter</string>
+    <string name="book_settings_reset">Reset appearance</string>
+
+    <!-- PDF reader tools (bookmarks/progress/jump) -->
+    <string name="pdf_reader_bookmarks">Bookmarks</string>
+    <string name="pdf_bookmark_add">Add bookmark</string>
+    <string name="pdf_bookmark_default">Page %1$d</string>
+    <string name="pdf_bookmark_saved">Bookmark added.</string>
+    <string name="pdf_bookmark_removed">Bookmark removed.</string>
+    <string name="pdf_bookmarks_empty">No bookmarks yet.</string>
+    <string name="pdf_page_progress">%1$d / %2$d</string>
+    <string name="pdf_page_jump">Go to page</string>
+    <string name="pdf_page_jump_field">Page number</string>
+    <string name="pdf_page_invalid">Enter a page between 1 and %1$d.</string>
+    <string name="pdf_page_actions">Page actions</string>
+    <string name="pdf_reader_failed">This document could not be opened.</string>
 </resources>

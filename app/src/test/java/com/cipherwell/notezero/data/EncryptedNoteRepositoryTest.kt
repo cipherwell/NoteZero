@@ -7,6 +7,8 @@ import com.cipherwell.notezero.crypto.Bip39Recovery
 import com.cipherwell.notezero.crypto.NoteCrypto
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
+import com.cipherwell.notezero.model.ReadingBookmark
+import com.cipherwell.notezero.model.ReadingState
 import com.cipherwell.notezero.model.ThemeMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -595,6 +597,69 @@ class EncryptedNoteRepositoryTest {
         assertEquals(0, restoreReport.skipped)
         assertEquals(listOf("A", "B"), repo.items.value.map(::itemTitle).sorted())
         assertEquals("body A", repo.items.value.first { it.title == "A" }.body)
+    }
+
+    @Test
+    fun readingStateIsPersistedEncryptedAndRepositoryOwned() = runBlocking {
+        repo.setupVault(PASSWORD.toCharArray())
+        val book = repo.saveItem(repo.createItem(ItemKind.BOOK_FILE).copy(title = "Stored book"))
+        val state = ReadingState(
+            position = 3,
+            fraction = 0.5f,
+            total = 12,
+            bookmarks = listOf(ReadingBookmark(position = 2, label = "secret bookmark label", createdAt = now)),
+            author = "secret author",
+            language = "en",
+        )
+
+        assertTrue(repo.saveReadingState(book.id, state))
+        assertEquals(state, repo.items.value.first { it.id == book.id }.readingState)
+
+        // saveItem is repository-owned: a stale copy cannot roll the reader back.
+        repo.saveItem(repo.items.value.first { it.id == book.id }.copy(title = "Renamed book"))
+        assertEquals(state, repo.items.value.first { it.id == book.id }.readingState)
+
+        // Persisted through the encrypted envelope: lock wipes the index, unlock restores it.
+        repo.lock()
+        assertEquals(VaultStatus.LOCKED, repo.status.value)
+        assertEquals(UnlockResult.SUCCESS, repo.unlock(PASSWORD.toCharArray()))
+        assertEquals(state, repo.items.value.first { it.id == book.id }.readingState)
+
+        // The bookmark label/author must not exist as plaintext in the Room ciphertext.
+        val ciphertext = db.openHelper.readableDatabase
+            .query("SELECT ciphertext FROM items WHERE id = ?", arrayOf(book.id))
+            .use { cursor ->
+                if (cursor.moveToFirst()) cursor.getBlob(0) else ByteArray(0)
+            }
+        val asText = String(ciphertext, Charsets.ISO_8859_1)
+        assertFalse(asText.contains("secret bookmark label"))
+        assertFalse(asText.contains("secret author"))
+    }
+
+    @Test
+    fun backupRoundTripCarriesReadingState() = runBlocking {
+        repo.setupVault(PASSWORD.toCharArray())
+        val book = repo.saveItem(repo.createItem(ItemKind.BOOK_FILE).copy(title = "Portable book"))
+        val state = ReadingState(
+            position = 9,
+            fraction = 0.75f,
+            total = 20,
+            bookmarks = listOf(ReadingBookmark(position = 4, label = "mark", createdAt = now)),
+            author = "Author",
+            language = "es",
+        )
+        assertTrue(repo.saveReadingState(book.id, state))
+
+        val exported = ByteArrayOutputStream()
+        assertTrue(repo.exportBackup(exported, null))
+        val bytes = exported.toByteArray()
+
+        val otherRepo = newRepository(database = newDatabase(), preferences = newPrefs())
+        otherRepo.setupVault("target password".toCharArray())
+        val report = otherRepo.importBackup(ByteArrayInputStream(bytes), PASSWORD.toCharArray())
+        assertNotNull(report)
+        assertEquals(1, report!!.imported)
+        assertEquals(state, otherRepo.items.value.single().readingState)
     }
 
     @Test

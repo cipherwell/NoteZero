@@ -163,6 +163,41 @@ its PendingIntent is immutable and its receiver is not exported. The only effect
 is the same pending quick-capture request as the launcher shortcut, which is honoured only
 after a successful unlock.
 
+### 3.9.2 Books, readers and encrypted reading state (increment 10)
+
+**EPUB as attachments.** A `BOOK_FILE` item is the same `NZAT` blob class as a PDF or an image:
+the EPUB bytes are encrypted under the VMK with AAD bound to item id + kind, and the item title/
+author/language/bookmarks live inside the item envelope (`ItemCodec` v4). No plaintext cover,
+thumbnail or extracted chapter is ever written to disk: the EPUB is parsed in memory when the
+reader opens and `EpubDocument.close()` drops the archive bytes; decoded images live only in the
+compose state and are not cached.
+
+**Parser attack surface.** EPUB is a ZIP of XML from an untrusted file, so the engine is written
+fail-closed: bounded entry count/size/total, path traversal rejected, duplicate names first-wins,
+truncated archives rejected, XML external entities/DTDs disabled (XXE), no script/style/HTML
+execution, no CSS/network references, no `WebView`, no external resolver. Any malformed required
+part returns `null` (clean error, never a partial book); DRM (`META-INF/encryption.xml` /
+`rights.xml`) is refused with a non-secret message and no circumvention attempt. ZIP/XML caps and
+the 1,000-sample malformed-input test live in `book/` and `docs/EPUB-ENGINE.md`; the parser is
+pure JVM code with no Android I/O beyond the bytes handed to it.
+
+**Reading state.** Position, fraction, total, bookmarks and book author/language are **content**:
+they live inside the GCM item envelope (payload v4), are repository-owned like attachments and
+the lock flag, and are never present in a plaintext Room column. A stale reader autosave cannot
+roll them back; a locked vault cannot read or write them (`saveReadingState` returns false).
+They travel with backup v2 inside the same ciphertext.
+
+**Library and import.** The shelf lists only decrypted, unlocked documents; locked+unverified
+items are filtered exactly like the code workspace. Import goes through SAF, is bracketed with
+the external-activity API, re-checks the vault is unlocked after the picker returns, and rejects
+unsupported/DRM/corrupt files by removing the placeholder item and showing a static message.
+Neither the picker response nor any title/URI is logged. The MIME filter is deliberately generic
+(`*/*`) because providers report EPUB types inconsistently; validation is the parser/viewer, not
+the picker.
+
+**Reader settings.** Font size/line spacing/margins/theme are non-secret preferences in
+app-private SharedPreferences (clamped); they contain no document content.
+
 ### 3.9.1 Attachment boundaries
 
 | Attack | Mitigation | Residual |
@@ -184,8 +219,9 @@ guarantees; screenshots/clipboard of secrets; fail-closed parsing of corrupted d
 **Out of scope for Phase 1:** compromised OS/firmware with kernel or TEE compromise;
 physical attacks (cold boot, chip-off, evil maid), power/EM side channels; malicious
 accessibility services; camera-based observation; coercion/"$5 wrench"; multi-user or
-shared-device vaults; drawing/handwriting (still out of scope); code editor LSP/AI (none
-exists by design); cloud sync (none exists by design).
+shared-device vaults; PDF ink/annotation editing and true PDF text-object editing (planned,
+not shipped); MOBI/AZW3/KFX parsing or DRM circumvention (not shipped); code editor LSP/AI
+(none exists by design); cloud sync, OPDS or online book catalogues (none exist by design).
 
 **Attachments are no longer an unscoped Phase-4 item**: blob storage, quotas, AAD binding,
 SHA-256-on-read, path-traversal guards and backup restore shipped in Phase 4/5. Their asset
@@ -214,6 +250,10 @@ detailed per-blob design in `docs/ATTACHMENTS.md` §9 (audit D4).
 | Decrypted editor content does not outlive the session | `EditorViewModel`/`CodeEditorViewModel` (Activity-scoped) observe `status` + `verifiedLockedIds` and wipe the draft, file name, undo/redo stacks and find state on lock or re-arm; a new session reloads from the index | `EditorViewModelTest.lock while the editor is open drops the draft and the undo history`, `CodeEditorViewModelTest.lock while the code editor is open drops the source and the undo history` |
 | Auto-lock cannot crash the UI | UI mutation coroutines convert the `IllegalStateException` of a lost lock race into non-secret refresh/cleared state | `NotesViewModelTest.a mutation that loses the auto-lock race…`, `CodeWorkspaceViewModelTest.a file mutation that loses the auto-lock race…` |
 | Locked code files cannot be opened through the editor | `CodeEditorScreen` gate before the ViewModel (defence in depth behind the workspace filter) | `CodeEditorLockedGateTest` |
+| Reading state (position/bookmarks/book metadata) is encrypted content only | `ItemCodec` payload v4 inside the item AEAD; repository-owned; no plaintext column | `PayloadCodecTest`, `EncryptedNoteRepositoryTest.readingStateIsPersistedEncryptedAndRepositoryOwned` |
+| A locked vault cannot read or write reading state | `saveReadingState` returns false while locked; readers drop state on lock | `EncryptedNoteRepositoryTest`, reader UI lock-reset tests |
+| A malformed/hostile EPUB cannot crash or execute code | pure bounded ZIP/XML parser, XXE-off, no WebView/scripts, DRM refused, fuzz tests | `book.EpubSecurityTest`, `EpubLimitsTest`, `Epub3ParserTest`/`Epub2ParserTest` |
+| No plaintext book covers/chapters/thumbnails on disk | parse/decrypt in memory, no cache writes; `EpubDocument.close()` on dispose | code review + `EpubDocumentLifecycleTest`, reader dispose path |
 
 ---
 

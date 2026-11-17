@@ -4,6 +4,8 @@ import com.cipherwell.notezero.crypto.Encoding
 import com.cipherwell.notezero.model.AttachmentRef
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
+import com.cipherwell.notezero.model.ReadingBookmark
+import com.cipherwell.notezero.model.ReadingState
 
 /**
  * Versioned binary payload stored **inside** the AES-256-GCM item envelope.
@@ -18,7 +20,7 @@ import com.cipherwell.notezero.model.ItemKind
  * Encoding (all integers big-endian):
  * ```
  * magic        4 bytes  "NZIT"
- * envelope     1 byte   1, 2 or 3 (3 is written; 1 and 2 are still decoded)
+ * envelope     1 byte   1, 2, 3 or 4 (4 is written; 1-3 are still decoded)
  * kind         1 byte   ItemKind ordinal
  * flags        1 byte   bit0 folderId present, bit1 pinned, bit2 favourite, bit3 trashed
  * createdAt    8 bytes  i64 epoch millis
@@ -40,14 +42,26 @@ import com.cipherwell.notezero.model.ItemKind
  *   sha256    32 bytes  raw SHA-256 (lowercase hex in the model)
  * -- envelope version 3 appends the lock flag: --
  * locked       1 byte   0 = unlocked, 1 = locked (anything else is corrupt)
+ * -- envelope version 4 appends the encrypted reading state (books/PDFs): --
+ * hasState     1 byte   0 = none, 1 = present
+ * position     4 bytes  u32 chapter/page index (<= ReadingState.MAX_POSITION)
+ * fractionBits 4 bytes  u32 IEEE-754 float bits of the progress fraction (0.0..1.0)
+ * total        4 bytes  u32 chapters/pages count (0 = unknown, <= ReadingState.MAX_POSITION)
+ * metaFlags    1 byte   bit0 author present, bit1 language present
+ *   len        2 bytes  u16 UTF-8 bytes (<= ReadingState.MAX_METADATA_BYTES each)
+ * bookmarkCount 2 bytes u16 (<= ReadingState.MAX_BOOKMARKS)
+ *   position   4 bytes  u32
+ *   createdAt  8 bytes  i64 epoch millis (>= 0)
+ *   labelLen   2 bytes  u16 UTF-8 bytes (<= ReadingState.MAX_LABEL_BYTES)
  * ```
  * Version compatibility (no re-encryption/migration; the next save writes the newest
  * version): a version-1 payload has no attachment list and no lock byte and decodes to
  * `attachments = emptyList()`, `locked = false`; a version-2 payload keeps its attachment
  * list and decodes to `locked = false` (pre-lock vaults were never locked); a version-3
- * payload carries the lock flag. The lock flag is content — it lives inside the GCM
- * envelope, never in a plaintext Room column, and locking/unlocking does not change the
- * VMK or the AAD.
+ * payload carries the lock flag. Version 4 appends the reading state (position, progress,
+ * bookmarks, book author/language); a version-3- payload decodes to `readingState = null`.
+ * All of it is content — inside the GCM envelope, never in a plaintext Room column, and none of
+ * it changes the VMK or the AAD.
  *
  * Decoding fails closed: [decode] returns null on unknown magic/version/flags, truncation,
  * oversized fields, bad attachment metadata or trailing bytes. It never throws and never
@@ -56,10 +70,14 @@ import com.cipherwell.notezero.model.ItemKind
 object ItemCodec {
 
     /** Version written by this implementation. */
-    const val ENVELOPE_VERSION: Int = 3
+    const val ENVELOPE_VERSION: Int = 4
 
     /** Oldest payload version still accepted (pre-attachments vaults). */
     const val MIN_DECODE_VERSION: Int = 1
+
+    private const val META_AUTHOR = 0x01
+    private const val META_LANGUAGE = 0x02
+    private const val KNOWN_META_FLAGS = META_AUTHOR or META_LANGUAGE
 
     const val MAX_PAYLOAD_BYTES: Int = MAX_DECODED_PAYLOAD_BYTES
     const val MAX_TITLE_BYTES: Int = 8 * 1024
@@ -152,6 +170,52 @@ object ItemCodec {
             }
             // Envelope version 3 appends the lock flag (content: sealed by the GCM tag).
             u8(if (item.locked) 1 else 0)
+            // Envelope version 4 appends the encrypted reading state.
+            val state = item.readingState
+            if (state == null) {
+                u8(0)
+            } else {
+                require(state.position in 0..ReadingState.MAX_POSITION) { "reading position out of range" }
+                require(state.fraction.isFinite() && state.fraction in 0f..1f) {
+                    "reading fraction out of range"
+                }
+                require(state.bookmarks.size <= ReadingState.MAX_BOOKMARKS) { "too many bookmarks" }
+                require(state.total in 0..ReadingState.MAX_POSITION) { "reading total out of range" }
+                u8(1)
+                u32(state.position.toLong())
+                u32(state.fraction.toRawBits().toLong() and 0xFFFFFFFFL)
+                u32(state.total.toLong())
+                var metaFlags = 0
+                val authorBytes = state.author?.toByteArray(Charsets.UTF_8)
+                if (authorBytes != null) metaFlags = metaFlags or META_AUTHOR
+                val languageBytes = state.language?.toByteArray(Charsets.UTF_8)
+                if (languageBytes != null) metaFlags = metaFlags or META_LANGUAGE
+                u8(metaFlags)
+                if (authorBytes != null) {
+                    require(authorBytes.size <= ReadingState.MAX_METADATA_BYTES) {
+                        "book author exceeds limit"
+                    }
+                    lenPrefixedU16(authorBytes, ReadingState.MAX_METADATA_BYTES)
+                }
+                if (languageBytes != null) {
+                    require(languageBytes.size <= ReadingState.MAX_METADATA_BYTES) {
+                        "book language exceeds limit"
+                    }
+                    lenPrefixedU16(languageBytes, ReadingState.MAX_METADATA_BYTES)
+                }
+                u16(state.bookmarks.size)
+                for (bookmark in state.bookmarks) {
+                    require(bookmark.position in 0..ReadingState.MAX_POSITION) {
+                        "bookmark position out of range"
+                    }
+                    require(bookmark.createdAt >= 0L) { "bookmark createdAt out of range" }
+                    val label = bookmark.label.toByteArray(Charsets.UTF_8)
+                    require(label.size <= ReadingState.MAX_LABEL_BYTES) { "bookmark label exceeds limit" }
+                    u32(bookmark.position.toLong())
+                    u64(bookmark.createdAt)
+                    lenPrefixedU16(label, ReadingState.MAX_LABEL_BYTES)
+                }
+            }
         }.toByteArray()
     }
 
@@ -221,6 +285,15 @@ object ItemCodec {
             } else {
                 false
             }
+            val readingState = if (envelopeVersion >= 4) {
+                when (reader.u8()) {
+                    0 -> null
+                    1 -> decodeReadingState(reader) ?: return null
+                    else -> return null
+                }
+            } else {
+                null
+            }
             reader.requireFullyConsumed()
             Item(
                 id = id,
@@ -237,10 +310,58 @@ object ItemCodec {
                 version = version,
                 attachments = attachments,
                 locked = locked,
+                readingState = readingState,
             )
         } catch (t: Throwable) {
             null
         }
+    }
+
+    /** Decodes the v4 reading state; null when any field is out of its documented bounds. */
+    private fun decodeReadingState(reader: BinaryReader): ReadingState? {
+        val position = reader.u32()
+        if (position > ReadingState.MAX_POSITION) return null
+        val fraction = Float.fromBits(reader.u32().toInt())
+        if (!fraction.isFinite() || fraction !in 0f..1f) return null
+        val total = reader.u32()
+        if (total > ReadingState.MAX_POSITION) return null
+        val metaFlags = reader.u8()
+        if (metaFlags and KNOWN_META_FLAGS.inv() and 0xFF != 0) return null
+        val author = if (metaFlags and META_AUTHOR != 0) {
+            reader.utf8LenPrefixedU16(ReadingState.MAX_METADATA_BYTES)
+        } else {
+            null
+        }
+        val language = if (metaFlags and META_LANGUAGE != 0) {
+            reader.utf8LenPrefixedU16(ReadingState.MAX_METADATA_BYTES)
+        } else {
+            null
+        }
+        val bookmarkCount = reader.u16()
+        if (bookmarkCount > ReadingState.MAX_BOOKMARKS) return null
+        val bookmarks = ArrayList<ReadingBookmark>(bookmarkCount)
+        repeat(bookmarkCount) {
+            val bookmarkPosition = reader.u32()
+            if (bookmarkPosition > ReadingState.MAX_POSITION) return null
+            val createdAt = reader.u64()
+            if (createdAt < 0L) return null
+            val label = reader.utf8LenPrefixedU16(ReadingState.MAX_LABEL_BYTES)
+            bookmarks.add(
+                ReadingBookmark(
+                    position = bookmarkPosition.toInt(),
+                    label = label,
+                    createdAt = createdAt,
+                ),
+            )
+        }
+        return ReadingState(
+            position = position.toInt(),
+            fraction = fraction,
+            total = total.toInt(),
+            bookmarks = bookmarks,
+            author = author,
+            language = language,
+        )
     }
 
     /** Strict lowercase-hex SHA-256 decoding; null when it is not exactly 64 hex chars. */
