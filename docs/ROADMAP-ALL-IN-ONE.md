@@ -30,7 +30,7 @@ Deliver:
 5. Security proof: parser hardening (bounded ZIP/XML, XXE off, DRM refusal, fuzz-ish tests), no
    plaintext cover/thumbnail cache, FLAG_SECURE, library titles behind lock; reproducible artifact.
 
-## Phase 11 — PDF annotation & document editing
+## Phase 11 — PDF annotation & document editing (annotation layer + flattened export shipped, increment 11)
 
 - Ink and highlighter layer over PDF pages, rectangle/underline highlights, text notes/sticky notes,
   colour palette + width, eraser, undo/redo; all stored encrypted (`ReadingState`/new annotation
@@ -43,6 +43,11 @@ Deliver:
   in-memory, no-cache rules.
 - Tests: annotation model/layer codecs, renderer round trips, flattened export validated with
   external tools, instrumented real-PdfRenderer acceptance, device QA with a real PDF.
+- **Shipped in increment 11:** encrypted annotation layer (ink/highlighter/rectangle highlights/
+  sticky notes/eraser/undo-redo, payload v5), annotate-mode UI, flattened annotated-copy export,
+  codec/fuzz/UI/instrumented tests, docs + VERIFICATION §16. **Still queued:** page
+  thumbnails, rotate/delete/insert/reorder page operations, text-layer search/extraction (needs a
+  vetted PDF text engine) and rendering sticky-note text into flattened copies.
 
 ## Phase 12 — Drawing studio
 

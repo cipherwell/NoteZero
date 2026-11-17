@@ -12,6 +12,7 @@ import com.cipherwell.notezero.model.AttachmentRef
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
+import com.cipherwell.notezero.model.PdfAnnotations
 import com.cipherwell.notezero.model.ReadingState
 import com.cipherwell.notezero.model.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -225,12 +226,29 @@ class FakeNoteRepository : NoteRepository {
             // editor autosave can never unlock a locked note.
             locked = existing?.locked ?: item.locked,
             readingState = existing?.readingState ?: item.readingState,
+            pdfAnnotations = existing?.pdfAnnotations ?: item.pdfAnnotations,
             updatedAt = nextClock(),
             version = maxOf(item.version, existing?.version ?: 0L) + 1,
         )
         _items.value = _items.value.map { if (it.id == saved.id) saved else it }
         savedItems += saved
         return saved
+    }
+
+    override suspend fun savePdfAnnotations(itemId: String, annotations: PdfAnnotations?): Boolean {
+        if (_status.value != VaultStatus.UNLOCKED) return false
+        val existing = itemById(itemId) ?: return false
+        _items.value = _items.value.map {
+            if (it.id == existing.id) {
+                it.copy(
+                    pdfAnnotations = annotations?.takeUnless { layer -> layer.isEmpty },
+                    updatedAt = nextClock(),
+                )
+            } else {
+                it
+            }
+        }
+        return true
     }
 
     override suspend fun saveReadingState(itemId: String, state: ReadingState): Boolean {

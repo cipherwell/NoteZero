@@ -1,6 +1,7 @@
 package com.cipherwell.notezero.ui.pdf
 
 import android.graphics.Bitmap
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -13,9 +14,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -28,16 +30,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -56,32 +57,60 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import com.cipherwell.notezero.R
 import com.cipherwell.notezero.data.NoteRepository
+import com.cipherwell.notezero.data.VaultStatus
 import com.cipherwell.notezero.model.BlankPdf
+import com.cipherwell.notezero.model.PdfAnnotations
+import com.cipherwell.notezero.model.PdfInkKind
+import com.cipherwell.notezero.model.PdfPoint
 import com.cipherwell.notezero.model.ReadingBookmark
 import com.cipherwell.notezero.model.ReadingState
 import com.cipherwell.notezero.ui.attachments.AttachmentController
 import com.cipherwell.notezero.ui.components.common.NzIconButton
 import com.cipherwell.notezero.ui.theme.NoteZeroSpacing
 import com.cipherwell.notezero.ui.theme.NoteZeroType
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/** Which plaintext egress the user confirmed in the export-choice dialog. */
+private enum class PdfExportKind { ORIGINAL, ANNOTATED }
+
+/**
+ * Annotation callbacks of one rendered page, grouped so the page composable stays readable.
+ * Recreated on recomposition; the overlay reads the latest instance through `rememberUpdatedState`.
+ */
+private class PdfAnnotationActions(
+    val onStroke: (Int, PdfInkKind, List<PdfPoint>) -> Unit,
+    val onHighlight: (Int, NormalisedRect) -> Unit,
+    val onErase: (Int, Float, Float, Float) -> Unit,
+    val onNewNote: (Int, Float, Float) -> Unit,
+    val onOpenNote: (Int) -> Unit,
+)
 
 /**
  * Full-screen viewer for an encrypted PDF item.
  *
  * The PDF bytes are decrypted from the vault, rasterised to in-memory bitmaps and shown on a
  * paged list; nothing is cached and no file survives viewing (see [AndroidPdfPageRenderer] for
- * the bounded ephemeral-render-file trade-off). "Export decrypted copy" is the only plaintext
- * egress and goes through the same SAF `CreateDocument` + explicit-warning flow as attachment
- * export, bracketed by [AttachmentController] so the picker does not lock the vault mid-export.
+ * the bounded ephemeral-render-file trade-off). Annotations are edited as a normalised layer
+ * (never touching the original PDF) and persisted encrypted through
+ * [NoteRepository.savePdfAnnotations]; only an explicit export turns them into plaintext.
+ *
+ * "Export decrypted copy" is the only plaintext egress and goes through the same SAF
+ * `CreateDocument` + explicit-warning flow as attachment export, bracketed by
+ * [AttachmentController] so the picker does not lock the vault mid-export. When annotations
+ * exist the user first chooses the untouched original or a flattened (rasterised) copy; the
+ * flattened copy is rendered in memory by [PdfFlattenedExporter] and written through
+ * [PdfExportGateway], with a final vault-unlocked re-check before any byte is written.
  *
  * A vault lock replaces this screen with the unlock UI at the shell level; bitmaps are
  * recycled as soon as the composition leaves.
@@ -93,6 +122,9 @@ fun PdfViewerScreen(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
     renderer: PdfPageRenderer = remember { AndroidPdfPageRenderer() },
+    flattenedExporter: PdfFlattenedExporter = remember { AndroidPdfFlattenedExporter() },
+    exportGateway: PdfExportGateway = rememberSafPdfExportGateway(),
+    exportDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
     val context = LocalContext.current
     val items by repository.items.collectAsStateWithLifecycle()
@@ -105,7 +137,16 @@ fun PdfViewerScreen(
     var pages by remember(itemId) { mutableStateOf(PdfPages(emptyList(), 0)) }
     var failed by remember(itemId) { mutableStateOf(false) }
     var notice by remember(itemId) { mutableStateOf<String?>(null) }
-    var showExportWarning by remember(itemId) { mutableStateOf(false) }
+    var showExportChoice by remember(itemId) { mutableStateOf(false) }
+    var pendingExport by remember(itemId) { mutableStateOf<PdfExportKind?>(null) }
+
+    val editor = remember(itemId) { PdfAnnotationEditor() }
+    var annotationsLoaded by remember(itemId) { mutableStateOf(false) }
+    var annotateMode by remember(itemId) { mutableStateOf(false) }
+    var tool by remember(itemId) { mutableStateOf(PdfAnnotationTool.INK) }
+    var colorIndex by remember(itemId) { mutableStateOf(0) }
+    var widthIndex by remember(itemId) { mutableStateOf(1) }
+    var noteDraft by remember(itemId) { mutableStateOf<PdfNoteDraft?>(null) }
 
     val readingState = item?.readingState
     val listState = rememberLazyListState(
@@ -137,6 +178,51 @@ fun PdfViewerScreen(
     val exportWrittenNotice = stringResource(R.string.attach_export_written)
     val exportFailedNotice = stringResource(R.string.attach_export_failed)
     val exportLockedNotice = stringResource(R.string.attach_export_locked)
+    val annotatedWrittenNotice = stringResource(R.string.pdf_export_annotated_written)
+    val annotatedFailedNotice = stringResource(R.string.pdf_export_annotated_failed)
+
+    fun persistAnnotations() {
+        val layer = editor.value
+        val payload = layer.takeUnless { it.isEmpty }
+        scope.launch { runCatching { repository.savePdfAnnotations(itemId, payload) } }
+    }
+
+    // Load the stored encrypted layer once, as soon as the item (and its attachments) exist.
+    LaunchedEffect(itemId, item?.pdfAnnotations) {
+        if (annotationsLoaded) return@LaunchedEffect
+        if (item != null) {
+            editor.load(item.pdfAnnotations)
+            annotationsLoaded = true
+        }
+    }
+
+    val annotationActions = PdfAnnotationActions(
+        onStroke = { page, kind, points ->
+            if (editor.addStroke(page, kind, colorIndex, widthIndex, points)) persistAnnotations()
+        },
+        onHighlight = { page, rect ->
+            if (editor.addHighlight(page, rect.left, rect.top, rect.right, rect.bottom, colorIndex)) {
+                persistAnnotations()
+            }
+        },
+        onErase = { page, x, y, tolerance ->
+            if (editor.eraseAt(page, x, y, tolerance)) persistAnnotations()
+        },
+        onNewNote = { page, x, y ->
+            noteDraft = PdfNoteDraft(page = page, x = x, y = y, text = "", existingIndex = null)
+        },
+        onOpenNote = { index ->
+            editor.value.notes.getOrNull(index)?.let { note ->
+                noteDraft = PdfNoteDraft(
+                    page = note.page,
+                    x = note.x,
+                    y = note.y,
+                    text = note.text,
+                    existingIndex = index,
+                )
+            }
+        },
+    )
 
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument(BlankPdf.MIME_TYPE),
@@ -155,6 +241,49 @@ fun PdfViewerScreen(
                     notice = if (written) exportWrittenNotice else exportFailedNotice
                 },
             )
+        }
+    }
+
+    fun writeAnnotatedExport(uri: Uri) {
+        scope.launch {
+            // CPU work off the main thread; the bytes exist only in this coroutine.
+            val layer = editor.value
+            val bytes = withContext(exportDispatcher) { flattenedExporter.export(pages, layer) }
+            val stillUnlocked = repository.status.value == VaultStatus.UNLOCKED &&
+                repository.items.value.any { it.id == itemId }
+            if (bytes == null) {
+                notice = annotatedFailedNotice
+                return@launch
+            }
+            if (!stillUnlocked) {
+                // Locked while the picker was open: drop the plaintext, never write it.
+                notice = exportLockedNotice
+                return@launch
+            }
+            val written = runCatching { exportGateway.write(uri, bytes) }.getOrDefault(false)
+            notice = if (written) annotatedWrittenNotice else annotatedFailedNotice
+        }
+    }
+
+    fun onAnnotatedDestinationPicked(uri: Uri?) {
+        // Ends the external-activity bracket started by controller.beginExport().
+        controller.onExportPickerCancelled()
+        if (uri == null) {
+            notice = exportCancelledNotice
+        } else {
+            writeAnnotatedExport(uri)
+        }
+    }
+
+    fun launchAnnotatedExport() {
+        val launched = runCatching {
+            exportGateway.pickDestination(annotatedPdfFileName(fileLabel)) { uri ->
+                onAnnotatedDestinationPicked(uri)
+            }
+        }
+        if (launched.isFailure) {
+            controller.onExportPickerCancelled()
+            notice = annotatedFailedNotice
         }
     }
 
@@ -206,7 +335,17 @@ fun PdfViewerScreen(
         onDispose { owned.forEach { it.recycle() } }
     }
 
-    BackHandler { onClose() }
+    // Back first leaves annotate mode so a drawing gesture can never close the document by
+    // accident; a second Back (or the toolbar arrow outside annotate mode) closes the viewer.
+    fun handleBack() {
+        if (annotateMode) {
+            annotateMode = false
+        } else {
+            onClose()
+        }
+    }
+
+    BackHandler { handleBack() }
 
     Box(
         modifier = modifier
@@ -224,7 +363,7 @@ fun PdfViewerScreen(
                 NzIconButton(
                     icon = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = stringResource(R.string.cd_pdf_back),
-                    onClick = onClose,
+                    onClick = { handleBack() },
                     modifier = Modifier.testTag("pdf_back"),
                 )
                 Column(
@@ -250,26 +389,49 @@ fun PdfViewerScreen(
                     }
                 }
                 if (!failed && pages.bitmaps.isNotEmpty()) {
-                    NzIconButton(
-                        icon = Icons.Filled.Add,
-                        contentDescription = stringResource(R.string.pdf_bookmark_add),
-                        onClick = {
-                            bookmarkLabel = ""
-                            showAddBookmark = true
-                        },
-                        modifier = Modifier.testTag("pdf_bookmark_add"),
-                    )
-                    NzIconButton(
-                        icon = Icons.Filled.List,
-                        contentDescription = stringResource(R.string.pdf_reader_bookmarks),
-                        onClick = { showBookmarks = true },
-                        modifier = Modifier.testTag("pdf_bookmarks_open"),
-                    )
+                    if (annotateMode) {
+                        TextButton(
+                            onClick = { annotateMode = false },
+                            modifier = Modifier
+                                .heightIn(min = NoteZeroSpacing.minTarget)
+                                .testTag("pdf_annotate_done"),
+                        ) {
+                            Text(stringResource(R.string.pdf_annotate_done), style = NoteZeroType.Button)
+                        }
+                    } else {
+                        NzIconButton(
+                            icon = Icons.Filled.Edit,
+                            contentDescription = stringResource(R.string.cd_pdf_annotate),
+                            onClick = { annotateMode = true },
+                            modifier = Modifier.testTag("pdf_annotate_toggle"),
+                        )
+                        NzIconButton(
+                            icon = Icons.Filled.Add,
+                            contentDescription = stringResource(R.string.pdf_bookmark_add),
+                            onClick = {
+                                bookmarkLabel = ""
+                                showAddBookmark = true
+                            },
+                            modifier = Modifier.testTag("pdf_bookmark_add"),
+                        )
+                        NzIconButton(
+                            icon = Icons.Filled.List,
+                            contentDescription = stringResource(R.string.pdf_reader_bookmarks),
+                            onClick = { showBookmarks = true },
+                            modifier = Modifier.testTag("pdf_bookmarks_open"),
+                        )
+                    }
                 }
                 NzIconButton(
                     icon = Icons.Filled.Share,
                     contentDescription = stringResource(R.string.cd_pdf_export),
-                    onClick = { showExportWarning = true },
+                    onClick = {
+                        if (editor.value.isEmpty) {
+                            pendingExport = PdfExportKind.ORIGINAL
+                        } else {
+                            showExportChoice = true
+                        }
+                    },
                     modifier = Modifier.testTag("pdf_export"),
                 )
             }
@@ -321,81 +483,193 @@ fun PdfViewerScreen(
                 )
             }
 
-            when {
-                loading -> Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator()
-                        Spacer(Modifier.height(NoteZeroSpacing.m))
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                when {
+                    loading -> Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator()
+                            Spacer(Modifier.height(NoteZeroSpacing.m))
+                            Text(
+                                text = stringResource(R.string.pdf_loading),
+                                style = NoteZeroType.Caption,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+
+                    failed || pages.bitmaps.isEmpty() -> Text(
+                        text = stringResource(R.string.pdf_error),
+                        style = NoteZeroType.Body,
+                        color = com.cipherwell.notezero.ui.theme.LocalNoteZeroColors.current.dangerText,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(NoteZeroSpacing.l)
+                            .semantics { liveRegion = LiveRegionMode.Polite }
+                            .testTag("pdf_error"),
+                    )
+
+                    else -> LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag("pdf_pages"),
+                        contentPadding = PaddingValues(
+                            start = NoteZeroSpacing.l,
+                            end = NoteZeroSpacing.l,
+                            top = NoteZeroSpacing.s,
+                            bottom = NoteZeroSpacing.l + 48.dp,
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(NoteZeroSpacing.m),
+                        userScrollEnabled = !annotateMode,
+                    ) {
+                        itemsIndexed(
+                            pages.bitmaps,
+                            key = { index: Int, _: Bitmap -> "pdf_page_$index" },
+                        ) { index, bitmap ->
+                            PageImage(
+                                bitmap = bitmap,
+                                index = index,
+                                total = pages.totalPages,
+                                annotations = editor.value,
+                                annotateMode = annotateMode,
+                                tool = tool,
+                                colorIndex = colorIndex,
+                                widthIndex = widthIndex,
+                                actions = annotationActions,
+                            )
+                        }
+                        if (pages.isTruncated) {
+                            item(key = "pdf_capped") {
+                                Text(
+                                    text = stringResource(R.string.pdf_pages_capped, pages.renderedPages),
+                                    style = NoteZeroType.Caption,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.testTag("pdf_pages_capped"),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (annotateMode && !failed && pages.bitmaps.isNotEmpty()) {
+                PdfAnnotationPaletteBar(
+                    tool = tool,
+                    colorIndex = colorIndex,
+                    widthIndex = widthIndex,
+                    canUndo = editor.canUndo,
+                    canRedo = editor.canRedo,
+                    onToolSelected = { tool = it },
+                    onColorSelected = { colorIndex = it },
+                    onWidthSelected = { widthIndex = it },
+                    onUndo = {
+                        if (editor.undo()) persistAnnotations()
+                    },
+                    onRedo = {
+                        if (editor.redo()) persistAnnotations()
+                    },
+                    modifier = Modifier.padding(
+                        start = NoteZeroSpacing.s,
+                        end = NoteZeroSpacing.s,
+                        bottom = NoteZeroSpacing.xs,
+                    ),
+                )
+            }
+        }
+    }
+
+    if (showExportChoice) {
+        AlertDialog(
+            onDismissRequest = { showExportChoice = false },
+            modifier = Modifier.testTag("pdf_export_choice"),
+            title = { Text(stringResource(R.string.pdf_export_title), style = NoteZeroType.Heading) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(NoteZeroSpacing.xs)) {
+                    TextButton(
+                        onClick = {
+                            showExportChoice = false
+                            pendingExport = PdfExportKind.ORIGINAL
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = NoteZeroSpacing.minTarget)
+                            .testTag("pdf_export_original"),
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Text(stringResource(R.string.pdf_export_original), style = NoteZeroType.Callout)
+                            Text(
+                                text = stringResource(R.string.pdf_export_original_desc),
+                                style = NoteZeroType.Caption,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    TextButton(
+                        onClick = {
+                            showExportChoice = false
+                            pendingExport = PdfExportKind.ANNOTATED
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = NoteZeroSpacing.minTarget)
+                            .testTag("pdf_export_annotated"),
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Text(stringResource(R.string.pdf_export_annotated), style = NoteZeroType.Callout)
+                            Text(
+                                text = stringResource(R.string.pdf_export_annotated_desc),
+                                style = NoteZeroType.Caption,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(
+                    onClick = { showExportChoice = false },
+                    modifier = Modifier.testTag("pdf_export_choice_cancel"),
+                ) { Text(stringResource(R.string.common_cancel), style = NoteZeroType.Button) }
+            },
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            shape = com.cipherwell.notezero.ui.theme.NoteZeroShapes.sheet,
+        )
+    }
+
+    pendingExport?.let { kind ->
+        AlertDialog(
+            onDismissRequest = { pendingExport = null },
+            modifier = Modifier.testTag("pdf_export_warning"),
+            title = { Text(stringResource(R.string.attach_export_warning_title), style = NoteZeroType.Heading) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(NoteZeroSpacing.s)) {
+                    Text(stringResource(R.string.attach_export_warning_message), style = NoteZeroType.Body)
+                    if (kind == PdfExportKind.ANNOTATED) {
                         Text(
-                            text = stringResource(R.string.pdf_loading),
+                            text = stringResource(R.string.pdf_export_annotated_desc),
                             style = NoteZeroType.Caption,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
-
-                failed || pages.bitmaps.isEmpty() -> Text(
-                    text = stringResource(R.string.pdf_error),
-                    style = NoteZeroType.Body,
-                    color = com.cipherwell.notezero.ui.theme.LocalNoteZeroColors.current.dangerText,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(NoteZeroSpacing.l)
-                        .semantics { liveRegion = LiveRegionMode.Polite }
-                        .testTag("pdf_error"),
-                )
-
-                else -> LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .testTag("pdf_pages"),
-                    contentPadding = PaddingValues(
-                        start = NoteZeroSpacing.l,
-                        end = NoteZeroSpacing.l,
-                        top = NoteZeroSpacing.s,
-                        bottom = NoteZeroSpacing.l + 48.dp,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(NoteZeroSpacing.m),
-                ) {
-                    itemsIndexed(pages.bitmaps, key = { index: Int, _: Bitmap -> "pdf_page_$index" }) { index, bitmap ->
-                        PageImage(
-                            bitmap = bitmap,
-                            index = index,
-                            total = pages.totalPages,
-                        )
-                    }
-                    if (pages.isTruncated) {
-                        item(key = "pdf_capped") {
-                            Text(
-                                text = stringResource(R.string.pdf_pages_capped, pages.renderedPages),
-                                style = NoteZeroType.Caption,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.testTag("pdf_pages_capped"),
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if (showExportWarning) {
-        AlertDialog(
-            onDismissRequest = { showExportWarning = false },
-            modifier = Modifier.testTag("pdf_export_warning"),
-            title = { Text(stringResource(R.string.attach_export_warning_title), style = NoteZeroType.Heading) },
-            text = { Text(stringResource(R.string.attach_export_warning_message), style = NoteZeroType.Body) },
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        showExportWarning = false
+                        pendingExport = null
                         if (controller.beginExport()) {
-                            runCatching { exportLauncher.launch(fileLabel) }
-                                .onFailure { controller.onExportPickerCancelled() }
+                            when (kind) {
+                                PdfExportKind.ORIGINAL -> {
+                                    runCatching { exportLauncher.launch(fileLabel) }
+                                        .onFailure { controller.onExportPickerCancelled() }
+                                }
+
+                                PdfExportKind.ANNOTATED -> launchAnnotatedExport()
+                            }
                         } else {
                             notice = exportLockedNotice
                         }
@@ -409,7 +683,7 @@ fun PdfViewerScreen(
             },
             dismissButton = {
                 TextButton(
-                    onClick = { showExportWarning = false },
+                    onClick = { pendingExport = null },
                     modifier = Modifier
                         .heightIn(min = NoteZeroSpacing.minTarget)
                         .testTag("pdf_export_cancel"),
@@ -419,6 +693,28 @@ fun PdfViewerScreen(
             },
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             shape = com.cipherwell.notezero.ui.theme.NoteZeroShapes.sheet,
+        )
+    }
+
+    noteDraft?.let { draft ->
+        PdfNoteDialog(
+            draft = draft,
+            onDismiss = { noteDraft = null },
+            onSave = { text ->
+                val saved = if (draft.existingIndex != null) {
+                    editor.updateNote(draft.existingIndex, text)
+                } else {
+                    editor.addNote(draft.page, draft.x, draft.y, text) != null
+                }
+                if (saved) persistAnnotations()
+                noteDraft = null
+            },
+            onDelete = {
+                if (draft.existingIndex != null && editor.deleteNote(draft.existingIndex)) {
+                    persistAnnotations()
+                }
+                noteDraft = null
+            },
         )
     }
 
@@ -612,17 +908,47 @@ fun PdfViewerScreen(
 }
 
 @Composable
-private fun PageImage(bitmap: Bitmap, index: Int, total: Int) {
+private fun PageImage(
+    bitmap: Bitmap,
+    index: Int,
+    total: Int,
+    annotations: PdfAnnotations,
+    annotateMode: Boolean,
+    tool: PdfAnnotationTool,
+    colorIndex: Int,
+    widthIndex: Int,
+    actions: PdfAnnotationActions,
+) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        Image(
-            bitmap = bitmap.asImageBitmap(),
-            contentDescription = stringResource(R.string.pdf_page_indicator, index + 1, total),
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .aspectRatio(bitmap.width.toFloat() / bitmap.height.toFloat())
                 .clip(RoundedCornerShape(NoteZeroSpacing.s))
-                .testTag("pdf_page")
-                .background(MaterialTheme.colorScheme.surfaceContainerLowest),
-        )
+                .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+                .testTag("pdf_page_frame"),
+        ) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = stringResource(R.string.pdf_page_indicator, index + 1, total),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("pdf_page"),
+            )
+            PdfAnnotationOverlay(
+                page = index,
+                annotations = annotations,
+                annotateMode = annotateMode,
+                tool = tool,
+                colorIndex = colorIndex,
+                widthIndex = widthIndex,
+                onStroke = actions.onStroke,
+                onHighlight = actions.onHighlight,
+                onErase = actions.onErase,
+                onNewNote = actions.onNewNote,
+                onOpenNote = actions.onOpenNote,
+            )
+        }
         Spacer(Modifier.height(NoteZeroSpacing.xxs))
         Text(
             text = stringResource(R.string.pdf_page_indicator, index + 1, total),

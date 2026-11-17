@@ -163,6 +163,33 @@ its PendingIntent is immutable and its receiver is not exported. The only effect
 is the same pending quick-capture request as the launcher shortcut, which is honoured only
 after a successful unlock.
 
+### 3.9.3 PDF annotation layer and flattened export (increment 11)
+
+**Annotation layer as content.** Ink/highlighter strokes, rectangle highlights and sticky notes
+are stored inside the item's AES-256-GCM envelope (`ItemCodec` payload v5 -> `PdfAnnotationCodec`
+"NZPA" v1). The geometry is normalised and quantised, so it is resolution-independent and bounded
+(<=2,000 strokes, <=100,000 points, <=1,000 highlights, <=500 notes, <=4 MiB). The codec is
+fuzz-tested and fails closed (null) on truncation, out-of-range counts/indices, trailing bytes or
+oversized blobs; the model constructor validates the same bounds before anything is encoded. It is
+repository-owned exactly like reading state and attachments (`savePdfAnnotations` only; `saveItem`
+preserves it; null/empty clears), never appears in a plaintext Room column, is unreadable while
+locked, travels inside backup v2, and annotation text is never logged.
+
+**Rendering/export boundary.** Annotations are drawn as a Compose canvas overlay from normalised
+coordinates; nothing is written to disk. The **flattened annotated copy** is the only new
+plaintext-egress path: it is reachable only through the existing explicit UNENCRYPTED warning and
+SAF `CreateDocument`, renders in memory via `android.graphics.pdf` (no temp file, page bitmaps
+already bounded by the viewer), re-checks the vault is unlocked/owned before writing, and drops
+pending bytes on lock. It is a rasterised copy (text not selectable, sticky-note markers only) —
+documented in the UI copy and `docs/PDF-ANNOTATION-UI.md`. The original encrypted PDF bytes are
+never mutated by annotation or export; no page-operations/text-object editing exists yet.
+
+**Bounds/robustness.** The exporter returns null (never throws) for empty/mismatched input,
+recycled bitmaps, platform errors or OOM, hard-fails above 32 pages instead of silently truncating,
+and ignores annotations on pages that were not rendered. Annotate mode is explicit (scroll locked,
+Back exits the mode first) so a drawing gesture can never trigger an accidental navigation/lock
+side effect; the tool palette uses design tokens only.
+
 ### 3.9.2 Books, readers and encrypted reading state (increment 10)
 
 **EPUB as attachments.** A `BOOK_FILE` item is the same `NZAT` blob class as a PDF or an image:
@@ -254,6 +281,10 @@ detailed per-blob design in `docs/ATTACHMENTS.md` §9 (audit D4).
 | A locked vault cannot read or write reading state | `saveReadingState` returns false while locked; readers drop state on lock | `EncryptedNoteRepositoryTest`, reader UI lock-reset tests |
 | A malformed/hostile EPUB cannot crash or execute code | pure bounded ZIP/XML parser, XXE-off, no WebView/scripts, DRM refused, fuzz tests | `book.EpubSecurityTest`, `EpubLimitsTest`, `Epub3ParserTest`/`Epub2ParserTest` |
 | No plaintext book covers/chapters/thumbnails on disk | parse/decrypt in memory, no cache writes; `EpubDocument.close()` on dispose | code review + `EpubDocumentLifecycleTest`, reader dispose path |
+| PDF annotation layer is encrypted content only | `ItemCodec` v5 + `PdfAnnotationCodec` inside the AEAD; repository-owned; no plaintext column | `PdfAnnotationCodecTest`, `PayloadCodecTest`, `EncryptedNoteRepositoryTest.pdfAnnotationsArePersistedEncryptedAndRepositoryOwned` |
+| A locked vault cannot read/write annotations | `savePdfAnnotations` false while locked; readers drop state on lock | repository tests + UI lock-reset tests |
+| Hostile annotation payloads cannot crash/allocate unbounded | model/codec bounds, 1,000-sample fuzz, codec null-on-corruption, exporter null-on-error and 32-page cap | `PdfAnnotationCodecTest`, `PdfFlattenedExportInstrumentedTest` |
+| Flattened PDF export is the same explicit plaintext-egress class as MD/HTML/PDF export | UNENCRYPTED warning + SAF CreateDocument only; in-memory render; vault re-check; no temp file; page bytes bounded | `ui.pdf` export tests + device QA (`pdfinfo` A4 3 pages) |
 
 ---
 

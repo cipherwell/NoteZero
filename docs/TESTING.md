@@ -33,6 +33,17 @@ CI runs `assembleDebug`, `testDebugUnitTest`, and `check-offline.sh --gradle` on
 | `data.*` reading state | 6 | Payload v4 round-trip, v3 compatibility, bounds enforcement, repository persistence through lock/unlock, backup round-trip, no plaintext bookmark/author in Room ciphertext |
 | Instrumented E2E | 15 | Unchanged flows still pass with the new Library route; real Keystore/SAF/FLAG_SECURE coverage |
 
+## Increment-11 areas (PDF annotation + flattened export)
+
+| Area | Tests | What it proves |
+|---|---|---|
+| `data.PdfAnnotationCodecTest` | 6 | Round-trips, density cap, truncation/corruption/trailing bytes, 1,000-sample fuzz, empty layer |
+| `data.PayloadCodecTest` / `LockedPayloadCodecTest` / `encrypted repository` | 6 | Payload v5 round-trip, v4 compatibility, boundary-byte invariants, persist/preserve/locked-write-rejection/backup/no plaintext note text/clear |
+| `ui.pdf.PdfAnnotationScreenTest` | 14 | Annotate mode, palette tags, gestures create strokes/highlights/notes, persistence, export-choice gating |
+| `ui.pdf.PdfAnnotationEditorTest` | 16 | State machine: tools, undo/redo, eraser hit-tests, note edit/delete, bounds/fail-closed |
+| `ui.pdf.PdfAnnotationPaletteTest` | 8 | Token-derived colours/widths, index bounds, shared overlay/exporter palette |
+| Instrumented `PdfFlattenedExportInstrumentedTest` | 4 | Real `PdfDocument` output accepted by `PdfRenderer` with matching page count, hostile/oversized fail-closed, max-density export |
+
 ## Backup-flow tests (Phase-2 SAF gap)
 
 | Test | What it proves | Tooling |
@@ -73,7 +84,7 @@ Commands:
 
 | Suite | Command | Result |
 |---|---|---|
-| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **1068 tests / 0 failures / 0 errors / 0 skipped** (91 classes) |
+| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **1118 tests / 0 failures / 0 errors / 0 skipped** (95 classes) |
 | Instrumented (emulator) | `adb shell am instrument -w com.cipherwell.notezero.test/androidx.test.runner.AndroidJUnitRunner` | **OK (15 tests)** incl. `NotePdfRenderInstrumentedTest`, `VaultFlowE2ETest` (notes + backup settings + code workspace + create sheet + PDF) and a real-`PdfRenderer` instrumented test |
 | Offline guarantee | `./scripts/check-offline.sh --gradle` | exit 0 |
 | Release signing | `apksigner verify --print-certs app-release.apk` | NoteZero upload key SHA-256 `FA:CA:DD:67:…:92:78` |

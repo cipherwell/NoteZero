@@ -541,4 +541,33 @@
     <string name="pdf_page_invalid">Enter a page between 1 and %1$d.</string>
     <string name="pdf_page_actions">Page actions</string>
     <string name="pdf_reader_failed">This document could not be opened.</string>
+    <!-- PDF annotation editor -->
+    <string name="cd_pdf_annotate">Annotate</string>
+    <string name="pdf_annotate_done">Done</string>
+    <string name="pdf_annotate_hint">Draw on the page. Tap Done to scroll again.</string>
+    <string name="pdf_tool_ink">Ink</string>
+    <string name="pdf_tool_highlighter">Highlighter</string>
+    <string name="pdf_tool_rect">Highlight box</string>
+    <string name="pdf_tool_eraser">Eraser</string>
+    <string name="pdf_tool_note">Sticky note</string>
+    <string name="pdf_tool_undo">Undo</string>
+    <string name="pdf_tool_redo">Redo</string>
+    <string name="pdf_tool_colour">Colour</string>
+    <string name="pdf_tool_width">Width</string>
+    <string name="pdf_note_dialog">Sticky note</string>
+    <string name="pdf_note_text">Note text</string>
+    <string name="pdf_note_save">Save note</string>
+    <string name="pdf_note_placeholder">Write a note for this spot</string>
+    <string name="pdf_annotation_saved">Annotations saved.</string>
+    <string name="pdf_annotation_erased">Annotation removed.</string>
+    <string name="pdf_export_title">Export PDF</string>
+    <string name="pdf_export_original">Original document</string>
+    <string name="pdf_export_original_desc">The encrypted PDF exactly as imported.</string>
+    <string name="pdf_export_annotated">Annotated copy (flattened)</string>
+    <string name="pdf_export_annotated_desc">Renders the pages together with ink and highlights into a new PDF. The page content becomes an image, so text is no longer selectable. The original stays encrypted and unchanged.</string>
+    <string name="pdf_export_annotated_written">Annotated PDF written outside the vault.</string>
+    <string name="pdf_export_annotated_failed">The annotated PDF could not be written.</string>
+    <string name="pdf_annotation_empty">No annotations yet.</string>
+    <string name="pdf_annotation_count">%1$d annotations</string>
+
 </resources>

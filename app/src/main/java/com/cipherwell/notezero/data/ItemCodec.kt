@@ -4,6 +4,7 @@ import com.cipherwell.notezero.crypto.Encoding
 import com.cipherwell.notezero.model.AttachmentRef
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
+import com.cipherwell.notezero.model.PdfAnnotations
 import com.cipherwell.notezero.model.ReadingBookmark
 import com.cipherwell.notezero.model.ReadingState
 
@@ -20,7 +21,7 @@ import com.cipherwell.notezero.model.ReadingState
  * Encoding (all integers big-endian):
  * ```
  * magic        4 bytes  "NZIT"
- * envelope     1 byte   1, 2, 3 or 4 (4 is written; 1-3 are still decoded)
+ * envelope     1 byte   1, 2, 3, 4 or 5 (5 is written; 1-4 are still decoded)
  * kind         1 byte   ItemKind ordinal
  * flags        1 byte   bit0 folderId present, bit1 pinned, bit2 favourite, bit3 trashed
  * createdAt    8 bytes  i64 epoch millis
@@ -53,13 +54,20 @@ import com.cipherwell.notezero.model.ReadingState
  *   position   4 bytes  u32
  *   createdAt  8 bytes  i64 epoch millis (>= 0)
  *   labelLen   2 bytes  u16 UTF-8 bytes (<= ReadingState.MAX_LABEL_BYTES)
+ * -- envelope version 5 appends the encrypted PDF annotation layer: --
+ * hasAnnotations 1 byte 0 = none, 1 = present
+ * annotationLen  4 bytes u32 byte length (<= PdfAnnotationCodec.MAX_BYTES), then that many
+ *                        bytes of the PdfAnnotationCodec "NZPA" v1 blob
  * ```
  * Version compatibility (no re-encryption/migration; the next save writes the newest
  * version): a version-1 payload has no attachment list and no lock byte and decodes to
  * `attachments = emptyList()`, `locked = false`; a version-2 payload keeps its attachment
  * list and decodes to `locked = false` (pre-lock vaults were never locked); a version-3
  * payload carries the lock flag. Version 4 appends the reading state (position, progress,
- * bookmarks, book author/language); a version-3- payload decodes to `readingState = null`.
+ * bookmarks, book author/language); a version-3 payload decodes to `readingState = null`.
+ * Version 5 appends the PDF annotation layer (ink/highlighter strokes, rectangle highlights,
+ * sticky notes encoded by [PdfAnnotationCodec]); a version-4 payload decodes to
+ * `pdfAnnotations = null`.
  * All of it is content — inside the GCM envelope, never in a plaintext Room column, and none of
  * it changes the VMK or the AAD.
  *
@@ -70,7 +78,7 @@ import com.cipherwell.notezero.model.ReadingState
 object ItemCodec {
 
     /** Version written by this implementation. */
-    const val ENVELOPE_VERSION: Int = 4
+    const val ENVELOPE_VERSION: Int = 5
 
     /** Oldest payload version still accepted (pre-attachments vaults). */
     const val MIN_DECODE_VERSION: Int = 1
@@ -216,6 +224,16 @@ object ItemCodec {
                     lenPrefixedU16(label, ReadingState.MAX_LABEL_BYTES)
                 }
             }
+            // Envelope version 5 appends the PDF annotation layer.
+            val annotations = item.pdfAnnotations
+            if (annotations == null || annotations.isEmpty) {
+                u8(0)
+            } else {
+                val blob = PdfAnnotationCodec.encode(annotations)
+                require(blob.size <= PdfAnnotationCodec.MAX_BYTES) { "annotations exceed limit" }
+                u8(1)
+                lenPrefixedU32(blob, PdfAnnotationCodec.MAX_BYTES)
+            }
         }.toByteArray()
     }
 
@@ -294,6 +312,19 @@ object ItemCodec {
             } else {
                 null
             }
+            val pdfAnnotations = if (envelopeVersion >= 5) {
+                when (reader.u8()) {
+                    0 -> null
+                    1 -> {
+                        val length = reader.u32()
+                        if (length > PdfAnnotationCodec.MAX_BYTES) return null
+                        PdfAnnotationCodec.decode(reader.bytes(length.toInt())) ?: return null
+                    }
+                    else -> return null
+                }
+            } else {
+                null
+            }
             reader.requireFullyConsumed()
             Item(
                 id = id,
@@ -311,6 +342,7 @@ object ItemCodec {
                 attachments = attachments,
                 locked = locked,
                 readingState = readingState,
+                pdfAnnotations = pdfAnnotations,
             )
         } catch (t: Throwable) {
             null

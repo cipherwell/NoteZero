@@ -15,6 +15,7 @@ import com.cipherwell.notezero.ui.FakeNoteRepository
 import com.cipherwell.notezero.ui.UiTestBase
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.runner.RunWith
@@ -241,6 +242,8 @@ class PdfViewerScreenTest : UiTestBase() {
         composeRule.waitUntil(5_000) {
             composeRule.onAllNodesWithText("2 / 3").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("2 / 3").assertExists()
+        // Both the progress button and the page caption may show "2 / 3"; either proves the
+        // saved position was restored.
+        assertTrue(composeRule.onAllNodesWithText("2 / 3").fetchSemanticsNodes().isNotEmpty())
     }
 }

@@ -661,3 +661,67 @@ Research basis: `docs/RESEARCH-ALL-IN-ONE-2026-11-17.md`; policies: DECISIONS #2
   until MediaStore indexed it; after the media scan it imported normally. Real downloads go
   through the download manager and are indexed automatically. The picker tolerates generic
   MIME types; the parser is the validator.
+
+---
+
+## 16. Increment 11 — PDF annotation editor + flattened annotated export (2026-11-17)
+
+Scope: phase 11 first slice (`docs/ROADMAP-ALL-IN-ONE.md`): an encrypted annotation layer over
+PDFs plus a flattened annotated-copy export. Contracts: `docs/CONTRACTS-PHASE10.md`; UI details:
+`docs/PDF-ANNOTATION-UI.md`; policy: DECISIONS #23.
+
+### 16.1 Data layer: encrypted annotation layer (`ItemCodec` payload v5)
+
+| Check | Result |
+|---|---|
+| Model | `PdfAnnotations` with ink/highlighter strokes, rectangle highlights and sticky notes; normalised 0..1 geometry, 6 palette indices, 3 width levels; bounds 2,000 strokes / 2..2,000 pts/stroke / 100k total points / 1,000 highlights / 500 notes / 4,000-byte note text / 4 MiB codec blob |
+| Codec | `PdfAnnotationCodec` v1 `"NZPA"`, 1/10,000 quantisation, deterministic, null (never throws) on truncation/corruption/out-of-range/trailing bytes/oversize; 1,000-sample random fuzz test |
+| Storage | `Item.pdfAnnotations` inside payload **v5** (presence byte + u32 length + codec blob after reading state); v1–v4 still decode (`pdfAnnotations = null`); repository-owned (`savePdfAnnotations` only, null/empty clears, `saveItem` preserves) |
+| Tests | `PdfAnnotationCodecTest` 6; `PayloadCodecTest` v5 + v4 compatibility; `LockedPayloadCodecTest` boundary bytes for v5; `EncryptedNoteRepositoryTest.pdfAnnotationsArePersistedEncryptedAndRepositoryOwned` (lock/unlock, locked write rejected, no plaintext note text in Room ciphertext, clear-on-empty) and `backupRoundTripCarriesPdfAnnotations`; legacy v1 backup fixture still imports |
+
+### 16.2 Annotation editor + flattened export (UI)
+
+| Check | Result |
+|---|---|
+| Editor | annotate-mode toggle (scroll locked, Done resumes scrolling, Back exits mode first), palette ink/highlighter/highlight-box/sticky-note/eraser/undo/redo + 6 token-derived colours + 3 widths; per-page canvas overlay from normalised coordinates; note dialog create/edit/delete; 64-step undo/redo; per-mutation persistence (silent while locked) |
+| Export | annotations present → export choice (original / annotated) → existing UNENCRYPTED warning → SAF `CreateDocument`; annotated path renders pages + layer in memory (`AndroidPdfFlattenedExporter`, A4 595×842, scaled-to-fit, note markers, null on OOM/errors, no temp file, 32-page defensive cap), re-checks the unlocked vault, writes bytes only after the check |
+| Tests | PDF package **55 unit tests** (new: `PdfAnnotationScreenTest` 14, `PdfAnnotationEditorTest` 16, `PdfAnnotationPaletteTest` 8; existing viewer/inline tests still green); full unit suite **1,118 tests / 0 failures / 95 classes**; **19 instrumented tests OK** (15 previous + 4 new `PdfFlattenedExportInstrumentedTest`: real output accepted by `PdfRenderer` with matching page count, hostile/oversized fail-closed, model bounds, max-density export) |
+
+### 16.3 Emulator device QA (measured)
+
+| Step | Evidence |
+|---|---|
+| Setup | fresh debug install + vault unlock; imported the 3-page QA PDF (`qc-3page.pdf`, 4,231 B) through the Library SAF flow |
+| Annotating | drew an ink stroke, switched colour and drew a highlighter stroke, created a highlight box, added a sticky note ("Remember to test the flattened export") with the note marker rendered; palette/selection/hint all visible; annotate mode locked scrolling as designed |
+| Edits | undo removed the note marker (Redo became enabled), redo restored it; eraser drag removed the ink stroke while keeping other annotations |
+| Persistence | force-stopped the app, re-launched, unlocked the vault, reopened the PDF: highlight box, highlighter stroke and sticky-note marker were restored from the encrypted `pdfAnnotations` layer (the erased ink stroke stayed erased) |
+| Flattened export | export → annotated copy → UNENCRYPTED warning → SAF save: `qc-3page-annotated.pdf` **70,333 B**; `pdfinfo`: **Pages 3, 595×842 pt A4**; `pdftoppm` page 1 shows the original text plus the highlight box, highlighter stroke and note marker |
+| Crashes/logs | 0 NoteZero FATAL/ANR in the session; no annotation content logged; exported QA file removed from emulator Downloads afterwards |
+| Screenshots | `27-pdf-annotate-tools`, `28-pdf-annotations`, `29-pdf-export-choice`, `30-pdf-flattened-page` |
+
+### 16.4 Security + release verification
+
+| Check | Result |
+|---|---|
+| Offline guard | `./scripts/check-offline.sh --gradle` → `OK: NoteZero is offline by construction.` |
+| Token lint | `ui/pdf/PdfAnnotationPalette.kt` token-clean (only a `0x00FFFFFF` RGB mask; colours derived from `NoteZeroPalette`) |
+| Hygiene | no TODO/FIXME/Log/println in new annotation/data files; no network imports; no new permissions (release APK: `USE_BIOMETRIC` only + generated dynamic-receiver permission) |
+| Reproducible APK | **REPRODUCIBLE** — both builds sha256 `150ba74269582e697db317213f85339d807a5645a6e070c2a9a52cc0ad4993bf` |
+| Reproducible AAB | **REPRODUCIBLE** — both builds sha256 `4b160b50fde8633fbb46800ff201cd8bf5e9b6fd46fcd425b320405b26b8ed9b` |
+| Artifacts | `releases/notezero-0.1.0-release.apk` / `.aab` replaced; `releases/SHA256SUMS` updated |
+| Certificate | `CN=Cipherwell, O=Cipherwell, OU=NoteZero, C=US`, SHA-256 `FA:CA:DD:67:…:92:78` (unchanged) |
+| Owner phone | release APK installed over the existing vault (data/biometrics intact, `firstInstallTime` unchanged); phone was at the lockscreen so no UI interaction was possible this pass; 0 crash entries for NoteZero; left locked |
+
+### 16.5 Residual notes
+
+- Flattened export is a **rasterised** copy: text is not selectable/searchable, interactive
+  links/forms are gone, only rendered pages are included (viewer cap ≤8; exporter hard-fails
+  above 32) and sticky notes flatten as markers — their text remains encrypted in the vault.
+  The original decrypted-copy export is still the full untouched file.
+- Page operations (rotate/delete/insert/reorder) and PDF text extraction/search are still queued
+  for phase 11; they require either a PDF-writing step with fidelity trade-offs or a vetted text
+  engine, so they were not rushed into this increment.
+- Annotation zoom/pan: the viewer has no pinch-zoom yet, so annotation coordinates are normalised
+  to the rendered page; when zoom lands the same model renders correctly (normalised geometry).
+- Undo/redo and the in-flight gesture are in-memory only; at most the last gesture is lost on
+  process death (persisted state is what was committed per mutation).

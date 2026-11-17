@@ -5,6 +5,7 @@ import com.cipherwell.notezero.crypto.BiometricEnroll
 import com.cipherwell.notezero.model.AttachmentRef
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
+import com.cipherwell.notezero.model.PdfAnnotations
 import com.cipherwell.notezero.model.ReadingState
 import com.cipherwell.notezero.model.ItemKind
 import com.cipherwell.notezero.model.ThemeMode
@@ -276,6 +277,14 @@ interface NoteRepository {
      * default is fail-secure (test doubles / alternative implementations).
      */
     suspend fun saveReadingState(itemId: String, state: ReadingState): Boolean = false
+
+    /**
+     * Persists the encrypted PDF annotation layer of [itemId]; `null` clears it. Repository-owned
+     * like [saveReadingState]/attachments: `saveItem` preserves the stored layer, only this call
+     * changes it. Returns false while locked, for unknown ids or invalid bounds; the default is
+     * fail-secure (test doubles / alternative implementations).
+     */
+    suspend fun savePdfAnnotations(itemId: String, annotations: PdfAnnotations?): Boolean = false
 
     /**
      * Locks/unlocks one folder and persists the flag inside the folder envelope

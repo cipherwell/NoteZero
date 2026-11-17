@@ -91,6 +91,12 @@ data class Item(
      * cannot roll the reader back.
      */
     val readingState: ReadingState? = null,
+    /**
+     * Encrypted PDF annotation layer (`ItemCodec` payload v5, repository-owned like
+     * [readingState]). `null` when the document has no annotations. Only
+     * `savePdfAnnotations` changes it; `saveItem` preserves the stored value.
+     */
+    val pdfAnnotations: PdfAnnotations? = null,
 ) {
     val isBlank: Boolean get() = title.isBlank() && body.isBlank()
 }

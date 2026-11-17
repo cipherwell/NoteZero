@@ -7,6 +7,11 @@ import com.cipherwell.notezero.crypto.Bip39Recovery
 import com.cipherwell.notezero.crypto.NoteCrypto
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
+import com.cipherwell.notezero.model.PdfAnnotations
+import com.cipherwell.notezero.model.PdfInkKind
+import com.cipherwell.notezero.model.PdfInkStroke
+import com.cipherwell.notezero.model.PdfNote
+import com.cipherwell.notezero.model.PdfPoint
 import com.cipherwell.notezero.model.ReadingBookmark
 import com.cipherwell.notezero.model.ReadingState
 import com.cipherwell.notezero.model.ThemeMode
@@ -634,6 +639,68 @@ class EncryptedNoteRepositoryTest {
         val asText = String(ciphertext, Charsets.ISO_8859_1)
         assertFalse(asText.contains("secret bookmark label"))
         assertFalse(asText.contains("secret author"))
+    }
+
+    @Test
+    fun pdfAnnotationsArePersistedEncryptedAndRepositoryOwned() = runBlocking {
+        repo.setupVault(PASSWORD.toCharArray())
+        val pdf = repo.saveItem(repo.createItem(ItemKind.PDF_FILE).copy(title = "Annotated doc"))
+        val annotations = PdfAnnotations(
+            strokes = listOf(
+                PdfInkStroke(
+                    page = 0,
+                    kind = PdfInkKind.INK,
+                    colorIndex = 1,
+                    widthIndex = 0,
+                    points = listOf(PdfPoint(0.1f, 0.1f), PdfPoint(0.6f, 0.4f)),
+                ),
+            ),
+            notes = listOf(PdfNote(page = 0, x = 0.5f, y = 0.5f, text = "secret sticky note text")),
+        )
+
+        assertTrue(repo.savePdfAnnotations(pdf.id, annotations))
+        assertEquals(annotations, repo.items.value.first { it.id == pdf.id }.pdfAnnotations)
+
+        // saveItem is repository-owned: a stale copy cannot roll annotations back.
+        repo.saveItem(repo.items.value.first { it.id == pdf.id }.copy(title = "Renamed"))
+        assertEquals(annotations, repo.items.value.first { it.id == pdf.id }.pdfAnnotations)
+
+        // Persisted through the encrypted envelope: lock wipes the index, unlock restores it.
+        repo.lock()
+        assertFalse("locked vault must reject annotation writes", repo.savePdfAnnotations(pdf.id, annotations))
+        assertEquals(UnlockResult.SUCCESS, repo.unlock(PASSWORD.toCharArray()))
+        assertEquals(annotations, repo.items.value.first { it.id == pdf.id }.pdfAnnotations)
+
+        // The sticky-note text must not exist as plaintext in the Room ciphertext.
+        val ciphertext = db.openHelper.readableDatabase
+            .query("SELECT ciphertext FROM items WHERE id = ?", arrayOf(pdf.id))
+            .use { cursor -> if (cursor.moveToFirst()) cursor.getBlob(0) else ByteArray(0) }
+        assertFalse(String(ciphertext, Charsets.ISO_8859_1).contains("secret sticky note text"))
+
+        // Passing an empty layer clears the stored annotations.
+        assertTrue(repo.savePdfAnnotations(pdf.id, PdfAnnotations()))
+        assertNull(repo.items.value.first { it.id == pdf.id }.pdfAnnotations)
+    }
+
+    @Test
+    fun backupRoundTripCarriesPdfAnnotations() = runBlocking {
+        repo.setupVault(PASSWORD.toCharArray())
+        val pdf = repo.saveItem(repo.createItem(ItemKind.PDF_FILE).copy(title = "Portable PDF"))
+        val annotations = PdfAnnotations(
+            notes = listOf(PdfNote(page = 2, x = 0.25f, y = 0.75f, text = "carried by backup")),
+        )
+        assertTrue(repo.savePdfAnnotations(pdf.id, annotations))
+
+        val exported = ByteArrayOutputStream()
+        assertTrue(repo.exportBackup(exported, null))
+        val bytes = exported.toByteArray()
+
+        val otherRepo = newRepository(database = newDatabase(), preferences = newPrefs())
+        otherRepo.setupVault("target password".toCharArray())
+        val report = otherRepo.importBackup(ByteArrayInputStream(bytes), PASSWORD.toCharArray())
+        assertNotNull(report)
+        assertEquals(1, report!!.imported)
+        assertEquals(annotations, otherRepo.items.value.single().pdfAnnotations)
     }
 
     @Test

@@ -4,6 +4,12 @@ import com.cipherwell.notezero.model.AttachmentRef
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
+import com.cipherwell.notezero.model.PdfAnnotations
+import com.cipherwell.notezero.model.PdfHighlightRect
+import com.cipherwell.notezero.model.PdfInkKind
+import com.cipherwell.notezero.model.PdfInkStroke
+import com.cipherwell.notezero.model.PdfNote
+import com.cipherwell.notezero.model.PdfPoint
 import com.cipherwell.notezero.model.ReadingBookmark
 import com.cipherwell.notezero.model.ReadingState
 import org.junit.Assert.assertArrayEquals
@@ -36,6 +42,7 @@ class PayloadCodecTest {
         version: Long = 7L,
         attachments: List<AttachmentRef> = emptyList(),
         readingState: ReadingState? = null,
+        pdfAnnotations: PdfAnnotations? = null,
     ) = Item(
         id = id,
         kind = kind,
@@ -51,6 +58,7 @@ class PayloadCodecTest {
         version = version,
         attachments = attachments,
         readingState = readingState,
+        pdfAnnotations = pdfAnnotations,
     )
 
     private fun attachment(
@@ -134,16 +142,62 @@ class PayloadCodecTest {
     @Test
     fun `version 3 payloads decode with no reading state`() {
         val original = note(kind = ItemKind.PDF_FILE, readingState = null)
-        val encodedV4 = ItemCodec.encode(original)
-        // Envelope layout: 4-byte magic, then the version byte; v4 with a null state appends
-        // exactly one "no state" byte at the end.
-        val legacy = encodedV4.copyOf(encodedV4.size - 1)
+        val encodedV5 = ItemCodec.encode(original)
+        // Envelope layout: 4-byte magic, then the version byte. v5 with null state and null
+        // annotations appends two presence bytes at the end; strip both for a v3 payload.
+        val legacy = encodedV5.copyOf(encodedV5.size - 2)
         legacy[4] = 3
 
         val decoded = ItemCodec.decode(legacy)
 
         assertEquals(original, decoded)
         assertNull(decoded?.readingState)
+    }
+
+    @Test
+    fun `item codec round trips the encrypted annotation layer`() {
+        val annotations = PdfAnnotations(
+            strokes = listOf(
+                PdfInkStroke(
+                    page = 1,
+                    kind = PdfInkKind.HIGHLIGHTER,
+                    colorIndex = 4,
+                    widthIndex = 2,
+                    points = listOf(PdfPoint(0.2f, 0.3f), PdfPoint(0.4f, 0.5f)),
+                ),
+            ),
+            highlights = listOf(
+                PdfHighlightRect(page = 0, left = 0.1f, top = 0.1f, right = 0.9f, bottom = 0.2f, colorIndex = 0),
+            ),
+            notes = listOf(PdfNote(page = 2, x = 0.5f, y = 0.5f, text = "remember this")),
+        )
+        val original = note(kind = ItemKind.PDF_FILE, pdfAnnotations = annotations)
+
+        val decoded = ItemCodec.decode(ItemCodec.encode(original))
+
+        assertEquals(original, decoded)
+        assertEquals(annotations, decoded?.pdfAnnotations)
+    }
+
+    @Test
+    fun `empty annotation layers are not written`() {
+        val original = note(kind = ItemKind.PDF_FILE, pdfAnnotations = PdfAnnotations())
+        val decoded = ItemCodec.decode(ItemCodec.encode(original))
+        assertEquals(original.copy(pdfAnnotations = null), decoded)
+        assertNull(decoded?.pdfAnnotations)
+    }
+
+    @Test
+    fun `version 4 payloads decode without annotations`() {
+        val state = ReadingState(position = 1, total = 4)
+        val encodedV5 = ItemCodec.encode(note(kind = ItemKind.BOOK_FILE, readingState = state))
+        // v5 wraps the annotation presence byte at the end; dropping it yields a valid v4
+        // payload that must still decode its reading state.
+        val v4 = encodedV5.copyOf(encodedV5.size - 1)
+        v4[4] = 4
+        val decoded = ItemCodec.decode(v4)
+        assertEquals(state, decoded?.readingState)
+        assertNull(decoded?.pdfAnnotations)
     }
 
     @Test

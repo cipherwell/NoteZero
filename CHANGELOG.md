@@ -3,6 +3,50 @@
 All notable changes to NoteZero are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [Unreleased] — PDF annotation editor + flattened annotated export (2026-11-17, increment 11)
+
+### Added
+
+**Encrypted PDF annotation layer (`ItemCodec` payload v5)**
+- `model/PdfAnnotations.kt`: ink/highlighter strokes, rectangle highlights and sticky notes with
+  normalised (0..1) geometry, 6 palette indices and 3 width levels; fail-closed bounds (≤2,000
+  strokes, 2..2,000 points/stroke, ≤100,000 total points, ≤1,000 highlights, ≤500 notes, notes
+  ≤4,000 UTF-8 bytes).
+- `data/PdfAnnotationCodec` v1 (`"NZPA"`): deterministic, 1/10,000-quantised binary codec,
+  ≤4 MiB, null (never throws) on corruption/trailing/oversized data; 1,000-sample fuzz test.
+- Payload **v5** appends the layer after the reading state (presence byte + u32 length + codec);
+  v1–v4 payloads still decode (`pdfAnnotations = null`). `Item.pdfAnnotations` is
+  repository-owned: `savePdfAnnotations` is the only writer (`null`/empty clears), `saveItem`
+  preserves it, backup v2 carries it, and it is never a plaintext column.
+
+**PDF annotation editor (viewer)**
+- Annotate mode toggle in the PDF toolbar (Back exits the mode first), bottom tool palette:
+  ink, highlighter, highlight box, sticky note, fingertip eraser, undo/redo, 6 token-derived
+  colours, 3 widths and a drawing hint; page scrolling is locked while annotating.
+- Per-page Canvas overlay with resolution-independent drawing; sticky-note markers reopen a
+  note dialog for edit/delete; eraser hit-tests strokes/highlights/notes; 64-step undo/redo;
+  every mutation persists to the encrypted layer (silent failures while locked), and the layer
+  reloads after app restarts/lock-unlock.
+- Export: when annotations exist, the export action offers original vs **annotated copy
+  (flattened)** behind the existing explicit UNENCRYPTED warning. The flattened path renders
+  pages + layer in memory through `PdfFlattenedExporter`/`AndroidPdfFlattenedExporter` (A4,
+  white, scaled-to-fit, note markers, no temp files, null on OOM/errors, 32-page defensive cap)
+  and writes through SAF with a vault re-check; the original path is unchanged.
+
+### Verified (measured)
+- **1118 unit tests / 0 failures** (95 classes; +38 annotation UI/editor/palette tests,
+  +12 annotation data/codec/repository/payload tests) and **19 instrumented tests OK** (+4 real
+  `PdfDocument`/`PdfRenderer` flatten/caps/hostile-input cases).
+- Emulator QA: 3-page PDF imported, ink/highlighter/highlight-box/sticky-note created,
+  undo/redo and eraser exercised, annotations persisted across force-stop + vault unlock;
+  annotated export produced `qc-3page-annotated.pdf` — `pdfinfo` 3 pages, 595×842 pt A4,
+  70,333 B — and the rendered page shows the annotations over the text.
+- `scripts/check-offline.sh --gradle` OK; no new permissions; annotation palette uses design
+  tokens only; no TODO/logging/network additions.
+- New screenshots `27-pdf-annotate-tools`, `28-pdf-annotations`, `29-pdf-export-choice`,
+  `30-pdf-flattened-page`; docs: `docs/CONTRACTS-PHASE10.md`, `docs/PDF-ANNOTATION-UI.md`,
+  DECISIONS #23, DATA-MODEL/BACKUP-FORMAT v5, THREAT-MODEL §3.9.3, VERIFICATION §16.
+
 ## [Unreleased] — all-in-one workspace: Library, EPUB/PDF readers, encrypted reading state (2026-11-17, increment 10)
 
 ### Added

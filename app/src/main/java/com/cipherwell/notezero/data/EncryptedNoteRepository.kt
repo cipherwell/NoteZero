@@ -17,6 +17,7 @@ import com.cipherwell.notezero.model.AttachmentRef
 import com.cipherwell.notezero.model.Folder
 import com.cipherwell.notezero.model.Item
 import com.cipherwell.notezero.model.ItemKind
+import com.cipherwell.notezero.model.PdfAnnotations
 import com.cipherwell.notezero.model.ReadingState
 import com.cipherwell.notezero.model.ItemQueries
 import com.cipherwell.notezero.model.ThemeMode
@@ -834,6 +835,28 @@ class EncryptedNoteRepository(
             }
         }
 
+    override suspend fun savePdfAnnotations(itemId: String, annotations: PdfAnnotations?): Boolean =
+        withContext(ioDispatcher) {
+            try {
+                mutex.withLock {
+                    val key = vmk ?: return@withLock false
+                    val item = itemsById[itemId] ?: return@withLock false
+                    val stored = annotations?.takeUnless { it.isEmpty }
+                    if (item.pdfAnnotations == stored) return@withLock true
+                    saveItemLocked(
+                        item.copy(pdfAnnotations = stored),
+                        key,
+                        preservePdfAnnotations = false,
+                    )
+                    afterItemMutationLocked()
+                    true
+                }
+            } catch (e: IllegalArgumentException) {
+                // Out-of-bounds annotations fail closed, never persist.
+                false
+            }
+        }
+
     override suspend fun setFolderLocked(id: String, locked: Boolean): Boolean =
         withContext(ioDispatcher) {
             mutex.withLock {
@@ -1531,6 +1554,7 @@ class EncryptedNoteRepository(
         preserveAttachments: Boolean = true,
         preserveLock: Boolean = true,
         preserveReadingState: Boolean = true,
+        preservePdfAnnotations: Boolean = true,
     ): Item {
         val existing = itemsById[item.id]
         val now = clock()
@@ -1543,6 +1567,11 @@ class EncryptedNoteRepository(
             existing?.readingState ?: item.readingState
         } else {
             item.readingState
+        }
+        val pdfAnnotations = if (preservePdfAnnotations) {
+            existing?.pdfAnnotations ?: item.pdfAnnotations
+        } else {
+            item.pdfAnnotations
         }
         val attachments = when {
             !preserveAttachments -> item.attachments
@@ -1561,6 +1590,7 @@ class EncryptedNoteRepository(
             attachments = attachments,
             locked = locked,
             readingState = readingState,
+            pdfAnnotations = pdfAnnotations,
         )
         persistItemLocked(saved, vmkBytes)
         itemsById[saved.id] = saved

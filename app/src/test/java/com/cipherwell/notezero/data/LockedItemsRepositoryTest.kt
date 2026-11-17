@@ -509,10 +509,12 @@ class LockedItemsRepositoryTest {
             ) ?: throw AssertionError("item ciphertext decrypts")
             try {
                 assertEquals(ItemCodec.ENVELOPE_VERSION, itemPlaintext[4].toInt())
-                assertEquals(4, itemPlaintext[4].toInt())
-                // v4 layout: lock byte is followed only by the reading-state presence byte.
+                assertEquals(5, itemPlaintext[4].toInt())
+                // v5 layout: lock byte is followed by the reading-state and annotation
+                // presence bytes only.
                 assertEquals(0, itemPlaintext.last().toInt())
-                assertEquals(1, itemPlaintext[itemPlaintext.size - 2].toInt())
+                assertEquals(0, itemPlaintext[itemPlaintext.size - 2].toInt())
+                assertEquals(1, itemPlaintext[itemPlaintext.size - 3].toInt())
                 val decoded = ItemCodec.decode(itemPlaintext)
                     ?: throw AssertionError("item payload decodes")
                 assertTrue(decoded.locked)

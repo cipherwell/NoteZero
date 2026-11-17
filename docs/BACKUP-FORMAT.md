@@ -129,10 +129,11 @@ importing into this build and a `PDF_FILE`/`BOOK_FILE` restores exactly like any
 single `application/pdf` or `application/epub+zip` attachment travels as an `NZAT` blob (layout in
 [ATTACHMENTS.md](ATTACHMENTS.md)) and is re-encrypted under the destination vault key during
 import. Restore never inspects or renders the document; duplicate-safe id matching and the
-missing/invalid-blob skip rules are unchanged. Item payload **v4** also carries the encrypted
-reading state (position/progress/bookmarks/book metadata) inside the same ciphertext, so a
-restored PDF or book resumes exactly where it was left on the source vault; older (v1–v3)
-payloads decode with no reading state.
+missing/invalid-blob skip rules are unchanged. Item payload **v4** also carries the encrypted reading state (position/progress/bookmarks/book
+metadata) and payload **v5** additionally carries the PDF annotation layer (ink, highlights,
+sticky notes), all inside the same ciphertext, so a restored PDF or book resumes exactly where it
+was left on the source vault and keeps its annotations; older (v1–v4) payloads decode with no
+reading state/annotations.
 
 ## 4. Import algorithm (implemented by `EncryptedNoteRepository.importBackup`)
 

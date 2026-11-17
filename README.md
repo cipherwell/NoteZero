@@ -10,7 +10,7 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 [VaultZero](https://github.com/cipherwell/Vault-Zero) with an independent package
 (`com.cipherwell.notezero`), independent signing key and independent threat model.
 
-> Status: **Phase 5 — all-in-one workspace (increment 10)** — 2026-11-17.
+> Status: **Phase 5 — all-in-one workspace (increment 11)** — 2026-11-17.
 > Security core, notes MVP, encrypted SAF backup/restore, code editor (workspace
 > search/copy/export/indent), encrypted attachments (images/files/**drawings**),
 > **locked notes/folders**, **Markdown/HTML/PDF note export**, **table editing**,
@@ -23,7 +23,7 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 > phased plan (PDF annotation, drawing studio, universal file workspace, more formats) are
 > in [docs/ROADMAP-ALL-IN-ONE.md](docs/ROADMAP-ALL-IN-ONE.md), grounded in
 > [docs/RESEARCH-ALL-IN-ONE-2026-11-17.md](docs/RESEARCH-ALL-IN-ONE-2026-11-17.md).
-> Builds are green, **1068 unit tests + 15 device tests**, and **signed APK + AAB release
+> Builds are green, **1118 unit tests + 19 device tests**, and **signed APK + AAB release
 > builds are byte-for-byte reproducible**; an independent security audit previously found
 > no HIGH/CRITICAL issues and its findings are remediated. Device QA on a Pixel 9 Pro XL
 > (Android 17) and the emulator covered import, TOC, search, bookmarks, themes and
@@ -51,8 +51,10 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 | ![Widget picker](docs/screenshots/20-widget-picker.png) | ![Device status bar](docs/screenshots/21-device-status-bar-light.png) | ![Device drawing](docs/screenshots/22-device-drawing-canvas-1-15x.png) |
 | **Library (books, PDFs, drawings)** | **EPUB reader (TOC/search/bookmarks)** | **PDF reader tools (progress/bookmarks)** |
 | ![Library](docs/screenshots/23-library.png) | ![EPUB reader](docs/screenshots/24-epub-reader.png) | ![PDF tools](docs/screenshots/25-pdf-viewer-tools.png) |
-| **Night reading theme + encrypted bookmarks** | | |
-| ![Reader night](docs/screenshots/26-reader-bookmarks-night.png) | | |
+| **Night reading theme + encrypted bookmarks** | **PDF annotate tools** | **Encrypted annotations** |
+| ![Reader night](docs/screenshots/26-reader-bookmarks-night.png) | ![Ann tools](docs/screenshots/27-pdf-annotate-tools.png) | ![Annotations](docs/screenshots/28-pdf-annotations.png) |
+| **Annotated export choice** | **Flattened annotated copy (page 1)** | |
+| ![Export choice](docs/screenshots/29-pdf-export-choice.png) | ![Flattened](docs/screenshots/30-pdf-flattened-page.png) | |
 
 Screenshots are real emulator captures from the instrumented E2E run (debug build with
 `-PallowScreenshots=true`; normal builds set FLAG_SECURE, which makes `screencap` return a
@@ -79,6 +81,28 @@ Screenshots are real emulator captures from the instrumented E2E run (debug buil
   `Page 2 of 3`), killed and relaunched the app + re-unlocked the vault, confirmed bookmarks
   and positions persisted; 1068 unit tests / 0 failures (91 classes) and 15 instrumented
   tests green.
+
+## PDF annotation editor (2026-11-17)
+
+- **What "editing" means:** annotation layer + flattened export, not object-level PDF text
+  editing (DECISIONS #23). The original encrypted PDF bytes are never modified.
+- **Tools:** ink, highlighter, rectangle highlight, sticky notes, fingertip eraser, linked
+  undo/redo, 6 token-derived colours, 3 widths; back exits annotate mode before closing.
+- **Encrypted storage:** `PdfAnnotationCodec` v1 inside `ItemCodec` payload v5
+  (`Item.pdfAnnotations`): normalised 1/10,000 geometry, bounds up to 2,000 strokes /
+  100k points / 1,000 highlights / 500 notes / 4 MiB, always repository-owned and never
+  plaintext. Carried by backup v2; unavailable while locked.
+- **Flattened export:** with annotations present, the export action offers original vs
+  **annotated copy (flattened)**; the latter renders pages + layer in memory into a new A4 PDF
+  (rasterised, no temp file) behind the existing UNENCRYPTED warning + SAF flow. The page count
+  is capped by what the viewer rendered (≤8) and the exporter fails closed above its 32-page
+  defensive ceiling; sticky notes flatten as markers (text remains in the vault).
+- **Measured QA** (emulator, Android 17 image): imported a 3-page PDF, drew an ink stroke,
+  highlighter, highlight box and sticky note, undid/redid, erased the ink stroke, killed and
+  relaunched the app + re-unlocked the vault (annotations restored), then exported the
+  annotated copy: `pdfinfo` → **3 pages, 595×842 pt A4, 70,333 B**, and the rendered page shows
+  the highlight box/highlighter/marker over the original text. 1118 unit tests / 0 failures
+  (95 classes) and **19 instrumented tests** green.
 
 ## Verified end to end (2026-11-15)
 
