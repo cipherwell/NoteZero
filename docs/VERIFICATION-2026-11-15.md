@@ -852,3 +852,70 @@ Contract: `docs/CONTRACTS-PHASE12.md`; UI details: `docs/WORKSPACE.md`; policy: 
 - Bulk operations don't have a dedicated undo; trash items are recoverable from Notes Trash.
 - Selection entry is long-press (TalkBack exposes long-click); there is no visible "select" mode
   button per row by design (space/strings constraint).
+
+---
+
+## 19. Increment 14 — more reading formats: TXT, FB2, CBZ comics (2026-11-18)
+
+Scope: phase 14 first slice (`docs/ROADMAP-ALL-IN-ONE.md`): content-detected TXT/FictionBook
+FB2/CBZ comics sharing the e-book reader surface. Contract: `docs/CONTRACTS-PHASE13.md`;
+engine details: `docs/BOOK-FORMATS.md`; UI details: `docs/READER-UI.md` (formats section);
+policy: DECISIONS #26.
+
+### 19.1 Format engine (pure JVM, no new dependencies)
+
+| Check | Result |
+|---|---|
+| Abstraction | `BookContent` implemented by `EpubDocument`; `BookFormat`/`BookDetector`/`BookLoader`; `LoadedBook.Reflowable`/`LoadedBook.Comic`; `ComicBook` |
+| Detection | bytes-only, order EPUB (mimetype/container) → CBZ (ZIP + image entries, no EPUB marker) → FB2 (secure XML root, namespace tolerant) → TXT (BOM/UTF-8/UTF-16 decodable, control-spam rejected); unsupported/ambiguous → null |
+| TXT | BOM-aware UTF-8/UTF-16LE/BE; no-BOM UTF-8 with windows-1252 fallback; blank-line paragraphs (single newlines joined); heading-aware chapters (chapter/part/book/... ≤120 chars, blank-line separated) else "Part N" every ~20k chars; caps 2,000 chapters / 20,000 blocks / 2M chars per chapter + whole-book caps |
+| FB2 | secure SAX (no DTD/external entities; UTF-16 refused), metadata title/author/lang, body sections→chapters + TOC (nested depth), p/emphasis/strong/code/a/poem/stanza/v/epigraph/cite/empty-line/subtitle mapping, lazy base64 `<binary>` images (≤4 MiB each, ≤64) and cover; malformed/XXE → null |
+| CBZ | natural-sorted jpg/jpeg/png/webp/gif pages, ≤500 pages, ≤16 MiB/page, lazy page byte copies, idempotent close, title = fallback; corrupt/missing → null/placeholder |
+| Safety | bounded parsers, no temp files/caches/logging, never throw on hostile input, 1,000-sample fuzz; no `android.*` in `book/` |
+| Tests | **211 book-package tests** (104 existing EPUB/book unchanged + 107 new: BookDetector 18, Txt 27, Fb2 35, Cbz 15, BookLoader 12) |
+
+### 19.2 Library + reader UI
+
+| Check | Result |
+|---|---|
+| Import | format-generic importer: detects format, stores detected MIME, derives title/author (fallback cleaned file name then localised "Untitled book"), encrypted `ReadingState` metadata, thumbnail-less rows show `EPUB`/`FB2`/`TXT`/`Comic` labels; unsupported/corrupt/DRM → placeholder removed + non-secret `library_import_unsupported`; >10 MiB → `library_import_failed` |
+| Reflowable reader | EPUB/FB2/TXT share the existing reader over `BookContent`: TOC, in-book search, bookmarks, font/line-spacing/margins, paper/sepia/night, progress/resume; format+author in the metadata line |
+| Comic reader | new `ComicReaderScreen`: lazy `BitmapFactory` page decoding in memory (bounded sample, recycled), page images + progress bar + page indicator, page-jump dialog with validation, bookmarks (add/list/delete/jump) persisted through `ReadingState`, resume, loading/page-error/comic-error states; no text search/TOC; comic resource closed on dispose |
+| Tests | +25 UI tests: `BookReaderScreenTest` 23 (7 new TXT/FB2/corrupt cases), `ComicReaderScreenTest` 11, `LibraryBookImportTest` 7; full suite **1,351 tests / 0 failures / 108 classes**; **23 instrumented tests OK** |
+
+### 19.3 Emulator device QA (measured)
+
+| Step | Evidence |
+|---|---|
+| TXT import | SAF → `qa-book.txt` imported as `TXT`; row `qa-book`, Chapter 1 of 1; reader rendered the text, search "txt-words" → **1 result** with snippet; progress/tools present |
+| FB2 import | `qa-book.fb2` imported with metadata title **The FB2 Test Book**, author **Ada Fiction**, label **FB2**, Chapter 1 of 3 / 33%; reader rendered book title, both sections, italic/bold/code spans, poem lines (quote styling), epigraph and subtitle; TOC showed **3 entries** (book title + both sections) |
+| CBZ import | `qa-comic.cbz` imported as **Comic** (`qa-comic`), pages decoded in the comic reader; page indicator `1 / 3`; bookmark added on page 1, bookmark list persisted **after force-stop + unlock**, page jump dialog opened/validated |
+| Unsupported | `qa-unknown.bin` → non-secret "This file is not a supported, DRM-free document." and **no library row** (placeholder cleaned) |
+| Crashes | 0 NoteZero FATAL/ANR during the session |
+| Screenshots | `38-txt-reader`, `39-fb2-reader`, `40-comic-reader`, `41-library-formats`, `42-comic-bookmarks` |
+
+### 19.4 Security + release verification
+
+| Check | Result |
+|---|---|
+| Offline guard | `./scripts/check-offline.sh` → `OK: NoteZero is offline by construction.` (new parsers contain no network APIs/URL literals) |
+| Token lint | `ui/comic` token-clean; no raw colours in new UI |
+| Hygiene | no TODO/FIXME/TEMP DEBUG/Log/println in `book/`/`ui/comic`/`ui/reader`; no debug test files; no new permissions/dependencies (release APK: `USE_BIOMETRIC` only + generated dynamic-receiver permission) |
+| Reproducible APK | **REPRODUCIBLE** — both builds sha256 `772192dd4393419fa12291d25037733b0912404742034efa8f74af75aed5fd8a` |
+| Reproducible AAB | **REPRODUCIBLE** — both builds sha256 `eb5aeadbac83f996711f6a96f71a04765eea49e10fe5701e022f0fa06e1886cb` |
+| Artifacts | `releases/notezero-0.1.0-release.apk` / `.aab` replaced; `releases/SHA256SUMS` updated |
+| Certificate | `CN=Cipherwell, O=Cipherwell, OU=NoteZero, C=US`, SHA-256 `FA:CA:DD:67:…:92:78` (unchanged) |
+| Owner phone | release APK installed over the existing vault (data/biometrics intact); phone at lockscreen so no UI interaction; 0 NoteZero crash entries; left locked |
+
+### 19.5 Residual notes
+
+- The TXT fixture's headings were not blank-line separated, so they rendered as prose in one
+  "Part 1" chapter (documented parser rule); heading detection requires blank-line-separated
+  single-line headings ≤120 chars.
+- Comic progress/bookmarks are page-based; resume uses a 500 ms debounce, so a force-stop
+  immediately after a jump can keep the previous saved page (bookmarks persist immediately).
+- The comic page-jump indicator is first-visible-page based; jumping to the last page clamps to
+  the maximum scroll offset (the page is still visible), like the PDF viewer.
+- Deferred: MOBI/AZW3/KFX (own parser + DRM caveat), comic metadata (`ComicInfo.xml`), TTS,
+  hyphenation, per-book appearance overrides, reading statistics, translations, accessibility
+  pass and the F-Droid window (opens 2027-02-15).

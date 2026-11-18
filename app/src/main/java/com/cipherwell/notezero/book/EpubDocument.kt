@@ -2,7 +2,7 @@ package com.cipherwell.notezero.book
 
 /**
  * A parsed, in-memory EPUB book. Produced only by [EpubParser.parse]; UI code compiles
- * against this type and never sees the archive.
+ * against [BookContent] and never sees the archive.
  *
  * Resource lifecycle: the document keeps the compressed archive bytes and the cover image
  * until [close]. [imageBytes] decompresses a referenced image on demand (bounded, no cache),
@@ -14,15 +14,15 @@ package com.cipherwell.notezero.book
  * returned arrays are always fresh copies owned by the caller.
  */
 class EpubDocument internal constructor(
-    val title: String,
-    val author: String?,
-    val language: String?,
-    val chapters: List<BookChapter>,
-    val toc: List<BookTocEntry>,
+    override val title: String,
+    override val author: String?,
+    override val language: String?,
+    override val chapters: List<BookChapter>,
+    override val toc: List<BookTocEntry>,
     private val archive: ZipArchive?,
     coverBytes: ByteArray?,
     private val imageEntries: Set<String>,
-) {
+) : BookContent {
 
     @Volatile
     private var archiveState: ZipArchive? = archive
@@ -34,7 +34,7 @@ class EpubDocument internal constructor(
     private var closed = false
 
     /** Cover image bytes (a copy), or null when absent, over the cover cap, or after close. */
-    val cover: ByteArray?
+    override val cover: ByteArray?
         get() {
             if (closed) return null
             return coverState?.copyOf()
@@ -45,7 +45,7 @@ class EpubDocument internal constructor(
      * copy, or null when the entry is unknown/not referenced by a parsed image block, missing,
      * over the 16 MiB entry cap, or after [close].
      */
-    fun imageBytes(entry: String): ByteArray? {
+    override fun imageBytes(entry: String): ByteArray? {
         if (closed) return null
         val archive = archiveState ?: return null
         if (entry !in imageEntries) return null
@@ -54,7 +54,7 @@ class EpubDocument internal constructor(
     }
 
     /** Drops the archive and cover byte state. Idempotent. */
-    fun close() {
+    override fun close() {
         closed = true
         archiveState = null
         coverState = null

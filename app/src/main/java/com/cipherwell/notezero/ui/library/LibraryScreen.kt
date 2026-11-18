@@ -68,8 +68,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cipherwell.notezero.R
-import com.cipherwell.notezero.book.EpubParser
+import com.cipherwell.notezero.book.BookDetector
+import com.cipherwell.notezero.book.BookFormat
+import com.cipherwell.notezero.book.BookLoader
+import com.cipherwell.notezero.book.LoadedBook
 import com.cipherwell.notezero.data.AttachmentImport
+import com.cipherwell.notezero.data.AttachmentLimits
 import com.cipherwell.notezero.data.NoteRepository
 import com.cipherwell.notezero.data.VaultStatus
 import com.cipherwell.notezero.model.AttachmentRef
@@ -93,12 +97,27 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 
 /** Plain text MIME the library imports and recognises as a PDF document. */
 private const val PDF_MIME = "application/pdf"
-private const val EPUB_MIME = EpubParser.MIME
+
+/** Attachment MIME used only if a detected book format somehow carries no MIME of its own. */
+private const val FALLBACK_BOOK_MIME = "application/octet-stream"
+
+/** MIME types a book import stores (content-detected; the formats the engine supports). */
+private val BOOK_MIME_TYPES: Set<String> =
+    BookFormat.values().map { it.mimeType }.toSet() + FALLBACK_BOOK_MIME
+
 private const val FALLBACK_PDF_NAME = "document.pdf"
-private const val FALLBACK_EPUB_NAME = "book.epub"
+private const val FALLBACK_BOOK_NAME = "book"
+
+/**
+ * Item title when neither the book metadata nor the SAF display name yields any text. This is
+ * stored user data (not reachable UI chrome); only the sketch shelf has an "untitled" resource.
+ */
 private const val MAX_METADATA_CHARS = 256
 private const val PNG_MIME = "image/png"
 
@@ -126,7 +145,7 @@ internal data class LibraryEntry(
 /**
  * All-in-one document shelf.
  *
- * Lists encrypted PDFs, EPUB books and the note-owned drawings of the vault, filtered by
+ * Lists encrypted PDFs, e-books (EPUB/FB2/TXT/comic) and the note-owned drawings, filtered by
  * the four chips and sorted newest-first. Locked items the session has not verified are
  * removed entirely (fail closed, exactly like the code workspace) and items inside a
  * hidden locked folder never appear. Import goes through SAF, is bracketed by
@@ -162,6 +181,7 @@ fun LibraryScreen(
     var creatingSketch by remember { mutableStateOf(false) }
 
     val importFailedNotice = stringResource(R.string.library_import_failed)
+    val untitledBookTitle = stringResource(R.string.book_untitled)
     val importUnsupportedNotice = stringResource(R.string.library_import_unsupported)
     val sketchSaveFailedNotice = stringResource(R.string.sketch_save_failed)
 
@@ -169,7 +189,7 @@ fun LibraryScreen(
         buildLibraryEntries(flowItems, folders, verifiedLockedIds, filter)
     }
 
-    fun startImport(uri: Uri?, epub: Boolean) {
+    fun startImport(uri: Uri?, book: Boolean) {
         // The SAF bracket closes as soon as the result arrives; a locked vault drops the
         // URI without touching it (the picker may outlive the idle auto-lock).
         repository.endExternalActivity()
@@ -179,8 +199,8 @@ fun LibraryScreen(
         notice = null
         scope.launch {
             try {
-                val outcome = if (epub) {
-                    importEpub(repository, context, uri)
+                val outcome = if (book) {
+                    importBook(repository, context, uri, untitledBookTitle)
                 } else {
                     importPdf(repository, context, uri)
                 }
@@ -200,28 +220,25 @@ fun LibraryScreen(
     }
 
     val pdfPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        startImport(uri, epub = false)
+        startImport(uri, book = false)
     }
-    val epubPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        startImport(uri, epub = true)
+    val bookPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        startImport(uri, book = true)
     }
 
-    fun launchPicker(epub: Boolean) {
+    fun launchPicker(book: Boolean) {
         importMenuOpen = false
         if (importing) return
         if (repository.status.value != VaultStatus.UNLOCKED) return
         repository.beginExternalActivity()
         val launched = runCatching {
-            if (epub) {
-                // File providers report EPUB/PDF MIME types inconsistently (a .epub is
-                // frequently served as application/zip or octet-stream), so the picker accepts
-                // the specific types plus generic fallbacks; the content itself is validated by
-                // the EPUB parser or by the PDF viewer before anything is surfaced.
-                // Generic picker: Android's MIME database maps .epub inconsistently (some
-                // providers report application/zip, some octet-stream and some nothing), and a
-                // narrowed filter makes valid books unselectable. The EPUB parser is the real
-                // validator: an unreadable file is rejected and its placeholder item removed.
-                epubPicker.launch(arrayOf("*/*"))
+            if (book) {
+                // Generic picker: Android's MIME database maps the book formats inconsistently
+                // (an .epub/.cbz is frequently reported as application/zip or octet-stream and a
+                // .fb2/.txt may map to nothing), so a narrowed filter makes valid books
+                // unselectable. The content is the real validator (BookDetector/BookLoader):
+                // an unreadable file is rejected and its placeholder item removed.
+                bookPicker.launch(arrayOf("*/*"))
             } else {
                 pdfPicker.launch(arrayOf("*/*"))
             }
@@ -376,7 +393,7 @@ fun LibraryScreen(
                                         style = NoteZeroType.Callout,
                                     )
                                 },
-                                onClick = { launchPicker(epub = false) },
+                                onClick = { launchPicker(book = false) },
                                 modifier = Modifier.testTag("library_import_pdf"),
                             )
                             DropdownMenuItem(
@@ -386,7 +403,7 @@ fun LibraryScreen(
                                         style = NoteZeroType.Callout,
                                     )
                                 },
-                                onClick = { launchPicker(epub = true) },
+                                onClick = { launchPicker(book = true) },
                                 modifier = Modifier.testTag("library_import_epub"),
                             )
                             HorizontalDivider()
@@ -706,6 +723,18 @@ private fun LibraryFilterChip(
     )
 }
 
+/**
+ * Distinguishes the supported e-book formats in the shelf's type label (EPUB/FB2/TXT/Comic).
+ * Kept as a plain resource-id helper so the row can resolve it with `stringResource`.
+ */
+private fun bookFormatLabelRes(mimeType: String?): Int = when (mimeType) {
+    "application/epub+zip" -> R.string.book_format_epub
+    "application/x-fictionbook+xml" -> R.string.book_format_fb2
+    "text/plain" -> R.string.book_format_txt
+    "application/vnd.comicbook+zip", "application/zip", "application/x-cbz" -> R.string.book_format_cbz
+    else -> R.string.library_type_book
+}
+
 /** One document row: title, type badge, progress and the overflow actions menu. */
 @Composable
 private fun LibraryRow(
@@ -723,7 +752,7 @@ private fun LibraryRow(
     val isSketch = item.kind == ItemKind.SKETCH_FILE
     val typeLabel = when (entry.type) {
         LibraryEntryType.PDF -> stringResource(R.string.library_type_pdf)
-        LibraryEntryType.BOOK -> stringResource(R.string.library_type_book)
+        LibraryEntryType.BOOK -> stringResource(bookFormatLabelRes(entry.attachment?.mimeType))
         LibraryEntryType.DRAWING ->
             if (isSketch) {
                 stringResource(R.string.library_type_sketch)
@@ -878,17 +907,20 @@ private fun LibraryProgress(entry: LibraryEntry, readingState: ReadingState) {
     val position = (readingState.position + 1).coerceIn(1, total)
     val fraction = position.toFloat() / total
     val percent = (fraction * 100f).toInt().coerceIn(0, 100)
+    // Comics are paged like PDFs, so their position must read "Page x of y" (books use chapters).
+    val paged = entry.type == LibraryEntryType.PDF ||
+        (entry.type == LibraryEntryType.BOOK &&
+            bookFormatLabelRes(entry.attachment?.mimeType) == R.string.book_format_cbz)
     Text(
-        text = when (entry.type) {
-            LibraryEntryType.PDF -> stringResource(R.string.library_page_progress, position, total)
-            else -> stringResource(R.string.library_chapter_progress, position, total)
+        text = if (paged) {
+            stringResource(R.string.library_page_progress, position, total)
+        } else {
+            stringResource(R.string.library_chapter_progress, position, total)
         },
         style = NoteZeroType.Caption,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier
-            .testTag(
-                if (entry.type == LibraryEntryType.PDF) "library_page_progress" else "library_chapter_progress",
-            )
+            .testTag(if (paged) "library_page_progress" else "library_chapter_progress")
             // The row is clickable and therefore merges its descendants; this node merges
             // itself so its tag survives in the merged semantics tree (tests/a11y can find it).
             .semantics(mergeDescendants = true) {},
@@ -938,7 +970,9 @@ internal fun buildLibraryEntries(
                 ?.let { entries += LibraryEntry(item, it, LibraryEntryType.PDF) }
 
             ItemKind.BOOK_FILE -> {
-                val attachment = item.attachments.firstOrNull { it.mimeType == EPUB_MIME }
+                // The format is content-detected at import and recorded as the attachment MIME;
+                // a BOOK_FILE item has exactly one book attachment (prefer a known book MIME).
+                val attachment = item.attachments.firstOrNull { it.mimeType in BOOK_MIME_TYPES }
                     ?: item.attachments.firstOrNull()
                 attachment?.let { entries += LibraryEntry(item, it, LibraryEntryType.BOOK) }
             }
@@ -977,14 +1011,14 @@ internal fun titleFromFileName(fileName: String, fallback: String): String {
 }
 
 /** Non-secret import outcome; the UI maps it to a string resource. */
-private enum class ImportOutcome { SUCCESS, UNSUPPORTED, FAILED }
+internal enum class ImportOutcome { SUCCESS, UNSUPPORTED, FAILED }
 
-/** Parsed EPUB metadata copied out before the document is closed (no archive kept). */
-private class ParsedBookData(
+/** Metadata copied out of a loaded book before its engine handle is closed. */
+private class ImportedBookData(
     val title: String,
     val author: String?,
     val language: String?,
-    val chapterCount: Int,
+    val total: Int,
 )
 
 /** Imports one SAF URI as an encrypted PDF_FILE item; trashes the item on any failure. */
@@ -1013,51 +1047,80 @@ private suspend fun importPdf(
     }
 }
 
-/** Imports one SAF URI as an encrypted BOOK_FILE item and derives its metadata. */
-private suspend fun importEpub(
+/** Imports one SAF URI as an encrypted BOOK_FILE item of any supported format. */
+private suspend fun importBook(
     repository: NoteRepository,
     context: Context,
     uri: Uri,
+    untitledBookTitle: String,
 ): ImportOutcome {
-    val displayName = resolveDisplayName(context, uri, FALLBACK_EPUB_NAME)
+    val displayName = resolveDisplayName(context, uri, FALLBACK_BOOK_NAME)
+    // Read the bytes before creating the item: the content decides the format and the stored
+    // MIME, and an unreadable/oversized stream must not leave a row behind. The attachment
+    // limit matches what the repository would enforce anyway, so a huge pick is rejected
+    // before it can be buffered.
+    val bytes = withContext(Dispatchers.IO) {
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                readBoundedBytes(input, AttachmentLimits.MAX_ATTACHMENT_BYTES)
+            }
+        }.getOrNull()
+    } ?: return ImportOutcome.FAILED
+    return withContext(Dispatchers.IO) {
+        importBookFromBytes(repository, displayName, bytes, untitledBookTitle)
+    }
+}
+
+/**
+ * Testable import core (no SAF Context): detects the format of in-memory [bytes], derives the
+ * title/author/language with [BookLoader], writes the encrypted attachment with the detected
+ * MIME and stores the title plus encrypted [ReadingState] (author/language/total).
+ *
+ * An unsupported/corrupt/DRM-protected file returns [ImportOutcome.UNSUPPORTED] and the
+ * just-created item is trashed, exactly like a failed attachment write: the shelf never shows
+ * an orphan row. Unknown title metadata falls back to the cleaned SAF display name and then to
+ * [UNTITLED_BOOK_TITLE]; the file extension is never trusted.
+ */
+internal suspend fun importBookFromBytes(
+    repository: NoteRepository,
+    displayName: String,
+    bytes: ByteArray,
+    untitledBookTitle: String,
+): ImportOutcome {
     val created = repository.createItem(ItemKind.BOOK_FILE)
     var succeeded = false
     try {
-        val imported = withContext(Dispatchers.IO) {
-            val input = runCatching { context.contentResolver.openInputStream(uri) }.getOrNull()
-                ?: return@withContext null
-            input.use {
-                repository.importAttachment(created.id, displayName, EPUB_MIME, it)
-            }
+        val fallbackName = titleFromFileName(displayName, "").ifBlank { untitledBookTitle }
+        val detected = BookDetector.detect(bytes)
+        val loaded = BookLoader.load(bytes, fallbackName)
+        if (detected == null || loaded == null) {
+            loaded?.closeBook()
+            return ImportOutcome.UNSUPPORTED
         }
+        val metadata = try {
+            readBookMetadata(loaded, fallbackName)
+        } finally {
+            loaded.closeBook()
+        }
+
+        val imported = repository.importAttachment(
+            created.id,
+            displayName,
+            detected.mimeType.ifBlank { FALLBACK_BOOK_MIME },
+            ByteArrayInputStream(bytes),
+        )
         if (imported !is AttachmentImport.Success) return ImportOutcome.FAILED
 
-        val bytes = withContext(Dispatchers.IO) {
-            runCatching { repository.attachmentBytes(created.id, imported.ref.id) }.getOrNull()
-        } ?: return ImportOutcome.FAILED
-
-        val parsed = withContext(Dispatchers.IO) { EpubParser.parse(bytes) }
-            ?: return ImportOutcome.UNSUPPORTED
-        val bookData = ParsedBookData(
-            title = parsed.title,
-            author = sanitizeMetadata(parsed.author),
-            language = sanitizeMetadata(parsed.language),
-            chapterCount = parsed.chapters.size,
-        )
-        parsed.close()
-
-        repository.saveItem(
-            created.copy(
-                title = bookData.title.takeIf { it.isNotBlank() }
-                    ?: titleFromFileName(displayName, displayName),
-            ),
-        )
+        // Re-read the item after the attachment write: the attachment list is repository-owned
+        // (a stale copy would drop it on repository implementations that don't merge it).
+        val withAttachment = repository.items.value.firstOrNull { it.id == created.id } ?: created
+        repository.saveItem(withAttachment.copy(title = metadata.title))
         repository.saveReadingState(
             created.id,
             ReadingState(
-                author = bookData.author,
-                language = bookData.language,
-                total = bookData.chapterCount,
+                author = metadata.author,
+                language = metadata.language,
+                total = metadata.total,
             ),
         )
         succeeded = true
@@ -1065,6 +1128,53 @@ private suspend fun importEpub(
     } finally {
         if (!succeeded) trashQuietly(repository, created.id)
     }
+}
+
+/** Copies title/author/language/total out of a loaded book before the engine handle closes. */
+private fun readBookMetadata(loaded: LoadedBook, fallbackName: String): ImportedBookData =
+    when (loaded) {
+        is LoadedBook.Reflowable -> ImportedBookData(
+            title = loaded.content.title.trim().ifBlank { fallbackName },
+            author = sanitizeMetadata(loaded.content.author),
+            language = sanitizeMetadata(loaded.content.language),
+            total = loaded.content.chapters.size,
+        )
+
+        is LoadedBook.Comic -> ImportedBookData(
+            // CBZ carries no metadata: the item/file display name is the only title source.
+            title = loaded.comic.title.trim().ifBlank { fallbackName },
+            author = null,
+            language = null,
+            total = loaded.comic.pageCount,
+        )
+    }
+
+/** Closes whichever engine handle a loaded book owns (both close methods are idempotent). */
+private fun LoadedBook.closeBook() {
+    when (this) {
+        is LoadedBook.Reflowable -> content.close()
+        is LoadedBook.Comic -> comic.close()
+    }
+}
+
+/**
+ * Reads [input] fully, returning null instead of buffering past [maxBytes] (no allocation past
+ * the cap). Mirrors the repository's own attachment size limit so ImportOutcome.FAILED is
+ * reported for an oversized pick instead of an OOM.
+ */
+private fun readBoundedBytes(input: InputStream, maxBytes: Long): ByteArray? {
+    if (maxBytes <= 0L || maxBytes > Int.MAX_VALUE) return null
+    val output = ByteArrayOutputStream()
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    var total = 0L
+    while (true) {
+        val read = input.read(buffer)
+        if (read < 0) break
+        total += read
+        if (total > maxBytes) return null
+        output.write(buffer, 0, read)
+    }
+    return output.toByteArray()
 }
 
 /** Best-effort removal of the just-created item, even if the coroutine was cancelled. */
@@ -1096,7 +1206,7 @@ private fun resolveDisplayName(context: Context, uri: Uri, fallback: String): St
     }
 }
 
-/** EPUB metadata is user content: bound it to what ReadingState accepts. */
+/** Book metadata is user content: bound it to what ReadingState accepts. */
 private fun sanitizeMetadata(value: String?): String? =
     value?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_METADATA_CHARS)
 

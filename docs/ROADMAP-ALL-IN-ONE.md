@@ -81,10 +81,15 @@ Deliver:
   split Markdown preview, offline symbol search, file templates, content-level EPUB/PDF text
   search (needs a vetted text engine), multi-select export, disk-usage view.
 
-## Phase 14 — More formats, reading comfort, release polish
+## Phase 14 — More formats, reading comfort, release polish (formats shipped, increment 14)
 
 - Formats: TXT/FB2/CBZ (comics) first (cheap, offline parsers), then evaluate MOBI/AZW3 (own
   parser; DRM-locked files refused); DjVu/DOCX out of scope unless a vetted engine is chosen.
+- **Shipped in increment 14:** content-detected TXT/FB2/CBZ support with a shared `BookContent`
+  reader (EPUB/FB2/TXT TOC/search/bookmarks/appearance/progress), a paged CBZ comic reader with
+  encrypted bookmarks/resume, format-aware Library import/labels, 107 engine tests + 25 UI tests
+  and device QA. **Still queued:** MOBI/AZW3 evaluation, TTS, hyphenation, per-book appearance
+  overrides, reading statistics, translations, accessibility pass, F-Droid window.
 - Reader comfort: TTS via platform engine (optional, offline voices), hyphenation, per-book
   appearance overrides, statistics, OPDS explicitly **not** (network invariant).
 - Translations, accessibility pass, F-Droid publication window (2027-02-15), store assets.

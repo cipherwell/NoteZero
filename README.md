@@ -10,7 +10,7 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 [VaultZero](https://github.com/cipherwell/Vault-Zero) with an independent package
 (`com.cipherwell.notezero`), independent signing key and independent threat model.
 
-> Status: **Phase 5 — all-in-one workspace (increment 13)** — 2026-11-17.
+> Status: **Phase 5 — all-in-one workspace (increment 14)** — 2026-11-18.
 > Security core, notes MVP, encrypted SAF backup/restore, code editor (workspace
 > search/copy/export/indent), encrypted attachments (images/files/**drawings**),
 > **locked notes/folders**, **Markdown/HTML/PDF note export**, **table editing**,
@@ -23,7 +23,7 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 > phased plan (PDF annotation, drawing studio, universal file workspace, more formats) are
 > in [docs/ROADMAP-ALL-IN-ONE.md](docs/ROADMAP-ALL-IN-ONE.md), grounded in
 > [docs/RESEARCH-ALL-IN-ONE-2026-11-17.md](docs/RESEARCH-ALL-IN-ONE-2026-11-17.md).
-> Builds are green, **1219 unit tests + 23 device tests**, and **signed APK + AAB release
+> Builds are green, **1351 unit tests + 23 device tests**, and **signed APK + AAB release
 > builds are byte-for-byte reproducible**; an independent security audit previously found
 > no HIGH/CRITICAL issues and its findings are remediated. Device QA on a Pixel 9 Pro XL
 > (Android 17) and the emulator covered import, TOC, search, bookmarks, themes and
@@ -59,6 +59,10 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 | ![Sketch drawn](docs/screenshots/32-sketch-drawn.png) | ![Sketch library](docs/screenshots/33-sketch-library.png) | ![Workspace](docs/screenshots/34-workspace.png) |
 | **Unified search** | **Multi-select bulk actions** | **Bulk trash confirmation** |
 | ![Workspace search](docs/screenshots/36-workspace-search.png) | ![Selection](docs/screenshots/35-workspace-selection.png) | ![Trash confirm](docs/screenshots/37-workspace-trash.png) |
+| **TXT reader (shared tools)** | **FB2 reader (TOC/poetry/epigraph)** | **CBZ comic reader** |
+| ![TXT reader](docs/screenshots/38-txt-reader.png) | ![FB2 reader](docs/screenshots/39-fb2-reader.png) | ![Comic reader](docs/screenshots/40-comic-reader.png) |
+| **Library with all e-book formats** | **Comic bookmarks (encrypted)** | |
+| ![Library formats](docs/screenshots/41-library-formats.png) | ![Comic bookmarks](docs/screenshots/42-comic-bookmarks.png) | |
 
 Screenshots are real emulator captures from the instrumented E2E run (debug build with
 `-PallowScreenshots=true`; normal builds set FLAG_SECURE, which makes `screencap` return a
@@ -149,6 +153,27 @@ Screenshots are real emulator captures from the instrumented E2E run (debug buil
   Lock/Trash; bulk trash confirmation removed the item and updated the summary to
   `3 items · 1 attachments · 431 B`; tapping a note row opened it in the editor via the deep link.
   1219 unit tests / 0 failures (101 classes) and 23 instrumented tests green.
+
+## More e-book formats: TXT, FB2, CBZ (2026-11-18)
+
+- **Format detection from the decrypted bytes** (no new item kind/payload): EPUB -> CBZ -> FB2 ->
+  TXT; the Library import stores the detected MIME and derives title/author before surfacing the
+  item, removing the placeholder for unknown/corrupt/DRM files.
+- **Shared reader**: EPUB, FB2 and TXT all use the existing reader (TOC, in-book search,
+  bookmarks, font/line-spacing/margins, paper/sepia/night themes, progress/resume) over the
+  `BookContent` interface; FB2 maps sections/TOC, inline styles, poems, epigraphs, subtitles and
+  embedded base64 images/cover; TXT is BOM-aware UTF-8/UTF-16 with a windows-1252 fallback and
+  auto-chaptering for progress.
+- **CBZ comics** get a paged reader: lazy in-memory page decoding, page progress/jump,
+  encrypted page bookmarks + resume, page error placeholders; no text search/TOC.
+- All parsers are dependency-free, bounded and fail-closed (no DTD/XXE, no scripts, ≤500 comic
+  pages, image/block/chapter caps, 1,000+ fuzz cases); pages/images exist only in memory.
+- **Measured QA** (emulator, Android 17 image): imported TXT/FB2/CBZ through SAF — rows showed
+  `TXT`, `FB2` (title "The FB2 Test Book", author Ada Fiction, Chapter 1 of 3) and `Comic`
+  (qa-comic); TXT search "txt-words" returned 1 snippet; FB2 rendered sections, poems and
+  epigraphs with a 3-entry TOC; CBZ decoded pages 1–3, page jump/bookmark persisted across
+  relaunch; `qa-unknown.bin` was rejected with the non-secret unsupported message and left no row.
+  1351 unit tests / 0 failures (108 classes) and 23 instrumented tests green.
 
 ## Verified end to end (2026-11-15)
 

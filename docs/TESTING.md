@@ -64,6 +64,19 @@ CI runs `assembleDebug`, `testDebugUnitTest`, and `check-offline.sh --gradle` on
 | `ui.workspace.WorkspaceScreenTest` (Robolectric) | 25 | Rows/filters/sort/search/summary, masked+hidden items absent, long-press multi-select + select-all, bulk move/lock/trash + confirmation, non-secret failures, note/code open callbacks, hosted PDF/book/sketch routing with test seams, re-auth for verified-locked rows |
 | `ui.AppRootTest` shell routing | +1 | Workspace opens from the Notes top bar and back returns to Notes |
 
+## Increment-14 areas (TXT / FB2 / CBZ formats)
+
+| Area | Tests | What it proves |
+|---|---|---|
+| `book.BookDetectorTest` | 18 | Content-based detection matrix (EPUB/CBZ/FB2/TXT), ambiguity, truncation, random blobs |
+| `book.TxtBookParserTest` | 27 | BOM UTF-8/UTF-16, windows-1252 fallback, chaptering/paragraph mapping, caps, empty/oversize |
+| `book.Fb2BookParserTest` | 35 | Metadata/TOC/sections/inline styles/poems/epigraphs/cover/base64 images, XXE/DTD refusal, limits |
+| `book.CbzParserTest` | 15 | Natural page order, page bytes/copies/close, corrupt/missing entries, caps |
+| `book.BookLoaderTest` | 12 | Dispatch, `BookContent`/`ComicBook` lifecycle, fuzz |
+| `ui.reader.BookReaderScreenTest` | +7 (23) | TXT render/search/TOC, FB2 metadata/sections/nested TOC/search, unsupported bytes -> `book_error`; EPUB cases unchanged |
+| `ui.comic.ComicReaderScreenTest` | 11 | Page rendering/navigation, page jump validation, bookmark add/delete/resume persistence, missing/empty comic errors |
+| `ui.library.LibraryBookImportTest` | 7 | Format detection/MIME/title/author import + unsupported cleanup (no orphan row) |
+
 ## Backup-flow tests (Phase-2 SAF gap)
 
 | Test | What it proves | Tooling |
@@ -104,7 +117,7 @@ Commands:
 
 | Suite | Command | Result |
 |---|---|---|
-| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **1219 tests / 0 failures / 0 errors / 0 skipped** (101 classes) |
+| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **1351 tests / 0 failures / 0 errors / 0 skipped** (108 classes) |
 | Instrumented (emulator) | `adb shell am instrument -w com.cipherwell.notezero.test/androidx.test.runner.AndroidJUnitRunner` | **OK (15 tests)** incl. `NotePdfRenderInstrumentedTest`, `VaultFlowE2ETest` (notes + backup settings + code workspace + create sheet + PDF) and a real-`PdfRenderer` instrumented test |
 | Offline guarantee | `./scripts/check-offline.sh --gradle` | exit 0 |
 | Release signing | `apksigner verify --print-certs app-release.apk` | NoteZero upload key SHA-256 `FA:CA:DD:67:…:92:78` |

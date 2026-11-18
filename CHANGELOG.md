@@ -3,6 +3,53 @@
 All notable changes to NoteZero are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [Unreleased] — more reading formats: TXT, FB2, CBZ comics (2026-11-18, increment 14)
+
+### Added
+
+**Format engine (dependency-free, pure JVM)**
+- `BookContent` interface implemented by `EpubDocument`, so EPUB/FB2/TXT share the same reader
+  surface (chapters, TOC, cover, lazy images, close lifecycle).
+- `BookFormat` + `BookDetector` (content-based: EPUB -> CBZ -> FB2 -> TXT) + `BookLoader`
+  (single UI entry point returning `LoadedBook.Reflowable`/`LoadedBook.Comic`).
+- **TXT**: BOM-aware UTF-8/UTF-16LE/BE decoding, no-BOM UTF-8 with windows-1252 fallback,
+  blank-line paragraphs, heading-aware auto-chaptering (`Chapter/Part/...`) with "Part N"
+  fallback, caps (2,000 chapters / 20,000 blocks / 2M chars per chapter + whole-book caps).
+- **FB2**: secure XML (no DTD/XXE/external entities), metadata (title/author/language), body
+  sections -> chapters + TOC, nested sections -> headings, p/emphasis/strong/code/a/poem/stanza/v/
+  epigraph/cite/empty-line/subtitle/text-author mapping, lazy base64 `<binary>` images (bounded,
+  copies), cover from `<coverpage>`; malformed/XXE -> null.
+- **CBZ**: natural-sorted image pages (jpg/jpeg/png/webp/gif), ≤500 pages, bounds, lazy page
+  byte copies, close lifecycle; unsupported/corrupt archives -> null.
+- All decoders never throw, never write temp files/caches, no logging, no new dependencies.
+- **Tests**: 107 new engine tests (BookDetector 18, TxtBookParser 27, Fb2BookParser 35,
+  CbzParser 15, BookLoader 12) + all 104 existing EPUB/book tests green; docs/BOOK-FORMATS.md.
+
+**Library + reader UI**
+- Book import is now format-generic: `BookDetector`/`BookLoader` derive the detected MIME,
+  title and author, store the encrypted `ReadingState` metadata and remove the placeholder on
+  unsupported/corrupt/DRM input (non-secret `library_import_unsupported`).
+- `BookReaderScreen` loads through `BookLoader`: EPUB/FB2/TXT use the existing TOC/search/
+  bookmarks/appearance/progress/resume tools over `BookContent`; CBZ dispatches to a new
+  **ComicReaderScreen** (paged images decoded lazily in memory, page progress/jump, encrypted
+  page bookmarks and resume, loading/page-error/comic-error states, no text search/TOC).
+- Library rows show the detected format label (`EPUB`/`FB2`/`TXT`/`Comic`) and "Page x of y"
+  progress for comics while books keep chapter progress.
+- **Tests**: +25 UI tests (reader formats 7, comic reader 11, library import 7); existing
+  EPUB/PDF/workspace/library suites stay green; docs/READER-UI formats section.
+
+### Verified (measured)
+- **1351 unit tests / 0 failures** (108 classes; +132: 107 engine + 25 UI) and **23 instrumented
+  tests OK**.
+- Emulator QA: imported TXT (`qa-book`, label TXT, reader + search "txt-words" 1 result), FB2
+  (title/author detected, label FB2, sections/poem/epigraph render, 3-entry TOC) and CBZ
+  (label Comic, pages 1–3 decoded, page jump/bookmark persisted across relaunch); an unknown
+  `.bin` was rejected with the unsupported message and left no row; 0 crashes.
+- Offline guard OK; token lint clean; no debug/logging leftovers; no new permissions/deps.
+- New screenshots `38-txt-reader`, `39-fb2-reader`, `40-comic-reader`, `41-library-formats`,
+  `42-comic-bookmarks`; docs CONTRACTS-PHASE13, BOOK-FORMATS, READER-UI, DECISIONS #26,
+  THREAT-MODEL §3.9.6, VERIFICATION §19.
+
 ## [Unreleased] — universal Workspace / IDE layer (2026-11-17, increment 13)
 
 ### Added

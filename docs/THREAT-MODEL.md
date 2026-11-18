@@ -163,6 +163,21 @@ its PendingIntent is immutable and its receiver is not exported. The only effect
 is the same pending quick-capture request as the launcher shortcut, which is honoured only
 after a successful unlock.
 
+### 3.9.6 Additional book formats and the shared reader (increment 14)
+
+`BOOK_FILE` now accepts EPUB/FB2/TXT/CBZ, with the format detected from the decrypted bytes at
+open time (EPUB -> CBZ -> FB2 -> TXT) instead of a schema change. All parsers are dependency-free
+pure JVM code with the same fail-closed discipline as the EPUB engine: bounded entries/sizes/
+chapters/blocks/images/pages, XML external entity/DTD resolution disabled (FB2), no scripts/CSS/
+HTML execution, corrupt/ambiguous/unsupported input returns `null` (clean reader error, no partial
+book) and never throws. Comics (CBZ) are an image archive: page entries are bounded (≤500 pages,
+≤16 MiB each), decoded lazily per page in memory via the existing Android decoder, recycled on
+dispose, with no extraction to disk and no plaintext thumbnail cache. The shared `BookContent`
+interface lets EPUB/FB2/TXT reuse the existing reader (TOC/search/bookmarks/appearance/progress)
+without duplicating UI, while comics get a paged reader storing only encrypted `ReadingState`
+progress/bookmarks (no content). Import detects the format and metadata before surfacing the item,
+stores the detected MIME, and removes the placeholder on failure; no content/name logging.
+
 ### 3.9.5 Universal workspace and bulk operations (increment 13)
 
 The Workspace is a second view over the already-decrypted item index, not a second store: no new
@@ -323,6 +338,9 @@ detailed per-blob design in `docs/ATTACHMENTS.md` §9 (audit D4).
 | Workspace surfaces cannot leak locked/hidden content | same `LockVisibility` masking as code/Library; search/counts built from visible items only; re-auth on open | workspace helper + Robolectric tests |
 | Bulk workspace operations fail closed on lock | only visible selected ids; repository false/status handled; non-secret error + refresh | workspace tests |
 | Workspace adds no storage/permission surface | view over the existing decrypted index; no new payload/table/permission/dependency | code review + offline guard |
+| Hostile TXT/FB2/CBZ files cannot crash or execute code | pure bounded parsers, XXE/DTD off, DRM/unsupported → null, fuzz tests; no WebView/scripts | `book.*` format tests, `docs/BOOK-FORMATS.md` |
+| Comic pages never exist as plaintext files outside the vault | page bytes decrypted in memory, decoded/recycled per page; no temp/cache writes | code review + comic reader tests |
+| New e-book formats add no storage/permission surface | `BOOK_FILE` reused; format detected from bytes; no new kind/payload/permission | code review + offline guard |
 
 ---
 

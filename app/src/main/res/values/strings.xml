@@ -470,7 +470,7 @@
     <string name="cd_library_back">Back</string>
     <string name="library_import">Import</string>
     <string name="library_import_pdf">PDF document</string>
-    <string name="library_import_epub">E-book (EPUB)</string>
+    <string name="library_import_epub">E-book (EPUB, FB2, TXT, Comic)</string>
     <string name="library_filter_all">All</string>
     <string name="library_filter_books">Books</string>
     <string name="library_filter_pdfs">PDFs</string>
@@ -481,7 +481,7 @@
     <string name="library_import_failed">The document could not be imported. Nothing in your vault changed.</string>
     <string name="library_import_unsupported">This file is not a supported, DRM-free document.</string>
     <string name="library_type_pdf">PDF</string>
-    <string name="library_type_book">EPUB</string>
+    <string name="library_type_book">E-book</string>
     <string name="library_type_drawing">Drawing</string>
     <string name="library_continue">Continue</string>
     <string name="library_page_progress">Page %1$d of %2$d</string>
@@ -660,4 +660,25 @@
         <item quantity="one">Move %1$d item to trash?</item>
         <item quantity="other">Move %1$d items to trash?</item>
     </plurals>
+    <!-- Additional e-book formats + comic reader -->
+    <string name="book_format_txt">TXT</string>
+    <string name="book_format_fb2">FB2</string>
+    <string name="book_format_cbz">Comic</string>
+    <string name="book_format_epub">EPUB</string>
+    <string name="book_untitled">Untitled book</string>
+    <string name="comic_reader">Comic reader</string>
+    <string name="comic_page_progress">%1$d / %2$d</string>
+    <string name="comic_page_jump">Go to page</string>
+    <string name="comic_page_field">Page number</string>
+    <string name="comic_page_invalid">Enter a page between 1 and %1$d.</string>
+    <string name="comic_bookmark_add">Add bookmark</string>
+    <string name="comic_bookmarks">Bookmarks</string>
+    <string name="comic_bookmarks_empty">No bookmarks yet.</string>
+    <string name="comic_bookmark_default">Page %1$d</string>
+    <string name="comic_loading">Opening comic…</string>
+    <string name="comic_error">This comic could not be opened. It may be unsupported or corrupted.</string>
+    <string name="comic_image_failed">Page could not be rendered</string>
+    <string name="library_import_book">E-book (EPUB, FB2, TXT, CBZ)</string>
+    <string name="library_type_book_format">%1$s e-book</string>
+
 </resources>

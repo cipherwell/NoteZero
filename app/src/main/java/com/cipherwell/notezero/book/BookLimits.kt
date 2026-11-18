@@ -42,4 +42,43 @@ internal object BookLimits {
 
     /** Number of spine items parsed into chapters (defensive; central directory is capped too). */
     const val MAX_CHAPTERS: Int = 5_000
+
+    // ---- additional reflowable formats (TXT / FictionBook FB2) -------------------------
+
+    /** Chapters parsed for TXT/FB2 (2,000; matches the phase-13 contract). */
+    const val MAX_REFOWABLE_CHAPTERS: Int = 2_000
+
+    /**
+     * Total blocks across one TXT/FB2 book (200,000). The per-chapter cap alone would allow
+     * 2,000 x 20,000 blocks, which is far beyond a phone reader's memory; this is the
+     * whole-book bound behind that cap.
+     */
+    const val MAX_TOTAL_BLOCKS: Int = 200_000
+
+    /** Total searchable characters across one TXT/FB2 book (8,000,000). */
+    const val MAX_TOTAL_TEXT_CHARS: Int = 8_000_000
+
+    /** TXT chapter part length: a new "Part N" starts at the next paragraph boundary (20,000). */
+    const val TXT_PART_TARGET_CHARS: Int = 20_000
+
+    /** Largest FB2 document handed to the parser (32 MiB; larger input is unsupported). */
+    const val MAX_FB2_XML_BYTES: Int = 32 * 1024 * 1024
+
+    /** FB2 `<binary>` images kept per book (64). */
+    const val MAX_FB2_IMAGES: Int = 64
+
+    /** Decoded bytes per FB2 image (4 MiB, same bound as an EPUB cover). */
+    const val MAX_FB2_IMAGE_BYTES: Int = 4 * 1024 * 1024
+
+    /** Total decoded FB2 image bytes kept per book (32 MiB). */
+    const val MAX_FB2_IMAGE_TOTAL_BYTES: Int = 32 * 1024 * 1024
+
+    /** Base64 characters collected from one `<binary>` element (6,000,000 ~= 4.5 MiB decoded). */
+    const val MAX_FB2_BASE64_CHARS: Int = 6_000_000
+
+    /** Pages exposed by a CBZ archive (500; extra image entries are ignored). */
+    const val MAX_COMIC_PAGES: Int = 500
+
+    /** Characters decoded from a TXT file; the remainder is not read (8,000,000). */
+    const val MAX_TXT_DECODED_CHARS: Int = MAX_TOTAL_TEXT_CHARS
 }

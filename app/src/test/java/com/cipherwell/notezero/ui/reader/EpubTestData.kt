@@ -52,8 +52,18 @@ object EpubTestData {
         return zip(entries)
     }
 
-    /** Bytes that are not a ZIP/EPUB at all: the reader must fail closed. */
-    fun corruptEpub(): ByteArray = "this is not an epub archive".toByteArray(Charsets.UTF_8)
+    /**
+     * Bytes the engine rejects in every supported format (binary, no ZIP signature, not XML
+     * text): the multi-format reader must fail closed instead of surfacing a corrupt book.
+     */
+    fun corruptBook(): ByteArray = ByteArray(96) { index ->
+        when (index % 4) {
+            0 -> 0x00
+            1 -> 0xC3.toByte()
+            2 -> 0x28
+            else -> 0x81.toByte()
+        }
+    }
 
     /**
      * Seeds a [FakeNoteRepository] with an encrypted-looking BOOK_FILE item holding [bytes]

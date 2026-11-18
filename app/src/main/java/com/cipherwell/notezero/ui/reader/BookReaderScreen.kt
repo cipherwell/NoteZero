@@ -86,16 +86,19 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cipherwell.notezero.R
 import com.cipherwell.notezero.book.BookBlock
 import com.cipherwell.notezero.book.BookChapter
+import com.cipherwell.notezero.book.BookContent
+import com.cipherwell.notezero.book.BookFormat
 import com.cipherwell.notezero.book.BookInline
 import com.cipherwell.notezero.book.BookListItem
+import com.cipherwell.notezero.book.BookLoader
 import com.cipherwell.notezero.book.BookTocEntry
-import com.cipherwell.notezero.book.EpubDocument
-import com.cipherwell.notezero.book.EpubParser
+import com.cipherwell.notezero.book.LoadedBook
 import com.cipherwell.notezero.data.NoteRepository
 import com.cipherwell.notezero.data.VaultStatus
 import com.cipherwell.notezero.model.ReadingBookmark
 import com.cipherwell.notezero.model.ReadingState
 import com.cipherwell.notezero.ui.attachments.AttachmentImages
+import com.cipherwell.notezero.ui.comic.ComicReaderScreen
 import com.cipherwell.notezero.ui.components.common.NzIconButton
 import com.cipherwell.notezero.ui.locks.LockVisibility
 import com.cipherwell.notezero.ui.theme.NoteZeroShapes
@@ -114,14 +117,19 @@ private const val SEARCH_SNIPPET_CONTEXT_CHARS = 80
 private const val STATE_SAVE_DEBOUNCE_MS = 500L
 
 /**
- * Full-screen EPUB reader.
+ * Full-screen e-book reader for one `BOOK_FILE` item, dispatching on the detected format.
  *
- * The encrypted EPUB is decrypted and parsed in memory on [Dispatchers.IO]; the resulting
- * [EpubDocument] holds the compressed archive only long enough to decode inline images on
- * demand and is closed as soon as this composable leaves (or the vault locks). No chapter
- * text, title, bookmark or position is ever written outside the vault: reading state goes
- * through [NoteRepository.saveReadingState] (encrypted item payload) and appearance lives
- * in the non-secret [ReaderPrefs].
+ * The encrypted attachment is decrypted and opened in memory on [Dispatchers.IO] with
+ * [BookLoader] (content-based detection, never the extension). EPUB, FB2 and TXT all resolve
+ * to a [BookContent] and share this reader's tools (TOC, search, bookmarks, appearance,
+ * progress, resume); a CBZ resolves to [LoadedBook.Comic] and is handed to
+ * [ComicReaderScreen], which renders page images instead of text. A `null` load (unsupported,
+ * corrupt or DRM-protected input) shows [R.string.book_reader_error].
+ *
+ * The parsed [BookContent]/comic is closed as soon as this composable leaves (or the vault
+ * locks). No chapter text, title, bookmark or position is ever written outside the vault:
+ * reading state goes through [NoteRepository.saveReadingState] (encrypted item payload) and
+ * appearance lives in the non-secret [ReaderPrefs].
  *
  * Chrome follows the standard reading layout: tapping the page toggles the bars, the left
  * and right edge zones turn chapters, and every navigation affordance (TOC, search
@@ -140,9 +148,9 @@ fun BookReaderScreen(
     val status by repository.status.collectAsStateWithLifecycle()
     val verifiedLockedIds by repository.verifiedLockedIds.collectAsStateWithLifecycle()
     val item = flowItems.firstOrNull { it.id == itemId }
-    val attachment = item?.attachments
-        ?.firstOrNull { it.mimeType == EpubParser.MIME }
-        ?: item?.attachments?.firstOrNull()
+    // A BOOK_FILE item carries exactly one encrypted e-book attachment; the format is
+    // detected from the decrypted bytes (never from the stored MIME or file extension).
+    val attachment = item?.attachments?.firstOrNull()
     val masked = item != null && LockVisibility.isItemMasked(item, verifiedLockedIds)
 
     val prefsStore = remember(context) { ReaderPrefs(context) }
@@ -153,7 +161,7 @@ fun BookReaderScreen(
 
     var loading by remember(itemId) { mutableStateOf(true) }
     var failed by remember(itemId) { mutableStateOf(false) }
-    var document by remember(itemId) { mutableStateOf<EpubDocument?>(null) }
+    var loadedBook by remember(itemId) { mutableStateOf<LoadedBook?>(null) }
     var chromeVisible by remember(itemId) { mutableStateOf(true) }
     var notice by remember(itemId) { mutableStateOf<String?>(null) }
 
@@ -168,7 +176,10 @@ fun BookReaderScreen(
 
     val bookmarkAddedNotice = stringResource(R.string.book_bookmark_added)
     val bookmarkDeletedNotice = stringResource(R.string.book_bookmark_deleted)
-    val chapterCount = document?.chapters?.size ?: 0
+    val loaded = loadedBook
+    val book = (loaded as? LoadedBook.Reflowable)?.content
+    val comicBook = (loaded as? LoadedBook.Comic)?.comic
+    val chapterCount = book?.chapters?.size ?: 0
     val currentChapter = if (chapterCount > 0) {
         listState.firstVisibleItemIndex.coerceIn(0, chapterCount - 1)
     } else {
@@ -183,30 +194,43 @@ fun BookReaderScreen(
 
     val restoredPosition = item?.readingState?.position ?: 0
     val title = item?.title?.takeIf { it.isNotBlank() }
-        ?: document?.title?.takeIf { it.isNotBlank() }
+        ?: book?.title?.takeIf { it.isNotBlank() }
         ?: attachment?.displayName.orEmpty()
     val author = item?.readingState?.author?.takeIf { it.isNotBlank() }
-        ?: document?.author?.takeIf { it.isNotBlank() }
+        ?: book?.author?.takeIf { it.isNotBlank() }
+    // Formats share one reader; surface which engine opened the file in the metadata line.
+    val formatLabel = when ((loaded as? LoadedBook.Reflowable)?.format) {
+        BookFormat.EPUB -> stringResource(R.string.book_format_epub)
+        BookFormat.FB2 -> stringResource(R.string.book_format_fb2)
+        BookFormat.TXT -> stringResource(R.string.book_format_txt)
+        BookFormat.CBZ -> stringResource(R.string.book_format_cbz)
+        null -> null
+    }
+    val chromeSubtitle = if (formatLabel == null) {
+        author
+    } else {
+        listOfNotNull(formatLabel, author).joinToString(" · ")
+    }
 
     val previousChapterLabel = stringResource(R.string.book_previous_chapter)
     val nextChapterLabel = stringResource(R.string.book_next_chapter)
 
-    // Drop the decrypted archive as soon as the composition (or the current document) dies.
-    DisposableEffect(document) {
-        val owned = document
-        onDispose { owned?.close() }
+    // Drop the decrypted content (or comic archive) as soon as the composition dies.
+    DisposableEffect(loadedBook) {
+        val owned = loadedBook
+        onDispose { owned?.closeBook() }
     }
 
     // A vault lock must never leave a parsed/decrypted book reachable in memory here.
     LaunchedEffect(status) {
         if (status != VaultStatus.UNLOCKED) {
-            document?.close()
-            document = null
+            loadedBook?.closeBook()
+            loadedBook = null
             loading = false
         }
     }
 
-    // Load + parse on IO. The item flow can arrive a beat after the screen if the shell is
+    // Load + dispatch on IO. The item flow can arrive a beat after the screen if the shell is
     // still restoring; keep showing the loading state until both the item and its
     // attachment are known instead of flashing the error state.
     LaunchedEffect(itemId, attachment?.id, status, masked) {
@@ -216,8 +240,7 @@ fun BookReaderScreen(
             return@LaunchedEffect
         }
         if (masked || attachment == null) {
-            document?.close()
-            document = null
+            loadedBook = null
             failed = true
             loading = false
             return@LaunchedEffect
@@ -225,20 +248,23 @@ fun BookReaderScreen(
         loading = true
         failed = false
         notice = null
-        val parsed = withContext(Dispatchers.IO) {
+        val fallbackTitle = item.title.takeIf { it.isNotBlank() } ?: attachment.displayName
+        val opened = withContext(Dispatchers.IO) {
             val bytes = runCatching { repository.attachmentBytes(itemId, attachment.id) }.getOrNull()
-            if (bytes == null) null else EpubParser.parse(bytes)
+            if (bytes == null) null else BookLoader.load(bytes, fallbackTitle)
         }
         if (repository.status.value != VaultStatus.UNLOCKED) {
-            parsed?.close()
+            opened?.closeBook()
             return@LaunchedEffect
         }
-        if (parsed == null || parsed.chapters.isEmpty()) {
-            parsed?.close()
+        val reflowable = opened as? LoadedBook.Reflowable
+        if (opened == null || (reflowable != null && reflowable.content.chapters.isEmpty())) {
+            opened?.closeBook()
+            loadedBook = null
             failed = true
             loading = false
         } else {
-            document = parsed
+            loadedBook = opened
             failed = false
             loading = false
         }
@@ -246,52 +272,52 @@ fun BookReaderScreen(
 
     // Restore the last chapter once the document is ready, and persist the chapter total
     // and restored index (repository-owned, encrypted; failures while locked are ignored).
-    LaunchedEffect(document) {
-        val book = document ?: return@LaunchedEffect
+    LaunchedEffect(book) {
+        val content = book ?: return@LaunchedEffect
         val fresh = repository.items.value.firstOrNull { it.id == itemId }?.readingState
-        val target = (fresh?.position ?: restoredPosition).coerceIn(0, book.chapters.lastIndex)
+        val target = (fresh?.position ?: restoredPosition).coerceIn(0, content.chapters.lastIndex)
         if (target > 0) {
             listState.scrollToItem(target)
         }
         runCatching {
             repository.saveReadingState(
                 itemId,
-                (fresh ?: ReadingState()).copy(position = target, fraction = 0f, total = book.chapters.size),
+                (fresh ?: ReadingState()).copy(position = target, fraction = 0f, total = content.chapters.size),
             )
         }
     }
 
     // Debounced chapter position save: scrolling restarts the effect, so only a settled
     // chapter is persisted (>= 500 ms), never a transient scroll frame.
-    LaunchedEffect(currentChapter, document, loading, failed) {
-        val book = document ?: return@LaunchedEffect
+    LaunchedEffect(currentChapter, book, loading, failed) {
+        val content = book ?: return@LaunchedEffect
         if (loading || failed) return@LaunchedEffect
         delay(STATE_SAVE_DEBOUNCE_MS)
-        val chapter = currentChapter.coerceIn(0, book.chapters.lastIndex)
+        val chapter = currentChapter.coerceIn(0, content.chapters.lastIndex)
         val fresh = repository.items.value.firstOrNull { it.id == itemId }?.readingState
-        if (fresh?.position == chapter && fresh.total == book.chapters.size) return@LaunchedEffect
+        if (fresh?.position == chapter && fresh.total == content.chapters.size) return@LaunchedEffect
         runCatching {
             repository.saveReadingState(
                 itemId,
-                (fresh ?: ReadingState()).copy(position = chapter, fraction = 0f, total = book.chapters.size),
+                (fresh ?: ReadingState()).copy(position = chapter, fraction = 0f, total = content.chapters.size),
             )
         }
     }
 
     // In-book search runs on a background thread over the already-parsed blocks; it never
     // touches the archive and returns at most MAX_SEARCH_RESULTS snippets.
-    LaunchedEffect(searchQuery, document) {
-        val book = document
+    LaunchedEffect(searchQuery, book) {
+        val content = book
         val query = searchQuery.trim()
-        if (book == null || query.isEmpty()) {
+        if (content == null || query.isEmpty()) {
             searchResults = emptyList()
             return@LaunchedEffect
         }
-        searchResults = withContext(Dispatchers.Default) { searchBook(book, query) }
+        searchResults = withContext(Dispatchers.Default) { searchBook(content, query) }
     }
 
     fun goToChapter(index: Int) {
-        val count = document?.chapters?.size ?: return
+        val count = book?.chapters?.size ?: return
         val target = index.coerceIn(0, count - 1)
         scope.launch { listState.scrollToItem(target) }
     }
@@ -311,7 +337,9 @@ fun BookReaderScreen(
 
     val defaultBookmarkLabel = stringResource(R.string.book_chapter_label, currentChapter + 1)
 
-    BackHandler { onClose() }
+    // A comic reader owns its own back handling (it closes itself like the PDF viewer); the
+    // text reader and the loading/error states close the item route on system back.
+    if (comicBook == null) BackHandler { onClose() }
 
     Box(
         modifier = modifier
@@ -320,12 +348,11 @@ fun BookReaderScreen(
             .testTag("book_reader"),
     ) {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
-            val book = document
             when {
                 loading -> {
                     BookReaderChrome(
                         title = title,
-                        author = null,
+                        subtitle = null,
                         percent = null,
                         palette = palette,
                         onBack = onClose,
@@ -346,10 +373,20 @@ fun BookReaderScreen(
                     }
                 }
 
+                // A CBZ is a fixed-page comic: same reader surface, page-oriented UI, no
+                // text search/TOC. Back/close and vault-lock handling live in the reader.
+                comicBook != null -> ComicReaderScreen(
+                    comic = comicBook,
+                    repository = repository,
+                    itemId = itemId,
+                    onClose = onClose,
+                    modifier = Modifier.fillMaxSize(),
+                )
+
                 failed || book == null -> {
                     BookReaderChrome(
                         title = title,
-                        author = null,
+                        subtitle = null,
                         percent = null,
                         palette = palette,
                         onBack = onClose,
@@ -374,7 +411,7 @@ fun BookReaderScreen(
                     if (chromeVisible) {
                         BookReaderChrome(
                             title = title,
-                            author = author,
+                            subtitle = chromeSubtitle,
                             percent = progressPercent,
                             palette = palette,
                             onBack = onClose,
@@ -418,7 +455,7 @@ fun BookReaderScreen(
                                         chapterIndex = index,
                                         preferences = preferences,
                                         palette = palette,
-                                        document = book,
+                                        content = book,
                                     )
                                 }
                             }
@@ -479,9 +516,9 @@ fun BookReaderScreen(
             }
         }
 
-        if (showToc && document != null) {
+        if (showToc && book != null) {
             TocDialog(
-                toc = document?.toc.orEmpty(),
+                toc = book?.toc.orEmpty(),
                 onSelect = { entry ->
                     showToc = false
                     goToChapter(entry.chapterIndex)
@@ -490,7 +527,7 @@ fun BookReaderScreen(
             )
         }
 
-        if (showSearch && document != null) {
+        if (showSearch && book != null) {
             SearchDialog(
                 query = searchQuery,
                 results = searchResults,
@@ -518,7 +555,7 @@ fun BookReaderScreen(
             )
         }
 
-        if (showBookmarks && document != null) {
+        if (showBookmarks && book != null) {
             BookmarksDialog(
                 bookmarks = item?.readingState?.bookmarks.orEmpty(),
                 onAdd = {
@@ -606,11 +643,11 @@ fun BookReaderScreen(
     }
 }
 
-/** Reader header: back, title/author, progress percent and the reader actions row. */
+/** Reader header: back, title/format+author, progress percent and the reader actions row. */
 @Composable
 private fun BookReaderChrome(
     title: String,
-    author: String?,
+    subtitle: String?,
     percent: Int?,
     palette: ReaderPalette,
     onBack: () -> Unit,
@@ -643,9 +680,9 @@ private fun BookReaderChrome(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.testTag("book_title"),
                     )
-                    if (!author.isNullOrBlank()) {
+                    if (!subtitle.isNullOrBlank()) {
                         Text(
-                            text = author,
+                            text = subtitle,
                             style = NoteZeroType.Caption,
                             color = palette.secondaryText,
                             maxLines = 1,
@@ -709,7 +746,7 @@ private fun ChapterView(
     chapterIndex: Int,
     preferences: ReaderPreferences,
     palette: ReaderPalette,
-    document: EpubDocument,
+    content: BookContent,
 ) {
     val blocks = remember(chapter) { boundedBlocks(chapter.blocks) }
     // Most EPUB chapters start with an <h1> that already carries the chapter title. Show the
@@ -743,7 +780,7 @@ private fun ChapterView(
                 block = block,
                 preferences = preferences,
                 palette = palette,
-                document = document,
+                content = content,
             )
         }
     }
@@ -755,7 +792,7 @@ private fun BlockView(
     block: BookBlock,
     preferences: ReaderPreferences,
     palette: ReaderPalette,
-    document: EpubDocument,
+    content: BookContent,
 ) {
     val bodyStyle = bodyTextStyle(preferences)
     when (block) {
@@ -852,7 +889,7 @@ private fun BlockView(
         is BookBlock.Image -> BookImage(
             entry = block.entry,
             alt = block.alt,
-            document = document,
+            content = content,
             palette = palette,
         )
     }
@@ -883,16 +920,16 @@ private fun inlineText(runs: List<BookInline>, palette: ReaderPalette): Annotate
 private fun BookImage(
     entry: String,
     alt: String,
-    document: EpubDocument,
+    content: BookContent,
     palette: ReaderPalette,
 ) {
     val loadState by produceState<ImageLoadState>(
         ImageLoadState.Loading,
         entry,
-        document,
+        content,
     ) {
         value = withContext(Dispatchers.Default) {
-            val bytes = document.imageBytes(entry)
+            val bytes = content.imageBytes(entry)
             val bitmap = if (bytes == null) {
                 null
             } else {
@@ -1386,6 +1423,14 @@ private fun monoTextStyle(preferences: ReaderPreferences): TextStyle {
     )
 }
 
+/** Closes whichever engine handle a loaded book owns (both close methods are idempotent). */
+private fun LoadedBook.closeBook() {
+    when (this) {
+        is LoadedBook.Reflowable -> content.close()
+        is LoadedBook.Comic -> comic.close()
+    }
+}
+
 // ---- Pure helpers (unit-testable; no Android dependencies beyond Compose types) ----
 
 /** Case/whitespace-insensitive comparison for synthetic chapter headers. */
@@ -1401,14 +1446,14 @@ internal data class BookSearchHit(
 
 /** Case-insensitive in-memory search bounded to [MAX_SEARCH_RESULTS] hits. */
 internal fun searchBook(
-    document: EpubDocument,
+    content: BookContent,
     query: String,
     limit: Int = MAX_SEARCH_RESULTS,
 ): List<BookSearchHit> {
     val trimmed = query.trim()
     if (trimmed.isEmpty() || limit <= 0) return emptyList()
     val hits = ArrayList<BookSearchHit>()
-    for (chapter in document.chapters) {
+    for (chapter in content.chapters) {
         if (hits.size >= limit) break
         val text = chapter.plainText()
         var from = 0

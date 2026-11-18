@@ -340,14 +340,14 @@ class LibraryScreenTest : UiTestBase() {
     }
 
     @Test
-    fun `import menu offers pdf and epub imports`() {
+    fun `import menu offers pdf and multi-format e-book imports`() {
         val repository = EpubTestData.unlockedRepository()
         showLibrary(repository)
 
         composeRule.onNodeWithTag("library_import").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("PDF document").assertExists()
-        composeRule.onNodeWithText("E-book (EPUB)").assertExists()
+        composeRule.onNodeWithText("E-book (EPUB, FB2, TXT, Comic)").assertExists()
     }
 
     @Test

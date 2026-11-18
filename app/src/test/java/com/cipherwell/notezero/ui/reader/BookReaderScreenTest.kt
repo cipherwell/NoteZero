@@ -205,7 +205,7 @@ class BookReaderScreenTest : UiTestBase() {
         val repository = repository()
         val itemId = EpubTestData.seedBook(
             repository,
-            bytes = EpubTestData.corruptEpub(),
+            bytes = EpubTestData.corruptBook(),
         )
         showReader(repository, itemId)
         waitForTag(repository, itemId, "book_error")
@@ -318,5 +318,117 @@ class BookReaderScreenTest : UiTestBase() {
 
         waitForText(EpubTestData.CHAPTER_TWO_BODY)
         composeRule.onAllNodesWithTag("book_search_dialog").fetchSemanticsNodes().isEmpty()
+    }
+
+    // =========================================================================
+    // Multi-format dispatch: TXT / FB2 share the text reader
+    // =========================================================================
+
+    @Test
+    fun `txt book renders auto-detected chapters and paragraphs`() {
+        val repository = repository()
+        val itemId = BookFormatsTestData.seedTxt(repository)
+        showReader(repository, itemId)
+
+        waitForText(BookFormatsTestData.TXT_BODY_ONE)
+        composeRule.onNodeWithText(BookFormatsTestData.TXT_ITEM_TITLE).assertExists()
+        // TXT auto-chapters are rendered with the same chapter/header model as EPUB.
+        composeRule.onAllNodesWithText(BookFormatsTestData.TXT_CHAPTER_ONE).fetchSemanticsNodes()
+            .let { assertTrue("expected the chapter heading", it.isNotEmpty()) }
+        composeRule.onNodeWithTag("book_list").performScrollToIndex(1)
+        waitForText(BookFormatsTestData.TXT_BODY_TWO)
+    }
+
+    @Test
+    fun `txt book table of contents lists the auto chapters and jumps`() {
+        val repository = repository()
+        val itemId = BookFormatsTestData.seedTxt(repository)
+        showReader(repository, itemId)
+        waitForText(BookFormatsTestData.TXT_BODY_ONE)
+
+        composeRule.onNodeWithTag("book_toc").performClick()
+        waitForTag(repository, itemId, "book_toc_dialog")
+        waitForTag(repository, itemId, "book_toc_entry")
+        assertEquals(2, composeRule.onAllNodesWithTag("book_toc_entry").fetchSemanticsNodes().size)
+        composeRule.onAllNodesWithText(BookFormatsTestData.TXT_CHAPTER_TWO)[0].performClick()
+        waitForText(BookFormatsTestData.TXT_BODY_TWO)
+    }
+
+    @Test
+    fun `txt book search finds a phrase in a paragraph`() {
+        val repository = repository()
+        val itemId = BookFormatsTestData.seedTxt(repository)
+        showReader(repository, itemId)
+        waitForText(BookFormatsTestData.TXT_BODY_ONE)
+
+        composeRule.onNodeWithTag("book_search").performClick()
+        waitForTag(repository, itemId, "book_search_dialog")
+        composeRule.onNodeWithTag("book_search_query").performTextInput(BookFormatsTestData.TXT_PHRASE)
+
+        waitForTag(repository, itemId, "book_search_result")
+        composeRule.onAllNodesWithText(BookFormatsTestData.TXT_PHRASE, substring = true)
+            .fetchSemanticsNodes()
+            .let { assertTrue("expected a TXT search snippet", it.isNotEmpty()) }
+    }
+
+    @Test
+    fun `fb2 book renders metadata, sections and nested body`() {
+        val repository = repository()
+        val itemId = BookFormatsTestData.seedFb2(repository)
+        showReader(repository, itemId)
+
+        waitForText(BookFormatsTestData.FB2_BODY_ONE)
+        composeRule.onNodeWithText(BookFormatsTestData.FB2_ITEM_TITLE).assertExists()
+        // The metadata line shows the detected format and the FB2 author.
+        composeRule.onAllNodesWithText(BookFormatsTestData.FB2_AUTHOR, substring = true)
+            .fetchSemanticsNodes()
+            .let { assertTrue("expected the FB2 author", it.isNotEmpty()) }
+        composeRule.onNodeWithTag("book_list").performScrollToIndex(1)
+        waitForText(BookFormatsTestData.FB2_BODY_TWO)
+    }
+
+    @Test
+    fun `fb2 book table of contents keeps nested sections`() {
+        val repository = repository()
+        val itemId = BookFormatsTestData.seedFb2(repository)
+        showReader(repository, itemId)
+        waitForText(BookFormatsTestData.FB2_BODY_ONE)
+
+        composeRule.onNodeWithTag("book_toc").performClick()
+        waitForTag(repository, itemId, "book_toc_dialog")
+        waitForTag(repository, itemId, "book_toc_entry")
+        // Two top-level sections plus the nested depth-1 anchor.
+        assertEquals(3, composeRule.onAllNodesWithTag("book_toc_entry").fetchSemanticsNodes().size)
+        composeRule.onAllNodesWithText(BookFormatsTestData.FB2_SECTION_TWO)[0].performClick()
+        waitForText(BookFormatsTestData.FB2_BODY_TWO)
+    }
+
+    @Test
+    fun `fb2 book search finds a phrase in a section body`() {
+        val repository = repository()
+        val itemId = BookFormatsTestData.seedFb2(repository)
+        showReader(repository, itemId)
+        waitForText(BookFormatsTestData.FB2_BODY_ONE)
+
+        composeRule.onNodeWithTag("book_search").performClick()
+        waitForTag(repository, itemId, "book_search_dialog")
+        composeRule.onNodeWithTag("book_search_query").performTextInput("fb2phrase")
+        waitForTag(repository, itemId, "book_search_result")
+    }
+
+    @Test
+    fun `unsupported bytes show the reader error instead of a text book`() {
+        val repository = repository()
+        val itemId = BookFormatsTestData.seedBook(
+            repository = repository,
+            bytes = EpubTestData.corruptBook(),
+            title = "Broken Import",
+            displayName = "broken.bin",
+            mimeType = "application/octet-stream",
+        )
+        showReader(repository, itemId)
+        waitForTag(repository, itemId, "book_error")
+        composeRule.onNodeWithTag("book_chapter").assertDoesNotExist()
+        composeRule.onNodeWithTag("comic_reader").assertDoesNotExist()
     }
 }
