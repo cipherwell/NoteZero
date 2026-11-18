@@ -681,4 +681,25 @@
     <string name="library_import_book">E-book (EPUB, FB2, TXT, CBZ)</string>
     <string name="library_type_book_format">%1$s e-book</string>
 
+    <!-- Code workspace IDE upgrades: tabs, quick open, templates, split preview -->
+    <string name="cd_code_tabs">Open files</string>
+    <string name="cd_code_close_tab">Close %1$s</string>
+    <string name="cd_code_quick_open">Quick open</string>
+    <string name="code_quick_open">Quick open</string>
+    <string name="code_quick_open_hint">Search files by name</string>
+    <string name="code_quick_open_empty">No matching files.</string>
+    <string name="code_quick_open_recent">Recent files</string>
+    <string name="code_tab_limit">Close a tab before opening more files.</string>
+    <string name="code_tab_untitled">Untitled</string>
+    <string name="code_template_label">Template</string>
+    <string name="code_template_blank">Blank</string>
+    <string name="code_template_kotlin">Kotlin class</string>
+    <string name="code_template_python">Python script</string>
+    <string name="code_template_markdown">Markdown note</string>
+    <string name="code_template_html">HTML page</string>
+    <string name="code_template_json">JSON config</string>
+    <string name="cd_code_split_preview">Split preview</string>
+    <string name="code_split_preview">Split</string>
+    <string name="cd_code_preview_pane">Markdown preview</string>
+
 </resources>

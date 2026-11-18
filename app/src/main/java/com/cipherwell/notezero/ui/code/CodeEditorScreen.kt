@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -47,8 +48,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.KeyboardType
@@ -96,7 +100,9 @@ import kotlinx.coroutines.launch
  * task restore) can load its source.
  *
  * Markdown files additionally offer a preview that reuses
- * [com.cipherwell.notezero.ui.editor.MarkdownPreview] — no duplicate renderer exists.
+ * [com.cipherwell.notezero.ui.editor.MarkdownPreview] — no duplicate renderer exists. On
+ * wide layouts the preview can be shown as `Split` (editor + preview side by side,
+ * docs/CONTRACTS-PHASE14.md §D); compact widths keep the single-pane preview.
  * Back always flushes pending edits before leaving (no keystroke is lost).
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -110,6 +116,11 @@ fun CodeEditorScreen(
     exportTarget: CodeExportTarget = rememberSafCodeExportTarget(repository, itemId),
     /** Injectable only for tests; production uses the device presence prompt. */
     biometricPrompt: LockBiometricPrompt? = null,
+    /**
+     * Overrides the wide-layout split-preview availability. Null (production) derives it from
+     * the window width; injectable so the split layout is testable without display qualifiers.
+     */
+    wideLayout: Boolean? = null,
 ) {
     val context = LocalContext.current
     val codeClipboardLabel = stringResource(R.string.common_code_clipboard_label)
@@ -143,8 +154,14 @@ fun CodeEditorScreen(
 
     var findVisible by rememberSaveable { mutableStateOf(false) }
     var previewMode by rememberSaveable { mutableStateOf(false) }
+    var splitPreview by rememberSaveable { mutableStateOf(false) }
     var showGotoDialog by remember { mutableStateOf(false) }
     var showExportConfirm by remember { mutableStateOf(false) }
+
+    // Wide layouts may show the Markdown preview beside the editor. Compact layouts keep the
+    // single-pane preview only (the existing PREVIEW_TOGGLE/PREVIEW tags are unchanged).
+    val configuration = LocalConfiguration.current
+    val isWideLayout = wideLayout ?: (configuration.screenWidthDp >= CODE_SPLIT_PREVIEW_MIN_WIDTH_DP)
 
     // Open-at-line request: applied once the draft is loaded, and re-applied on every
     // re-open of this file (new [openToken]) even though the ViewModel survives.
@@ -173,11 +190,17 @@ fun CodeEditorScreen(
 
     BackHandler { leave() }
 
-    // Switching to a different file must not inherit the previous file's view mode.
+    // Switching to a different file *within one composition* must not inherit the previous
+    // file's view mode. Per-tab editors are separate compositions (the workspace keeps them
+    // alive), so their restored find/preview state survives a tab switch.
+    val initialItemId = remember { itemId }
     LaunchedEffect(itemId) {
-        findVisible = false
-        previewMode = false
-        showGotoDialog = false
+        if (itemId != initialItemId) {
+            findVisible = false
+            previewMode = false
+            splitPreview = false
+            showGotoDialog = false
+        }
     }
 
     LaunchedEffect(state.loading) {
@@ -313,12 +336,15 @@ fun CodeEditorScreen(
                     EditorToolbar(
                         state = state,
                         previewSelected = previewMode,
+                        splitPreviewSelected = splitPreview && isWideLayout,
+                        showSplitPreview = isWideLayout,
                         onFindToggle = { findVisible = !findVisible },
                         onGotoLine = { showGotoDialog = true },
                         onFontDecrease = viewModel::decreaseFontSize,
                         onFontIncrease = viewModel::increaseFontSize,
                         onWrapToggle = viewModel::toggleWordWrap,
                         onPreviewToggle = { previewMode = !previewMode },
+                        onSplitPreviewToggle = { splitPreview = !splitPreview },
                     )
                     EditorActionBar(
                         onIndent = viewModel::indentSelection,
@@ -347,11 +373,26 @@ fun CodeEditorScreen(
                             },
                         )
                     }
-                    if (previewMode && state.isMarkdown) {
+                    val editorField: @Composable (Modifier) -> Unit = { fieldModifier ->
+                        CodeEditorField(
+                            value = textFieldValue,
+                            onValueChange = { new ->
+                                viewModel.onTextChanged(new.text, new.selection.start, new.selection.end)
+                            },
+                            state = state,
+                            palette = palette,
+                            modifier = fieldModifier,
+                            focusRequester = focusRequester,
+                            onIndent = viewModel::indentSelection,
+                            onOutdent = viewModel::outdentSelection,
+                        )
+                    }
+                    val previewPane: @Composable (Modifier) -> Unit = { paneModifier ->
                         val document = remember(state.body) {
                             runCatching { MarkdownBlockCodec.parse(state.body) }
                                 .getOrDefault(BlockDocument(emptyList()))
                         }
+                        val previewPaneLabel = stringResource(R.string.cd_code_preview_pane)
                         MarkdownPreview(
                             document = document,
                             onToggleCheckItem = { index ->
@@ -360,25 +401,41 @@ fun CodeEditorScreen(
                                     viewModel.onTextChanged(updated, state.cursor, state.selectionEnd)
                                 }
                             },
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth()
-                                .testTag(CodeTags.PREVIEW),
+                            modifier = paneModifier
+                                .testTag(CodeTags.PREVIEW)
+                                .semantics { contentDescription = previewPaneLabel },
                         )
+                    }
+                    if (previewMode && state.isMarkdown) {
+                        if (splitPreview && isWideLayout) {
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth(),
+                            ) {
+                                editorField(
+                                    Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                )
+                                previewPane(
+                                    Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                )
+                            }
+                        } else {
+                            previewPane(
+                                Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth(),
+                            )
+                        }
                     } else {
-                        CodeEditorField(
-                            value = textFieldValue,
-                            onValueChange = { new ->
-                                viewModel.onTextChanged(new.text, new.selection.start, new.selection.end)
-                            },
-                            state = state,
-                            palette = palette,
-                            modifier = Modifier
+                        editorField(
+                            Modifier
                                 .weight(1f)
                                 .fillMaxWidth(),
-                            focusRequester = focusRequester,
-                            onIndent = viewModel::indentSelection,
-                            onOutdent = viewModel::outdentSelection,
                         )
                     }
                     EditorStatusRow(
@@ -434,12 +491,15 @@ fun CodeEditorScreen(
 private fun EditorToolbar(
     state: CodeEditorViewModel.State,
     previewSelected: Boolean,
+    splitPreviewSelected: Boolean,
+    showSplitPreview: Boolean,
     onFindToggle: () -> Unit,
     onGotoLine: () -> Unit,
     onFontDecrease: () -> Unit,
     onFontIncrease: () -> Unit,
     onWrapToggle: () -> Unit,
     onPreviewToggle: () -> Unit,
+    onSplitPreviewToggle: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -497,6 +557,18 @@ private fun EditorToolbar(
                     .testTag(CodeTags.PREVIEW_TOGGLE),
                 label = { Text(stringResource(R.string.common_preview), style = NoteZeroType.Caption) },
             )
+            if (previewSelected && showSplitPreview) {
+                val splitLabel = stringResource(R.string.cd_code_split_preview)
+                FilterChip(
+                    selected = splitPreviewSelected,
+                    onClick = onSplitPreviewToggle,
+                    modifier = Modifier
+                        .heightIn(min = NoteZeroSpacing.minTarget)
+                        .testTag(CodeTags.SPLIT_PREVIEW)
+                        .semantics { contentDescription = splitLabel },
+                    label = { Text(stringResource(R.string.code_split_preview), style = NoteZeroType.Caption) },
+                )
+            }
         }
     }
 }
@@ -715,6 +787,9 @@ private fun CenteredEditorBox(content: @Composable () -> Unit) {
         contentAlignment = Alignment.Center,
     ) { content() }
 }
+
+/** Minimum window width (dp) that enables the side-by-side Markdown split preview. */
+internal const val CODE_SPLIT_PREVIEW_MIN_WIDTH_DP = 600
 
 /**
  * Save label shown in the top bar. The E2E contract requires the clean state to read

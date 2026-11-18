@@ -3,6 +3,51 @@
 All notable changes to NoteZero are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [Unreleased] — IDE-style code workspace: tabs, quick open, templates, split preview (2026-11-18, increment 15)
+
+### Added
+
+**Multi-file tabs**
+- `CodeWorkspaceScreen` keeps up to 8 open files (saveable) with an active tab; a horizontally
+  scrollable strip (`code_tabs`/`code_tab`/`code_tab_close`) switches files, closes tabs (neighbour
+  activates), keeps tabs when Back returns to the tree, re-activates existing tabs on re-open and
+  shows a non-secret `code_tab_limit` notice at the cap.
+- Each editor ViewModel is keyed per item id and editors are kept alive in a
+  `SaveableStateHolder`, so switching tabs preserves drafts, undo history and per-tab find/preview
+  chrome; the existing `code_editor`/toolbar/search/export tags are unchanged.
+
+**Quick open**
+- A code-file switcher (`code_quick_open`) dialog with search field/results, filtered by
+  title/path/extension, newest-updated first, locked/hidden files excluded; choosing a file opens
+  it in a tab (or activates its existing tab).
+
+**New-file templates**
+- `NewCodeFileDialog` gains template chips (Blank, Kotlin class, Python script, Markdown note, HTML
+  page, JSON config) that swap the suggested name/extension/starter body and returns a
+  `NewCodeFileRequest(name, body)`; the workspace and notes-shell create paths persist the body
+  (notes-shell `NotesViewModel.createCodeFile(name, folderId, body)` wired by the Lead).
+
+**Split Markdown preview**
+- On wide layouts (≥600dp) the existing Preview toggle exposes a Split mode rendering
+  `MarkdownPreview` beside the editor; compact layouts keep the single-pane preview.
+  Wide-layout selection is injectable for tests (no display qualifiers).
+
+### Fixed
+- Line-number gutter draw could crash (`maxHeight(-46) must be >= minHeight(0)`) when the editor
+  was laid out at zero height during tab creation/rotation; it now draws pre-measured text layouts
+  and skips empty frames (found by device QA on the new tab flow).
+
+### Verified (measured)
+- **1397 unit tests / 0 failures** (113 classes; +46 code-workspace tests: tabs 10, quick open 7,
+  templates 5, workspace tabs screen 6, quick-open screen 7, dialog 9 + extended VM/editor cases)
+  and **23 instrumented tests OK**; existing notes/EPUB/PDF/workspace suites stay green.
+- Emulator QA: opened `hello.kt`, quick-opened a Markdown file into a second tab, typed a draft,
+  switched tabs and back (draft preserved), toggled Preview, rotated to landscape and used the
+  split editor/preview; no crash after the gutter fix; 0 NoteZero FATAL/ANR.
+- Offline guard OK; no new permissions/dependencies; no debug/logging leftovers.
+- New screenshots `43-code-tabs`, `44-code-quick-open`, `45-code-split-preview`;
+  docs `docs/CONTRACTS-PHASE14.md`, `docs/CODE-WORKSPACE.md`, VERIFICATION §20.
+
 ## [Unreleased] — more reading formats: TXT, FB2, CBZ comics (2026-11-18, increment 14)
 
 ### Added

@@ -10,7 +10,7 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 [VaultZero](https://github.com/cipherwell/Vault-Zero) with an independent package
 (`com.cipherwell.notezero`), independent signing key and independent threat model.
 
-> Status: **Phase 5 — all-in-one workspace (increment 14)** — 2026-11-18.
+> Status: **Phase 5 — all-in-one workspace (increment 15)** — 2026-11-18.
 > Security core, notes MVP, encrypted SAF backup/restore, code editor (workspace
 > search/copy/export/indent), encrypted attachments (images/files/**drawings**),
 > **locked notes/folders**, **Markdown/HTML/PDF note export**, **table editing**,
@@ -23,7 +23,7 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 > phased plan (PDF annotation, drawing studio, universal file workspace, more formats) are
 > in [docs/ROADMAP-ALL-IN-ONE.md](docs/ROADMAP-ALL-IN-ONE.md), grounded in
 > [docs/RESEARCH-ALL-IN-ONE-2026-11-17.md](docs/RESEARCH-ALL-IN-ONE-2026-11-17.md).
-> Builds are green, **1351 unit tests + 23 device tests**, and **signed APK + AAB release
+> Builds are green, **1397 unit tests + 23 device tests**, and **signed APK + AAB release
 > builds are byte-for-byte reproducible**; an independent security audit previously found
 > no HIGH/CRITICAL issues and its findings are remediated. Device QA on a Pixel 9 Pro XL
 > (Android 17) and the emulator covered import, TOC, search, bookmarks, themes and
@@ -61,8 +61,10 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 | ![Workspace search](docs/screenshots/36-workspace-search.png) | ![Selection](docs/screenshots/35-workspace-selection.png) | ![Trash confirm](docs/screenshots/37-workspace-trash.png) |
 | **TXT reader (shared tools)** | **FB2 reader (TOC/poetry/epigraph)** | **CBZ comic reader** |
 | ![TXT reader](docs/screenshots/38-txt-reader.png) | ![FB2 reader](docs/screenshots/39-fb2-reader.png) | ![Comic reader](docs/screenshots/40-comic-reader.png) |
-| **Library with all e-book formats** | **Comic bookmarks (encrypted)** | |
-| ![Library formats](docs/screenshots/41-library-formats.png) | ![Comic bookmarks](docs/screenshots/42-comic-bookmarks.png) | |
+| **Library with all e-book formats** | **Comic bookmarks (encrypted)** | **Code tabs + split preview** |
+| ![Library formats](docs/screenshots/41-library-formats.png) | ![Comic bookmarks](docs/screenshots/42-comic-bookmarks.png) | ![Code tabs](docs/screenshots/45-code-split-preview.png) |
+| **Multi-file tabs (state-preserving)** | **Quick-open switcher** | |
+| ![Tabs](docs/screenshots/43-code-tabs.png) | ![Quick open](docs/screenshots/44-code-quick-open.png) | |
 
 Screenshots are real emulator captures from the instrumented E2E run (debug build with
 `-PallowScreenshots=true`; normal builds set FLAG_SECURE, which makes `screencap` return a
@@ -174,6 +176,28 @@ Screenshots are real emulator captures from the instrumented E2E run (debug buil
   epigraphs with a 3-entry TOC; CBZ decoded pages 1–3, page jump/bookmark persisted across
   relaunch; `qa-unknown.bin` was rejected with the non-secret unsupported message and left no row.
   1351 unit tests / 0 failures (108 classes) and 23 instrumented tests green.
+
+## IDE-style code workspace (2026-11-18)
+
+- **Multi-file tabs** in the code workspace (up to 8): opening a second file adds a tab, active
+  tab is highlighted, switching preserves that file's draft/undo/find state because each editor
+  ViewModel is keyed per item; close a tab (neighbour activates), Back returns to the tree keeping
+  tabs, re-opening a tabbed file activates its tab and a cap notice protects the 8-tab limit.
+- **Quick open**: a search dialog over visible code files (title/path/extension, newest-updated
+  first), excluding locked/hidden files; selecting a result opens it in a tab.
+- **New-file templates**: Blank / Kotlin class / Python script / Markdown note / HTML page /
+  JSON config supply both the suggested name/extension and starter body; the dialog returns
+  `NewCodeFileRequest(name, body)` and both the workspace and the notes-shell create path persist
+  the body into the encrypted item.
+- **Split Markdown preview** on wide layouts (≥600dp): editor and rendered `MarkdownPreview` side
+  by side with the existing `Preview` toggle; compact widths keep the single-pane preview.
+- **Fixed during device QA**: a pre-existing line-number draw path could crash with
+  `maxHeight(-46) must be >= minHeight(0)` when the editor was first laid out at zero height (tab
+  creation/rotation); line numbers now draw pre-measured text layouts and skip empty frames.
+- **Measured QA** (emulator, Android 17 image): opened `hello.kt`, quick-opened `untitled.md` to a
+  second tab, typed a draft, switched tabs and back (draft preserved), toggled Preview on a
+  Markdown file and rotated to landscape to show the split editor/preview; 0 crashes after the fix.
+  1397 unit tests / 0 failures (113 classes) and 23 instrumented tests green.
 
 ## Verified end to end (2026-11-15)
 

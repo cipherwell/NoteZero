@@ -170,13 +170,17 @@ class NotesViewModel(
      * Creates a code file titled [name] (the format dialog already resolved the extension) and
      * returns it so the caller can open the code editor. Null when locked or on failure.
      */
-    suspend fun createCodeFile(name: String, folderId: String? = null): Item? {
+    suspend fun createCodeFile(
+        name: String,
+        folderId: String? = null,
+        body: String = "",
+    ): Item? {
         if (!isUnlocked()) return null
         val title = name.trim()
         if (title.isEmpty()) return null
         return try {
             val created = repository.createItem(ItemKind.CODE_FILE, folderId)
-            repository.saveItem(created.copy(title = title))
+            repository.saveItem(created.copy(title = title, body = body))
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Throwable) {

@@ -254,10 +254,14 @@ fun NotesListScreen(
             confirmLabel = stringResource(R.string.common_create),
             onDismiss = { showNewCodeDialog = false },
             validate = { name -> CodeTree.validateName(CodeTree.normalizeNewFileName(name)) },
-            onConfirm = { name ->
+            onConfirmRequest = { request ->
                 showNewCodeDialog = false
                 createScope.launch {
-                    val created = viewModel.createCodeFile(name, folderForCreate)
+                    val created = viewModel.createCodeFile(
+                        name = request.name,
+                        folderId = folderForCreate,
+                        body = request.body,
+                    )
                     if (created != null) codeItemId = created.id
                 }
             },

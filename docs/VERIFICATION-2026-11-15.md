@@ -919,3 +919,51 @@ policy: DECISIONS #26.
 - Deferred: MOBI/AZW3/KFX (own parser + DRM caveat), comic metadata (`ComicInfo.xml`), TTS,
   hyphenation, per-book appearance overrides, reading statistics, translations, accessibility
   pass and the F-Droid window (opens 2027-02-15).
+
+---
+
+## 20. Increment 15 — IDE-style code workspace: tabs, quick open, templates, split preview (2026-11-18)
+
+Scope: phase-13 follow-ups (`docs/ROADMAP-ALL-IN-ONE.md`) for the code workspace. Contract:
+`docs/CONTRACTS-PHASE14.md`; UI details: `docs/CODE-WORKSPACE.md`. No data-model, payload,
+permission or dependency changes.
+
+### 20.1 Implementation
+
+| Check | Result |
+|---|---|
+| Tabs | up to 8 open files (saveable list + active id) with `code_tabs` strip (`code_tab`, `code_tab_close`); switching preserves each file's draft/undo/find/preview state (per-item keyed ViewModels kept alive in a `SaveableStateHolder`); close activates the neighbour (or tree); Back returns to the tree keeping tabs; re-opening a tabbed file activates it; cap shows `code_tab_limit` |
+| Quick open | `code_quick_open` dialog with `quick_open_query`/`quick_open_result`, code files only (locked/hidden folders excluded), case-insensitive title/path/extension filter, newest-updated then title, empty `code_quick_open_empty`; opens/activates a tab |
+| Templates | `NewCodeFileDialog` template chips (`code_template_blank/kotlin/python/markdown/html/json`) swap suggested name/extension/starter body and return `NewCodeFileRequest(name, body)`; workspace verifies body is persisted; notes-shell create path wired (`NotesViewModel.createCodeFile(name, folderId, body)` + `onConfirmRequest`) |
+| Split preview | on wide layouts (≥600dp) the Preview toggle exposes `Split` (`code_split_preview`) rendering `MarkdownPreview` beside the editor; compact keeps the existing single-pane preview; preview/checklist tags unchanged |
+| Regression fix | line-number gutter draw crashed with `maxHeight(-46) must be >= minHeight(0)` when the editor was first drawn at zero height (tab creation/rotation); fix draws pre-measured text layouts and returns early for empty frames |
+
+### 20.2 Tests + measured QA
+
+| Check | Result |
+|---|---|
+| Unit suite | **1,397 tests / 0 failures / 113 classes** (+46 code-IDE tests: tabs 10, quick open 7, templates 5, workspace-tabs screen 6, quick-open screen 7, dialog 9 + extended editor/VM cases); previously 1,351/108 |
+| Instrumented | **23 tests OK** on the emulator (unchanged E2E, new tabs/quick-open kept existing tags) |
+| Emulator QA | unlocked → code workspace; opened `hello.kt`; quick-open dialog listed `untitled.md`/`hello.kt` and opened the Markdown file as a **second tab**; typed a draft, switched to `hello.kt` and back — draft preserved; toggled Preview (single-pane compact), rotated to landscape and enabled **Split** (editor + rendered preview side by side, two tabs visible) |
+| Crash found/fixed | opening the editor via quick-open crashed reproducibly in `CodeEditorField.drawLineNumbers` (negative draw constraints); after the fix the same flow and subsequent tab switches ran without FATAL/ANR |
+| Offline guard | `./scripts/check-offline.sh --gradle` → `OK: NoteZero is offline by construction.` |
+| Hygiene | no TODO/FIXME/TEMP DEBUG/Log/println in `ui/code`; no debug test files; no new permissions/deps (release: `USE_BIOMETRIC` only) |
+| Reproducible APK | **REPRODUCIBLE** — both builds sha256 `2d5932bcfdc21562e4da4e6813514956d2cfb6df4744a1641975da66cae40966` |
+| Reproducible AAB | **REPRODUCIBLE** — both builds sha256 `568b341a47d9a5f93673b78e34abc5f62a9c8be8d7a318f8677568ade7b2af2b` |
+| Artifacts | `releases/notezero-0.1.0-release.apk` / `.aab` replaced; `releases/SHA256SUMS` updated |
+| Certificate | `FA:CA:DD:67:…:92:78` unchanged |
+| Owner phone | release installed over existing vault (data/biometrics intact), 0 NoteZero crash entries, left locked |
+| Screenshots | `43-code-tabs`, `44-code-quick-open`, `45-code-split-preview` |
+
+### 20.3 Residual notes
+
+- Tabs are an in-memory session view: they reset on vault lock/process death by design (no
+  plaintext file names persisted); drafts are autosaved through the normal encrypted editor path.
+- Quick open is title/path filtering only (no fuzzy ranking/symbol search) and covers code files
+  only; workspace-wide content search remains the existing code-search surface.
+- Templates are static built-in snippets (no user-defined templates yet); a template mismatched
+  with a chosen extension falls back to a blank body.
+- Split preview requires ≥600dp; rotation reflows but the split state is per-tab ephemeral.
+- A transient status-bar/tab-strip overlap was observed immediately after an adb-driven rotation;
+  it settles on the next frame (final screenshots show correct insets) and was not reproducible
+  in normal use.

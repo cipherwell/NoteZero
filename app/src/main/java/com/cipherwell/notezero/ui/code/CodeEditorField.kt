@@ -367,6 +367,12 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawLineNumbers(
     scrollOffsetPx: Float,
     viewportHeightPx: Float,
 ) {
+    // During tab switches/split layouts the editor can be drawn once at zero size; drawing a
+    // label with the implicit drawText constraints then computes a negative maxHeight and
+    // crashes. Draw pre-measured layouts instead and skip empty frames.
+    if (size.width <= 0f || size.height <= 0f || !size.width.isFinite() || !size.height.isFinite()) {
+        return
+    }
     val textLength = layout.layoutInput.text.length
     val currentLine = safeLineOf(lineIndex, cursor)
     val headerStyle = style.copy(color = palette.gutterText)
@@ -381,12 +387,13 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawLineNumbers(
             continue
         }
         val label = (line + 1).toString()
-        val labelWidth = textMeasurer.measure(AnnotatedString(label), headerStyle).size.width.toFloat()
-        drawText(
-            textMeasurer = textMeasurer,
-            text = label,
-            topLeft = Offset(size.width - paddingPx - labelWidth, top),
+        val labelLayout = textMeasurer.measure(
+            text = AnnotatedString(label),
             style = if (line == currentLine) currentStyle else headerStyle,
+        )
+        drawText(
+            textLayoutResult = labelLayout,
+            topLeft = Offset(size.width - paddingPx - labelLayout.size.width, top),
         )
     }
 }

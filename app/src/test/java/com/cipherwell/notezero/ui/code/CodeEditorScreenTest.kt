@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyPress
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextInputSelection
 import androidx.compose.ui.text.TextRange
@@ -54,6 +55,7 @@ class CodeEditorScreenTest {
         body: String = "fun main() {\n    println(\"hi\")\n}",
         initialLine: Int? = null,
         exportTarget: CodeExportTarget? = null,
+        wideLayout: Boolean? = null,
     ) {
         repository.seedCodeFile(id = "f1", title = title, body = body)
         composeRule.setContent {
@@ -64,6 +66,7 @@ class CodeEditorScreenTest {
                         itemId = "f1",
                         initialLine = initialLine,
                         onBack = { backCount++ },
+                        wideLayout = wideLayout,
                     )
                 } else {
                     CodeEditorScreen(
@@ -72,6 +75,7 @@ class CodeEditorScreenTest {
                         initialLine = initialLine,
                         onBack = { backCount++ },
                         exportTarget = exportTarget,
+                        wideLayout = wideLayout,
                     )
                 }
             }
@@ -164,6 +168,36 @@ class CodeEditorScreenTest {
 
         composeRule.onNodeWithTag(CodeTags.PREVIEW).assertExists()
         composeRule.onNodeWithText("Heading").assertExists()
+    }
+
+    @Test
+    fun `wide markdown layout offers split preview beside the editor`() {
+        openEditor(
+            title = "README.md",
+            body = "# Heading\n\nSome **bold** text.",
+            wideLayout = true,
+        )
+        composeRule.onNodeWithTag(CodeTags.PREVIEW_TOGGLE).performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag(CodeTags.PREVIEW).assertExists()
+
+        composeRule.onNodeWithTag(CodeTags.SPLIT_PREVIEW).performScrollTo().performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag(CodeTags.SPLIT_PREVIEW).assertIsSelected()
+        // Split keeps the editable source next to the rendered preview.
+        composeRule.onNodeWithTag(CodeTags.EDITOR).assertExists()
+        composeRule.onNodeWithTag(CodeTags.PREVIEW).assertExists()
+    }
+
+    @Test
+    fun `compact markdown layout has no split option`() {
+        openEditor(title = "README.md", body = "# Heading", wideLayout = false)
+        composeRule.onNodeWithTag(CodeTags.PREVIEW_TOGGLE).performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag(CodeTags.PREVIEW).assertExists()
+        composeRule.onNodeWithTag(CodeTags.SPLIT_PREVIEW).assertDoesNotExist()
     }
 
     @Test

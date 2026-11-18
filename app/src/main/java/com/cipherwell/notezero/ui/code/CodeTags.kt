@@ -81,4 +81,36 @@ object CodeTags {
     const val MOVE_ROOT = "code_move_root"
     const val MOVE_TARGET = "code_move_target"
     const val DELETE_DIALOG = "code_delete_dialog"
+
+    // ---- Multi-file tabs (docs/CONTRACTS-PHASE14.md §A) ---------------------
+    /** Horizontally scrollable strip holding one [TAB] per open file. */
+    const val TABS = "code_tabs"
+    /** One open-file tab; selected semantics mark the active file. */
+    const val TAB = "code_tab"
+    /** Close button inside a tab; contentDescription is `cd_code_close_tab`. */
+    const val TAB_CLOSE = "code_tab_close"
+    /** Inline notice shown when the open-tab cap would be exceeded (string code_tab_limit). */
+    const val TAB_LIMIT = "code_tab_limit_notice"
+
+    // ---- Quick open (docs/CONTRACTS-PHASE14.md §B) --------------------------
+    /** Toolbar action in the file-tree shell; contentDescription `cd_code_quick_open`. */
+    const val QUICK_OPEN = "code_quick_open"
+    const val QUICK_OPEN_DIALOG = "quick_open_dialog"
+    const val QUICK_OPEN_QUERY = "quick_open_query"
+    const val QUICK_OPEN_RESULT = "quick_open_result"
+    const val QUICK_OPEN_EMPTY = "code_quick_open_empty"
+    const val QUICK_OPEN_RECENT = "code_quick_open_recent"
+
+    // ---- New-file templates (docs/CONTRACTS-PHASE14.md §C) ------------------
+    const val TEMPLATE_LABEL = "code_template_label"
+    const val TEMPLATE_BLANK = "code_template_blank"
+    const val TEMPLATE_KOTLIN = "code_template_kotlin"
+    const val TEMPLATE_PYTHON = "code_template_python"
+    const val TEMPLATE_MARKDOWN = "code_template_markdown"
+    const val TEMPLATE_HTML = "code_template_html"
+    const val TEMPLATE_JSON = "code_template_json"
+
+    // ---- Split Markdown preview (docs/CONTRACTS-PHASE14.md §D) --------------
+    /** Wide-layout-only "Split" chip beside the existing single-pane preview toggle. */
+    const val SPLIT_PREVIEW = "code_split_preview"
 }

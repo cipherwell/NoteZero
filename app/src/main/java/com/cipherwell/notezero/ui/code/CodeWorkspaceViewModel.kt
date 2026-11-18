@@ -34,6 +34,8 @@ data class CodeWorkspaceUiState(
     val searchResults: List<CodeSearchMatch> = emptyList(),
     /** Code files/folders hidden because they are locked and not verified this session. */
     val lockedHiddenCount: Int = 0,
+    /** Visible code files for the quick-open switcher, newest-updated first. */
+    val quickOpenEntries: List<QuickOpenEntry> = emptyList(),
 ) {
     val isEmpty: Boolean get() = fileCount == 0 && folderCount == 0
 
@@ -144,6 +146,7 @@ class CodeWorkspaceViewModel(
                     CodeSearch.search(content.items, search.query, search.caseSensitive)
                 },
                 lockedHiddenCount = content.hiddenCount,
+                quickOpenEntries = CodeQuickOpen.entries(content.items, content.folders),
             )
         }
     }.stateIn(
@@ -194,17 +197,20 @@ class CodeWorkspaceViewModel(
 
     /**
      * Creates a [ItemKind.CODE_FILE] item titled [rawName] inside [folderId] (root when
-     * null). Blank names fall back to the engine's default file name. Returns the saved
-     * item — the caller opens the editor — or null when the vault locked or the name is
-     * invalid.
+     * null). Blank names fall back to the engine's default file name. [body] is the starter
+     * snippet contributed by [NewCodeFileDialog]'s template (blank for the default template);
+     * it is written through the normal encrypted [NoteRepository.saveItem] path.
+     *
+     * Returns the saved item — the caller opens it in a tab — or null when the vault locked
+     * or the name is invalid.
      */
-    suspend fun createFile(rawName: String, folderId: String?): Item? {
+    suspend fun createFile(rawName: String, folderId: String?, body: String = ""): Item? {
         if (!isUnlocked()) return null
         val name = CodeTree.normalizeNewFileName(rawName)
         if (CodeTree.validateName(name) != null) return null
         return try {
             val created = repository.createItem(ItemKind.CODE_FILE, folderId)
-            val saved = repository.saveItem(created.copy(title = name))
+            val saved = repository.saveItem(created.copy(title = name, body = body))
             folderId?.let(::expandFolder)
             saved
         } catch (cancelled: kotlinx.coroutines.CancellationException) {

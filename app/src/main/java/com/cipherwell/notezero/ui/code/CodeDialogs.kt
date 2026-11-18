@@ -5,6 +5,7 @@ import com.cipherwell.notezero.code.CodeFormat
 import com.cipherwell.notezero.code.CodeFormats
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
@@ -254,30 +255,72 @@ fun CodeMoveDialog(
 }
 
 /**
- * New-code-file dialog: a name field plus a horizontal format picker (`.txt`, `.md`, `.html`,
- * `.py`, `.kt`, …). Picking a format rewrites the extension of the typed name, so the created
- * item always gets a well-known extension and the editor picks the matching syntax.
+ * Template chip mapping: label resource + stable tag for each built-in template.
+ * Kept next to the dialog so the snippets themselves stay a pure, JVM-tested object.
+ */
+private data class TemplateChip(
+    val template: CodeTemplate,
+    val tag: String,
+    val labelRes: Int,
+)
+
+private val templateChips = listOf(
+    TemplateChip(CodeTemplates.blank, CodeTags.TEMPLATE_BLANK, R.string.code_template_blank),
+    TemplateChip(CodeTemplates.kotlin, CodeTags.TEMPLATE_KOTLIN, R.string.code_template_kotlin),
+    TemplateChip(CodeTemplates.python, CodeTags.TEMPLATE_PYTHON, R.string.code_template_python),
+    TemplateChip(CodeTemplates.markdown, CodeTags.TEMPLATE_MARKDOWN, R.string.code_template_markdown),
+    TemplateChip(CodeTemplates.html, CodeTags.TEMPLATE_HTML, R.string.code_template_html),
+    TemplateChip(CodeTemplates.json, CodeTags.TEMPLATE_JSON, R.string.code_template_json),
+)
+
+/**
+ * New-code-file dialog: a name field, a horizontal format picker (`.txt`, `.md`, `.html`,
+ * `.py`, `.kt`, …) and a template picker that also supplies the initial body.
  *
- * Pure format rules live in [CodeFormats] (unit-tested); this composable only wires them to UI.
- * Tags: [CodeTags.DIALOG_FIELD], [CodeTags.DIALOG_CONFIRM], [CodeTags.DIALOG_CANCEL],
- * `code_format_<extension>` for each chip and `code_new_file_format_row` for the picker.
+ * Picking a format rewrites the extension of the typed name, so the created item always gets
+ * a well-known extension and the editor picks the matching syntax. Picking a template swaps
+ * the suggested name, the extension and the starter body; picking a format that does not
+ * match the template keeps the name/extension but falls back to the blank template body so a
+ * Kotlin snippet can never be silently stored behind a `.py` name.
+ *
+ * Confirm reports a [NewCodeFileRequest] (name + body). The legacy `onConfirm(name)` callback
+ * is still invoked when no request callback is supplied, so the not-yet-migrated notes-shell
+ * call site keeps working while the Lead wires the body through.
+ *
+ * Pure format/template rules live in [CodeFormats]/[CodeTemplates] (unit-tested); this
+ * composable only wires them to UI. Tags: [CodeTags.DIALOG_FIELD], [CodeTags.DIALOG_CONFIRM],
+ * [CodeTags.DIALOG_CANCEL], `code_format_<extension>` for each format chip,
+ * `code_new_file_format_row` for the format picker, [CodeTags.TEMPLATE_LABEL] for the
+ * template label and one `code_template_<id>` tag per template chip.
  */
 @Composable
 fun NewCodeFileDialog(
     title: String,
     confirmLabel: String,
     onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
     validate: (String) -> String?,
+    onConfirm: (String) -> Unit = {},
+    onConfirmRequest: ((NewCodeFileRequest) -> Unit)? = null,
     initialFormat: CodeFormat = CodeFormats.default,
 ) {
     var selectedExtension by rememberSaveable { mutableStateOf(initialFormat.extension) }
     var name by rememberSaveable { mutableStateOf(CodeFormats.defaultName(initialFormat)) }
+    var selectedTemplateId by rememberSaveable { mutableStateOf(CodeTemplates.blank.id) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
 
     fun selectFormat(format: CodeFormat) {
         name = CodeFormats.applyFormat(name, format)
         selectedExtension = format.extension
+        if (CodeTemplates.byId(selectedTemplateId).format.extension != format.extension) {
+            selectedTemplateId = CodeTemplates.blank.id
+        }
+        error = null
+    }
+
+    fun selectTemplate(template: CodeTemplate) {
+        selectedTemplateId = template.id
+        selectedExtension = template.format.extension
+        name = template.suggestedName
         error = null
     }
 
@@ -285,7 +328,7 @@ fun NewCodeFileDialog(
         onDismissRequest = onDismiss,
         title = { Text(title, style = NoteZeroType.Heading) },
         text = {
-            Column {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = {
@@ -336,6 +379,29 @@ fun NewCodeFileDialog(
                         )
                     }
                 }
+                Spacer(Modifier.size(NoteZeroSpacing.s))
+                Text(
+                    text = stringResource(R.string.code_template_label),
+                    style = NoteZeroType.FieldLabel,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag(CodeTags.TEMPLATE_LABEL),
+                )
+                Spacer(Modifier.size(NoteZeroSpacing.xs))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(NoteZeroSpacing.xs),
+                ) {
+                    templateChips.forEach { chip ->
+                        NzSelectableChip(
+                            label = stringResource(chip.labelRes),
+                            selected = chip.template.id == selectedTemplateId,
+                            onClick = { selectTemplate(chip.template) },
+                            modifier = Modifier.testTag(chip.tag),
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
@@ -344,7 +410,15 @@ fun NewCodeFileDialog(
                     val resolved = CodeFormats.resolveName(name, formatFor(selectedExtension))
                     val problem = validate(resolved)
                     if (problem == null) {
-                        onConfirm(resolved)
+                        val request = NewCodeFileRequest(
+                            name = resolved,
+                            body = CodeTemplates.byId(selectedTemplateId).body,
+                        )
+                        if (onConfirmRequest != null) {
+                            onConfirmRequest(request)
+                        } else {
+                            onConfirm(request.name)
+                        }
                     } else {
                         error = problem
                     }

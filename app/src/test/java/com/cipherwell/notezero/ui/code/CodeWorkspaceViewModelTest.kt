@@ -477,4 +477,65 @@ class CodeWorkspaceViewModelTest {
         advanceUntilIdle()
         assertFalse(model.sessionStale.value)
     }
+
+    @Test
+    fun `createFile saves the template body through the encrypted save path`() = runTest(dispatcher) {
+        val model = viewModel()
+        advanceUntilIdle()
+        val body = "class Hello {\n    fun greet() = \"hi\"\n}\n"
+
+        val created = model.createFile("Main.kt", null, body)
+        advanceUntilIdle()
+
+        assertNotNull(created)
+        assertEquals(body, created!!.body)
+        assertEquals(body, repository.itemById(created.id)!!.body)
+    }
+
+    @Test
+    fun `createFile in a folder saves the template body there`() = runTest(dispatcher) {
+        repository.seedFolder(id = "docs", name = "Docs")
+        val model = viewModel()
+        advanceUntilIdle()
+
+        val created = model.createFile("notes.md", "docs", "# Untitled\n")
+
+        advanceUntilIdle()
+        assertNotNull(created)
+        val stored = repository.itemById(created!!.id)!!
+        assertEquals("docs", stored.folderId)
+        assertEquals("# Untitled\n", stored.body)
+    }
+
+    @Test
+    fun `quick open entries list visible code files newest first`() = runTest(dispatcher) {
+        repository.clock = 1_000L
+        repository.seedCodeFile(id = "older", title = "Older.kt")
+        repository.clock = 3_000L
+        repository.seedCodeFile(id = "newer", title = "Newer.kt")
+        repository.seedNote(id = "note", title = "Shopping")
+        val model = viewModel()
+        advanceUntilIdle()
+
+        val entries = model.uiState.value.quickOpenEntries
+
+        assertEquals(listOf("newer", "older"), entries.map { it.itemId })
+    }
+
+    @Test
+    fun `quick open entries exclude locked and hidden-folder files`() = runTest(dispatcher) {
+        repository.seedCodeFile(id = "public", title = "Public.kt")
+        repository.seedCodeFile(id = "locked", title = "Locked.kt", locked = true)
+        repository.seedFolder(id = "secret", name = "Secret", locked = true)
+        repository.seedCodeFile(id = "hidden", title = "Hidden.kt", folderId = "secret")
+        val model = viewModel()
+        advanceUntilIdle()
+
+        val entries = model.uiState.value.quickOpenEntries
+
+        assertEquals(listOf("Public.kt"), entries.map { it.title })
+        // Two hidden code files (the locked one and the hidden folder's) + one folder.
+        assertEquals(3, model.uiState.value.lockedHiddenCount)
+        assertFalse(model.uiState.value.quickOpenEntries.any { it.title == "Locked.kt" })
+    }
 }

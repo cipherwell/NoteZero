@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
@@ -24,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -32,7 +34,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,13 +55,20 @@ import com.cipherwell.notezero.ui.theme.NoteZeroType
 import kotlinx.coroutines.launch
 
 /**
- * Phase 3 code workspace: an encrypted file tree of [com.cipherwell.notezero.model.ItemKind.CODE_FILE]
+ * Code workspace: an encrypted file tree of [com.cipherwell.notezero.model.ItemKind.CODE_FILE]
  * items in the same folder tree as notes, opening the syntax-highlighted
- * [CodeEditorScreen] for one file.
+ * [CodeEditorScreen].
  *
- * Exact entry symbol required by docs/CONTRACTS-PHASE3.md section C. The Lead wires this
- * into ui/AppRoot; the notes screen gets the "Code" entry. Decrypted file names/source
- * stay in memory here and in [CodeWorkspaceViewModel] — nothing is logged.
+ * IDE upgrades (docs/CONTRACTS-PHASE14.md):
+ *  - multi-file tabs: [openFileIds] (rememberSaveable, capped by
+ *    [CodeTabs.MAX_OPEN_TABS]) plus [activeFileId]. Each tab's editor is keyed by its item id
+ *    (`code_editor_<id>`), so switching tabs keeps the draft, undo history and per-tab
+ *    ViewModel state; the workspace never clears the editor ViewModel on a tab switch.
+ *  - quick-open switcher (`code_quick_open`) over the visible code files.
+ *  - the new-file dialog returns a [NewCodeFileRequest] whose template body is saved here.
+ *
+ * Exact entry symbol required by docs/CONTRACTS-PHASE3.md section C. Decrypted file names and
+ * source stay in memory here and in [CodeWorkspaceViewModel] — nothing is logged.
  */
 @Composable
 fun CodeWorkspaceScreen(
@@ -68,41 +79,104 @@ fun CodeWorkspaceScreen(
         factory = CodeWorkspaceViewModelFactory(repository),
     )
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    var openFileId by rememberSaveable { mutableStateOf<String?>(null) }
+    val items by repository.items.collectAsStateWithLifecycle()
+
+    // Open tabs. A List<String> is not Bundle-safe on its own, so persist it through an
+    // explicit list saver (same order as the strip). Active id/line/token are rememberSaveable
+    // exactly like the single-file workspace before this increment.
+    val openTabsSaver = remember { listSaver<List<String>, String>(save = { it }, restore = { it }) }
+    var openFileIds by rememberSaveable(stateSaver = openTabsSaver) {
+        mutableStateOf(emptyList<String>())
+    }
+    var activeFileId by rememberSaveable { mutableStateOf<String?>(null) }
 
     // Open-at-line request. [openToken] is bumped on every open so re-opening the same file
     // (a singleton editor ViewModel) still applies the new target line.
     var openFileLine by rememberSaveable { mutableStateOf<Int?>(null) }
     var openToken by rememberSaveable { mutableStateOf(0) }
 
+    // Non-secret cap notice: shown when a new file would exceed the 8-tab limit.
+    var tabLimitNotice by remember { mutableStateOf(false) }
+
+    fun openFile(itemId: String, line: Int?) {
+        val opened = CodeTabs.open(openFileIds, activeFileId, itemId)
+        if (opened.limitReached) {
+            tabLimitNotice = true
+            return
+        }
+        tabLimitNotice = false
+        openFileIds = opened.openFileIds
+        activeFileId = opened.activeFileId
+        openFileLine = line
+        openToken += 1
+    }
+
+    fun selectTab(itemId: String) {
+        if (itemId == activeFileId) return
+        activeFileId = itemId
+        // A plain tab switch never re-applies a stale search-hit line.
+        openFileLine = null
+        openToken += 1
+    }
+
+    fun closeTab(itemId: String) {
+        val closed = CodeTabs.close(openFileIds, activeFileId, itemId)
+        openFileIds = closed.openFileIds
+        activeFileId = closed.activeFileId
+        openFileLine = null
+        tabLimitNotice = false
+    }
+
+    val tabs = openFileIds.map { id ->
+        CodeTab(itemId = id, title = items.firstOrNull { it.id == id }?.title.orEmpty())
+    }
+    val saveableStateHolder = rememberSaveableStateHolder()
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .testTag(CodeTags.WORKSPACE),
     ) {
-        val fileId = openFileId
-        if (fileId == null) {
+        val activeId = activeFileId
+        if (activeId == null || activeId !in openFileIds) {
             CodeTreeContent(
                 state = state,
                 viewModel = viewModel,
+                limitNotice = tabLimitNotice,
                 onBack = onBack,
-                onOpenFile = { itemId, line ->
-                    openFileId = itemId
-                    openFileLine = line
-                    openToken += 1
-                },
+                onOpenFile = { itemId, line -> openFile(itemId, line) },
             )
         } else {
-            CodeEditorScreen(
-                repository = repository,
-                itemId = fileId,
-                initialLine = openFileLine,
-                openToken = openToken,
-                onBack = {
-                    openFileId = null
-                    openFileLine = null
-                },
-            )
+            Column(modifier = Modifier.fillMaxSize()) {
+                CodeTabsStrip(
+                    tabs = tabs,
+                    activeFileId = activeId,
+                    onSelect = { itemId -> selectTab(itemId) },
+                    onClose = { itemId -> closeTab(itemId) },
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                ) {
+                    // Keep each file's editor rememberSaveable state (find bar, preview mode,
+                    // focus/scroll chrome) alive across tab switches. The editor ViewModel is
+                    // keyed per item and outlives this subtree (Activity/Nav ViewModel store).
+                    saveableStateHolder.SaveableStateProvider(activeId) {
+                        CodeEditorScreen(
+                            repository = repository,
+                            itemId = activeId,
+                            initialLine = openFileLine,
+                            openToken = openToken,
+                            onBack = {
+                                // Back to the file tree without closing any tab (§A).
+                                activeFileId = null
+                                openFileLine = null
+                            },
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -112,6 +186,7 @@ fun CodeWorkspaceScreen(
 private fun CodeTreeContent(
     state: CodeWorkspaceUiState,
     viewModel: CodeWorkspaceViewModel,
+    limitNotice: Boolean,
     onBack: () -> Unit,
     onOpenFile: (String, Int?) -> Unit,
 ) {
@@ -121,6 +196,7 @@ private fun CodeTreeContent(
     var newFileParent by remember { mutableStateOf<String?>(null) }
     var showNewFolder by remember { mutableStateOf(false) }
     var newFolderParent by remember { mutableStateOf<String?>(null) }
+    var showQuickOpen by remember { mutableStateOf(false) }
     var renameFileTarget by remember { mutableStateOf<Item?>(null) }
     var renameFolderTarget by remember { mutableStateOf<Folder?>(null) }
     var moveFileTarget by remember { mutableStateOf<Item?>(null) }
@@ -183,6 +259,18 @@ private fun CodeTreeContent(
                 },
                 actions = {
                     IconButton(
+                        onClick = { showQuickOpen = true },
+                        enabled = state.isUnlocked,
+                        modifier = Modifier
+                            .heightIn(min = NoteZeroSpacing.minTarget)
+                            .testTag(CodeTags.QUICK_OPEN),
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.List,
+                            contentDescription = stringResource(R.string.cd_code_quick_open),
+                        )
+                    }
+                    IconButton(
                         onClick = { viewModel.toggleSearch() },
                         modifier = Modifier
                             .heightIn(min = NoteZeroSpacing.minTarget)
@@ -220,6 +308,23 @@ private fun CodeTreeContent(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
+            if (limitNotice) {
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = NoteZeroSpacing.l, vertical = NoteZeroSpacing.xs),
+                ) {
+                    Text(
+                        text = stringResource(R.string.code_tab_limit),
+                        style = NoteZeroType.Caption,
+                        modifier = Modifier
+                            .padding(NoteZeroSpacing.s)
+                            .testTag(CodeTags.TAB_LIMIT),
+                    )
+                }
+            }
             if (state.searchVisible) {
                 CodeSearchBar(
                     query = state.searchQuery,
@@ -287,17 +392,28 @@ private fun CodeTreeContent(
 
     // ---- Dialogs -------------------------------------------------------------
 
+    if (showQuickOpen && state.isUnlocked) {
+        QuickOpenDialog(
+            entries = state.quickOpenEntries,
+            onDismiss = { showQuickOpen = false },
+            onOpen = { entry ->
+                showQuickOpen = false
+                onOpenFile(entry.itemId, null)
+            },
+        )
+    }
+
     if (showNewFile) {
         NewCodeFileDialog(
             title = stringResource(R.string.code_new_file_title),
             confirmLabel = stringResource(R.string.common_create),
             validate = { name -> CodeTree.validateName(CodeTree.normalizeNewFileName(name)) },
             onDismiss = { showNewFile = false },
-            onConfirm = { name ->
+            onConfirmRequest = { request ->
                 val parent = newFileParent
                 showNewFile = false
                 scope.launch {
-                    val created = viewModel.createFile(name, parent)
+                    val created = viewModel.createFile(request.name, parent, request.body)
                     if (created != null) onOpenFile(created.id, null)
                 }
             },
