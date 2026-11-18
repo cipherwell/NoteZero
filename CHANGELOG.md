@@ -3,6 +3,43 @@
 All notable changes to NoteZero are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [Unreleased] — universal Workspace / IDE layer (2026-11-17, increment 13)
+
+### Added
+
+**Workspace ("Files") — one browser over the encrypted index**
+- New `WorkspaceScreen` reachable from the Notes top-bar files icon: every `ItemKind` (notes, code,
+  PDFs, EPUB books, sketches) in one list with type filter chips, search, sort (last updated / name)
+  and a footer storage summary (items · attachments · human-readable size, from the decrypted
+  index only).
+- Unified offline search over titles/bodies/tags/file names/book authors with body/code snippets;
+  masked locked items and items inside hidden locked folders are excluded from rows, filters,
+  counts and search (fail-closed), and no locked content can reach the UI.
+- Type-aware opening: notes/code deep-link into the existing editors hosted by the notes shell
+  (new `requestedItemId` hand-off in `NotesListScreen`/`AppRoot`); PDFs, books and sketches open
+  the existing viewer/reader/studio screens inside the Workspace; verified-locked rows route
+  through the standard re-auth controller.
+- Multi-select (long-press) with Select all / Clear, bulk Move to folder (existing dialog),
+  Lock/Unlock and Move to trash (confirmation); operations act only on visible selected ids,
+  failures show a non-secret message and selection is cleared.
+- Pure JVM-tested model layer (`WorkspaceModel`: fail-closed visibility, row/filter/search/sort,
+  summary, selection algebra, folder flattening) plus 25 Robolectric screen tests.
+- No new data model, payload, permission or dependency; all copy is resource strings
+  (`workspace_*`), colours from existing tokens, no content logging.
+
+### Verified (measured)
+- **1219 unit tests / 0 failures** (101 classes; +42: 16 workspace JVM + 25 Robolectric + 1 shell
+  routing) and **23 instrumented tests OK**.
+- Emulator QA: Workspace listed seeded note/PDF/code items with storage summary and hid the locked
+  note; search "E2E" returned the code file (snippet) and the note; long-press selection showed
+  "1 selected" with Select all/Clear/Move/Lock/Trash; bulk trash confirmation removed the row and
+  the summary updated to `3 items · 1 attachments · 431 B`; tapping a note row opened the editor
+  via the deep link.
+- Offline guard OK; token lint clean; no new permissions/deps; no debug/logging leftovers.
+- New screenshots `34-workspace`, `35-workspace-selection`, `36-workspace-search`,
+  `37-workspace-trash`; docs `docs/CONTRACTS-PHASE12.md`, `docs/WORKSPACE.md`, DECISIONS #25,
+  THREAT-MODEL §3.9.5, VERIFICATION §18.
+
 ## [Unreleased] — drawing studio: encrypted standalone sketches (2026-11-17, increment 12)
 
 ### Added

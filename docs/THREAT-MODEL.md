@@ -163,6 +163,20 @@ its PendingIntent is immutable and its receiver is not exported. The only effect
 is the same pending quick-capture request as the launcher shortcut, which is honoured only
 after a successful unlock.
 
+### 3.9.5 Universal workspace and bulk operations (increment 13)
+
+The Workspace is a second view over the already-decrypted item index, not a second store: no new
+payload, table, file or permission. It inherits the fail-closed visibility rules of the code
+workspace/Library — `LockVisibility.isItemMasked` items and items inside hidden locked folders are
+excluded from rows, filters, counts and search, so a locked title/body/snippet cannot leak through
+this surface; opening a verified-locked item goes through the standard re-auth controller. Bulk
+operations (move to folder, lock/unlock, move to trash) act only on the visible selected ids via
+`moveItem`/`setItemLocked`/`trashItem`; a vault lock mid-operation makes repository calls fail
+closed, the UI shows a non-secret error and refreshes, and selection is cleared. Search is an
+offline substring query over decrypted titles/bodies/tags/file names/book authors only (no PDF/EPUB
+content text extraction yet). The storage summary is computed from the decrypted index (counts +
+attachment sizes), never from a filesystem walk, and never logs names/content.
+
 ### 3.9.4 Standalone sketches and the drawing studio (increment 12)
 
 A `SKETCH_FILE` item stores its editable **vector** document (`SketchDocument`: template, strokes,
@@ -306,6 +320,9 @@ detailed per-blob design in `docs/ATTACHMENTS.md` §9 (audit D4).
 | A locked vault cannot read/write sketches | `saveSketch` false while locked; studio drops state on lock | repository tests + studio lock-reset tests |
 | Hostile sketch payloads cannot crash/allocate unbounded | model/codec bounds, 1,000-sample fuzz, null-on-corruption; bounded preview renderer | `SketchCodecTest`, instrumented renderer test |
 | Sketch previews never exist as plaintext files | in-memory bitmap/PNG only, imported through the NZAT pipeline; previous preview deleted | code review + attachment tests |
+| Workspace surfaces cannot leak locked/hidden content | same `LockVisibility` masking as code/Library; search/counts built from visible items only; re-auth on open | workspace helper + Robolectric tests |
+| Bulk workspace operations fail closed on lock | only visible selected ids; repository false/status handled; non-secret error + refresh | workspace tests |
+| Workspace adds no storage/permission surface | view over the existing decrypted index; no new payload/table/permission/dependency | code review + offline guard |
 
 ---
 

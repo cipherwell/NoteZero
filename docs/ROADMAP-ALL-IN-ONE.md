@@ -66,7 +66,7 @@ Deliver:
   per-element selection/move, sketch export, and a shared stroke surface with note drawings/PDF
   annotations.
 
-## Phase 13 — "IDE" file workspace
+## Phase 13 — "IDE" file workspace (shipped, increment 13)
 
 - Unified file browser across all item kinds (notes, code, PDFs, books, drawings) with folders,
   multi-select move/trash/export, sort/filter, storage/quota view.
@@ -74,6 +74,12 @@ Deliver:
   type facets and recent filters.
 - Code workspace polish: multi-tab recent files, split Markdown preview, project-level symbol-ish
   search (offline lexers only), file templates; keep no LSP/network/AI.
+- **Shipped in increment 13:** universal Workspace ("Files") over every item kind with type
+  filters, unified offline search/snippets, sort, storage summary, multi-select bulk
+  move/lock/trash (confirmation + fail-closed), type-aware openers/deep links, fail-closed lock
+  masking + re-auth, 41 workspace tests and shell routing. **Still queued:** multi-tab editor,
+  split Markdown preview, offline symbol search, file templates, content-level EPUB/PDF text
+  search (needs a vetted text engine), multi-select export, disk-usage view.
 
 ## Phase 14 — More formats, reading comfort, release polish
 

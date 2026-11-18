@@ -10,7 +10,7 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 [VaultZero](https://github.com/cipherwell/Vault-Zero) with an independent package
 (`com.cipherwell.notezero`), independent signing key and independent threat model.
 
-> Status: **Phase 5 — all-in-one workspace (increment 12)** — 2026-11-17.
+> Status: **Phase 5 — all-in-one workspace (increment 13)** — 2026-11-17.
 > Security core, notes MVP, encrypted SAF backup/restore, code editor (workspace
 > search/copy/export/indent), encrypted attachments (images/files/**drawings**),
 > **locked notes/folders**, **Markdown/HTML/PDF note export**, **table editing**,
@@ -23,7 +23,7 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 > phased plan (PDF annotation, drawing studio, universal file workspace, more formats) are
 > in [docs/ROADMAP-ALL-IN-ONE.md](docs/ROADMAP-ALL-IN-ONE.md), grounded in
 > [docs/RESEARCH-ALL-IN-ONE-2026-11-17.md](docs/RESEARCH-ALL-IN-ONE-2026-11-17.md).
-> Builds are green, **1177 unit tests + 23 device tests**, and **signed APK + AAB release
+> Builds are green, **1219 unit tests + 23 device tests**, and **signed APK + AAB release
 > builds are byte-for-byte reproducible**; an independent security audit previously found
 > no HIGH/CRITICAL issues and its findings are remediated. Device QA on a Pixel 9 Pro XL
 > (Android 17) and the emulator covered import, TOC, search, bookmarks, themes and
@@ -55,8 +55,10 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 | ![Reader night](docs/screenshots/26-reader-bookmarks-night.png) | ![Ann tools](docs/screenshots/27-pdf-annotate-tools.png) | ![Annotations](docs/screenshots/28-pdf-annotations.png) |
 | **Annotated export choice** | **Flattened annotated copy (page 1)** | **Drawing studio** |
 | ![Export choice](docs/screenshots/29-pdf-export-choice.png) | ![Flattened](docs/screenshots/30-pdf-flattened-page.png) | ![Drawing studio](docs/screenshots/31-drawing-studio.png) |
-| **Sketch: pen + shapes + grid** | **Sketch in the Library** | |
-| ![Sketch drawn](docs/screenshots/32-sketch-drawn.png) | ![Sketch library](docs/screenshots/33-sketch-library.png) | |
+| **Sketch: pen + shapes + grid** | **Sketch in the Library** | **Workspace (all files)** |
+| ![Sketch drawn](docs/screenshots/32-sketch-drawn.png) | ![Sketch library](docs/screenshots/33-sketch-library.png) | ![Workspace](docs/screenshots/34-workspace.png) |
+| **Unified search** | **Multi-select bulk actions** | **Bulk trash confirmation** |
+| ![Workspace search](docs/screenshots/36-workspace-search.png) | ![Selection](docs/screenshots/35-workspace-selection.png) | ![Trash confirm](docs/screenshots/37-workspace-trash.png) |
 
 Screenshots are real emulator captures from the instrumented E2E run (debug build with
 `-PallowScreenshots=true`; normal builds set FLAG_SECURE, which makes `screencap` return a
@@ -125,6 +127,28 @@ Screenshots are real emulator captures from the instrumented E2E run (debug buil
   template, renamed it, left and reopened it — the vector document restored exactly (grid,
   stroke, rectangle) from the encrypted item; preview blob 34,009 B encrypted `NZAT`. 1177 unit
   tests / 0 failures (99 classes) and **23 instrumented tests** green.
+
+## Universal Workspace / IDE layer (2026-11-17)
+
+- **One browser, every kind**: the Workspace ("Files") shows notes, code, PDFs, EPUB books and
+  sketches from the same encrypted index, with type filter chips, a search box, sort by
+  last-updated/name and a footer summary (items · attachments · human-readable size).
+- **Unified search** over decrypted titles/bodies/tags/file names/book authors, with body/code
+  snippets; masked locked items and hidden-folder items are excluded from rows, filters, counts
+  and search (fail-closed).
+- **Multi-select** (long-press) → bulk **Move** (existing folder dialog), **Lock/Unlock** (unlock
+  re-authenticates), **Move to trash** (confirmation); actions apply only to visible selected ids,
+  failures are non-secret and selection is cleared.
+- **Type-aware openers**: notes/code deep-link into the editors hosted by the notes shell; PDFs,
+  books and sketches open the existing reader/studio screens inside the Workspace; verified-locked
+  items go through the standard re-auth path.
+- No new data model, permission or dependency — this is a view over the already-decrypted index.
+- **Measured QA** (emulator, Android 17 image): Workspace listed the seeded note/PDF/code items
+  with the storage summary and excluded the locked note; search "E2E" returned the code file with a
+  matching snippet and the note; long-press selection → "1 selected" with Select all/Clear/Move/
+  Lock/Trash; bulk trash confirmation removed the item and updated the summary to
+  `3 items · 1 attachments · 431 B`; tapping a note row opened it in the editor via the deep link.
+  1219 unit tests / 0 failures (101 classes) and 23 instrumented tests green.
 
 ## Verified end to end (2026-11-15)
 

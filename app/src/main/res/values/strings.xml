@@ -613,4 +613,51 @@
     <string name="library_type_sketch">Drawing</string>
     <string name="library_new_sketch_desc">Create an editable drawing with pen, shapes, highlights and paper templates.</string>
 
+    <!-- Workspace: unified file browser / IDE layer -->
+    <string name="cd_workspace">Workspace</string>
+    <string name="workspace_title">Files</string>
+    <string name="cd_workspace_back">Back</string>
+    <string name="workspace_search_placeholder">Search all files</string>
+    <string name="cd_workspace_clear_search">Clear search</string>
+    <string name="workspace_filter_all">All</string>
+    <string name="workspace_filter_notes">Notes</string>
+    <string name="workspace_filter_code">Code</string>
+    <string name="workspace_filter_pdfs">PDFs</string>
+    <string name="workspace_filter_books">Books</string>
+    <string name="workspace_filter_drawings">Drawings</string>
+    <string name="workspace_empty_title">No files yet</string>
+    <string name="workspace_empty_message">Create a note, code file or drawing, or import a PDF or book. Everything appears here in one place.</string>
+    <string name="workspace_no_matches">No files match your search.</string>
+    <string name="workspace_selected_count">%1$d selected</string>
+    <string name="workspace_move">Move</string>
+    <string name="workspace_lock">Lock</string>
+    <string name="workspace_unlock">Unlock</string>
+    <string name="workspace_trash">Move to trash</string>
+    <string name="workspace_clear_selection">Clear selection</string>
+    <string name="cd_workspace_select_all">Select all</string>
+    <string name="cd_workspace_select">Select %1$s</string>
+    <string name="workspace_sort">Sort</string>
+    <string name="workspace_sort_updated">Last updated</string>
+    <string name="workspace_sort_name">Name</string>
+    <string name="workspace_storage_summary">%1$d items · %2$d attachments · %3$s</string>
+    <string name="workspace_type_note">Note</string>
+    <string name="workspace_type_code">Code</string>
+    <string name="workspace_type_pdf">PDF</string>
+    <string name="workspace_type_book">Book</string>
+    <string name="workspace_type_sketch">Drawing</string>
+    <string name="workspace_locked">Locked</string>
+    <string name="workspace_no_folder">No folder</string>
+    <string name="workspace_trash_confirm_message">You can restore them from Trash in the notes screen.</string>
+    <string name="workspace_trash_confirm_action">Move to trash</string>
+    <string name="workspace_cancel">Cancel</string>
+    <string name="workspace_bulk_failed">Some files could not be updated. The vault was re-checked.</string>
+    <string name="workspace_locked_content">Locked file</string>
+    <string name="workspace_search_snippet_masked">Locked content</string>
+    <string name="workspace_sort_menu">Sort files</string>
+    <string name="workspace_more_actions">File actions</string>
+
+    <plurals name="workspace_trash_confirm_title">
+        <item quantity="one">Move %1$d item to trash?</item>
+        <item quantity="other">Move %1$d items to trash?</item>
+    </plurals>
 </resources>

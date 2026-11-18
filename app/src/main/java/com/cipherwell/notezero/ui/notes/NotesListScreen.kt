@@ -106,6 +106,7 @@ fun NotesListScreen(
     onOpenSettings: () -> Unit,
     onOpenCode: () -> Unit = {},
     onOpenLibrary: () -> Unit = {},
+    onOpenWorkspace: () -> Unit = {},
     /** Injectable only for tests; production uses the device presence prompt. */
     biometricPrompt: LockBiometricPrompt? = null,
     /** Injectable only for tests; production uses the SAF `CreateDocument` target. */
@@ -113,6 +114,9 @@ fun NotesListScreen(
     /** Quick-capture request (launcher shortcut): create and open a new note once. */
     startNewNote: Boolean = false,
     onStartNewNoteConsumed: () -> Unit = {},
+    /** Workspace deep link: open this note/code file once, then acknowledge it. */
+    requestedItemId: String? = null,
+    onRequestedItemConsumed: () -> Unit = {},
 ) {
     val viewModel: NotesViewModel = viewModel(factory = NotesViewModelFactory(repository))
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -122,6 +126,17 @@ fun NotesListScreen(
     var codeItemId by rememberSaveable { mutableStateOf<String?>(null) }
     var bookItemId by rememberSaveable { mutableStateOf<String?>(null) }
     var editorOpenDrawing by rememberSaveable { mutableStateOf(false) }
+
+    // Workspace deep link: a note/code file tapped in the Workspace opens in this shell.
+    LaunchedEffect(requestedItemId) {
+        val id = requestedItemId ?: return@LaunchedEffect
+        when (repository.items.value.firstOrNull { it.id == id }?.kind) {
+            ItemKind.NOTE -> editorItemId = id
+            ItemKind.CODE_FILE -> codeItemId = id
+            else -> Unit
+        }
+        onRequestedItemConsumed()
+    }
     var showCreateSheet by rememberSaveable { mutableStateOf(false) }
     var showNewCodeDialog by rememberSaveable { mutableStateOf(false) }
     val createScope = rememberCoroutineScope()
@@ -189,6 +204,7 @@ fun NotesListScreen(
         reauth = reauth,
         onOpenCode = onOpenCode,
         onOpenLibrary = onOpenLibrary,
+        onOpenWorkspace = onOpenWorkspace,
         onOpenEditor = { editorItemId = it },
         onOpenPdf = { pdfItemId = it },
         onOpenCodeItem = { codeItemId = it },
@@ -278,6 +294,7 @@ private fun NotesListContent(
     onOpenSettings: () -> Unit,
     onOpenCode: () -> Unit,
     onOpenLibrary: () -> Unit,
+    onOpenWorkspace: () -> Unit,
     exportTarget: NoteExportTarget,
 ) {
     var renameTarget by remember { mutableStateOf<Item?>(null) }
@@ -295,6 +312,7 @@ private fun NotesListContent(
     val isTrash = state.section == NotesSection.TRASH
     val codeWorkspaceLabel = stringResource(R.string.cd_notes_code_workspace)
     val libraryLabel = stringResource(R.string.cd_library)
+    val workspaceLabel = stringResource(R.string.cd_workspace)
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
 
     BackHandler(enabled = isTrash) { viewModel.leaveTrash() }
@@ -381,6 +399,18 @@ private fun NotesListContent(
                                 modifier = Modifier.testTag("trash_empty_button"),
                             ) { Text(stringResource(R.string.notes_empty_trash)) }
                         } else {
+                            IconButton(
+                                onClick = onOpenWorkspace,
+                                modifier = Modifier
+                                    .testTag("workspace_button")
+                                    .semantics { contentDescription = workspaceLabel },
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_workspace),
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                             IconButton(
                                 onClick = onOpenLibrary,
                                 modifier = Modifier

@@ -63,6 +63,24 @@ class AppRootTest : UiTestBase() {
     }
 
     @Test
+    fun `workspace opens from the notes top bar and back returns to notes`() {
+        val repository = FakeNoteRepository(
+            initialStatus = VaultStatus.UNLOCKED,
+            initialPassword = FakeNoteRepository.STRONG_PASSWORD,
+        )
+        val viewModel = viewModel(repository)
+        setThemedContent { AppRoot(repository = repository, viewModel = viewModel) }
+
+        composeRule.onNodeWithTag("notes_list").assertExists()
+        composeRule.onNodeWithTag("workspace_button").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("workspace_screen").assertExists()
+        composeRule.onNodeWithTag("workspace_back").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("notes_list").assertExists()
+    }
+
+    @Test
     fun `immediate re-lock shows the locked overlay`() {
         val repository = FakeNoteRepository(
             initialStatus = VaultStatus.UNLOCKED,

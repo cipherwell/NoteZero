@@ -794,3 +794,61 @@ DECISIONS #24.
   temporary debug SideEffect was removed before the final runs.
 - Rename automation via `adb input text` typed only the first token; the feature itself was
   verified by the title update and unit tests, not by the full typed string.
+
+---
+
+## 18. Increment 13 — universal Workspace / IDE layer (2026-11-17)
+
+Scope: phase 13 first slice (`docs/ROADMAP-ALL-IN-ONE.md`): one file-manager/IDE browser over the
+encrypted item index, unified offline search, multi-select bulk operations and a storage summary.
+Contract: `docs/CONTRACTS-PHASE12.md`; UI details: `docs/WORKSPACE.md`; policy: DECISIONS #25.
+
+### 18.1 Workspace (Files) implementation
+
+| Check | Result |
+|---|---|
+| Browser | `WorkspaceScreen` reachable from the Notes top bar (files icon); title "Files"; type chips All/Notes/Code/PDFs/Books/Drawings; sort (last updated/name); search box; footer `N items · M attachments · human size` computed from the visible decrypted index |
+| Rows | `workspace_item` rows with type label, title, folder name or "No folder", metadata/attachment hint, lock glyph for verified-locked items; fail-closed visibility: masked locked items and items in hidden locked folders excluded from rows, filters, counts and search |
+| Openers | NOTE/CODE_FILE deep-link into the editors hosted by the notes shell (`AppRoot` pending item → `NotesListScreen.requestedItemId`); PDF/BOOK/SKETCH open the existing viewer/reader/studio hosted inside the Workspace; verified-locked items re-authenticate through the standard controller |
+| Search | Case-insensitive offline search over title/body/tags/attachment display name/book author; body/code matches show a snippet; masked content never contributes; empty/no-match states |
+| Bulk | Long-press selection + Select all/Clear; Move (existing `MoveToFolderDialog`), Lock/Unlock (unlock re-auth) and Move to trash (confirmation dialog); only visible selected ids; repository failures show non-secret `workspace_bulk_failed` and clear selection; plural trash title ("1 item"/"N items") |
+| Rules | No new data model, payload, permission, dependency or storage surface — a view over the already-decrypted index; no content logging; strings resources; colours from tokens; no debug leftovers |
+| Tests | `WorkspaceQueryTest` 16 JVM (visibility/search/sort/summary/selection/folder flattening), `WorkspaceScreenTest` 25 Robolectric (rows/filters/search/sort/summary, masked+hidden exclusion, long-press + select-all, bulk move/lock/trash + confirmation + failures, note/code callbacks, hosted PDF/book/sketch routing seams, re-auth) plus an `AppRootTest` shell-routing test; full suite **1,219 tests / 0 failures / 101 classes**; **23 instrumented tests OK** |
+
+### 18.2 Emulator device QA (measured)
+
+| Step | Evidence |
+|---|---|
+| Entry | Notes top bar files icon opened Workspace; the locked ("Locked note") item was absent (fail-closed) while 4 visible items rendered with type labels and `4 items · 1 attachments · 431 B` |
+| Search | search "E2E" returned the code file `hello.kt` with a matching body snippet and the note `E2E persisted secret title` |
+| Selection | long-press row → selection mode with "1 selected", Select all / Clear selection / Move / Lock / Move to trash actions and per-row checkboxes |
+| Bulk trash | "Move to trash" opened the confirmation ("Move 1 item to trash?" after the plural fix), confirming removed the row and updated the summary to `3 items · 1 attachments · 431 B` |
+| Open note | tapping the note row deep-linked into the note editor with the item loaded (title/body shown), proving workspace → notes-shell navigation |
+| Crashes | 0 NoteZero FATAL/ANR during the session |
+| Screenshots | `34-workspace`, `35-workspace-selection`, `36-workspace-search`, `37-workspace-trash` |
+
+### 18.3 Security + release verification
+
+| Check | Result |
+|---|---|
+| Offline guard | `./scripts/check-offline.sh --gradle` → `OK: NoteZero is offline by construction.` |
+| Token lint | `ui/workspace` Kotlin files token-clean (no raw colours/hex) |
+| Hygiene | no TODO/FIXME/TEMP DEBUG/Log/println in `ui/workspace` or the new AppRoot/Notes wiring; no network imports; no new permissions (release APK: `USE_BIOMETRIC` only + generated dynamic-receiver permission) |
+| Reproducible APK | **REPRODUCIBLE** — both builds sha256 `680ea345eae5dfc844b1219856a93d9c1189fc8b73db8d1a1c7772c23d8c6f20` |
+| Reproducible AAB | **REPRODUCIBLE** — both builds sha256 `3df3c1d5e8335001343d090f906cc134eb398ba93656a42279fb12015e25223d` |
+| Artifacts | `releases/notezero-0.1.0-release.apk` / `.aab` replaced; `releases/SHA256SUMS` updated |
+| Certificate | `CN=Cipherwell, O=Cipherwell, OU=NoteZero, C=US`, SHA-256 `FA:CA:DD:67:…:92:78` (unchanged) |
+| Owner phone | release APK installed over the existing vault (data/biometrics intact); phone at lockscreen so no UI interaction this pass; 0 NoteZero crash entries; left locked |
+
+### 18.4 Residual notes
+
+- Workspace v1 excludes locked+unverified items entirely (fail-closed) rather than showing masked
+  rows, unlike the Notes list; unlocking is done from Notes. This is documented in WORKSPACE.md.
+- Search is index-level only: no PDF/EPUB *content* text extraction yet (phase 14 needs a vetted
+  text engine), and no fuzzy/prefix ranking.
+- No multi-tab editors, split Markdown preview, symbol search, templates, multi-select export or
+  disk-usage view yet (phase-13 follow-ups). Storage summary reports attachment-ref sizes, not
+  filesystem usage.
+- Bulk operations don't have a dedicated undo; trash items are recoverable from Notes Trash.
+- Selection entry is long-press (TalkBack exposes long-click); there is no visible "select" mode
+  button per row by design (space/strings constraint).

@@ -33,6 +33,7 @@ import com.cipherwell.notezero.ui.components.common.NzTextButton
 import com.cipherwell.notezero.ui.components.common.rememberBiometricAvailability
 import com.cipherwell.notezero.ui.code.CodeWorkspaceScreen
 import com.cipherwell.notezero.ui.library.LibraryScreen
+import com.cipherwell.notezero.ui.workspace.WorkspaceScreen
 import com.cipherwell.notezero.ui.components.common.rememberBiometricPromptLauncher
 import com.cipherwell.notezero.ui.notes.NotesListScreen
 import com.cipherwell.notezero.ui.screens.recovery.RecoveryScreen
@@ -95,6 +96,8 @@ fun AppRoot(
     // Quick capture survives a locked vault: the request is honoured after unlock.
     var pendingNewNote by rememberSaveable { mutableStateOf(newNoteRequest) }
     LaunchedEffect(newNoteRequest) { if (newNoteRequest) pendingNewNote = true }
+    // Deep link used by the Workspace to open a note/code file in the notes shell.
+    var pendingNotesItemId by rememberSaveable { mutableStateOf<String?>(null) }
 
     var wasUnlocked by rememberSaveable { mutableStateOf(false) }
     var lockedRoute by rememberSaveable { mutableStateOf(ROUTE_UNLOCK) }
@@ -115,6 +118,7 @@ fun AppRoot(
             VaultStatus.LOCKED -> {
                 // Immediate re-lock: never leave an unlocked destination mounted.
                 unlockedRoute = ROUTE_NOTES
+                pendingNotesItemId = null
             }
         }
     }
@@ -226,6 +230,15 @@ fun AppRoot(
                                     onBack = { unlockedRoute = ROUTE_NOTES },
                                 )
 
+                                ROUTE_WORKSPACE -> WorkspaceScreen(
+                                    repository = repository,
+                                    onBack = { unlockedRoute = ROUTE_NOTES },
+                                    onOpenNote = { itemId ->
+                                        pendingNotesItemId = itemId
+                                        unlockedRoute = ROUTE_NOTES
+                                    },
+                                )
+
                                 else -> NotesListScreen(
                                     repository = repository,
                                     onOpenSettings = {
@@ -236,6 +249,9 @@ fun AppRoot(
                                     },
                                     onOpenCode = { unlockedRoute = ROUTE_CODE },
                                     onOpenLibrary = { unlockedRoute = ROUTE_LIBRARY },
+                                    onOpenWorkspace = { unlockedRoute = ROUTE_WORKSPACE },
+                                    requestedItemId = pendingNotesItemId,
+                                    onRequestedItemConsumed = { pendingNotesItemId = null },
                                     startNewNote = pendingNewNote,
                                     onStartNewNoteConsumed = {
                                         pendingNewNote = false
@@ -313,3 +329,4 @@ private const val ROUTE_NOTES = "notes"
 private const val ROUTE_SETTINGS = "settings"
 private const val ROUTE_CODE = "code"
 private const val ROUTE_LIBRARY = "library"
+private const val ROUTE_WORKSPACE = "workspace"

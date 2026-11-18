@@ -19,6 +19,7 @@ Features:
 - A drawing studio for standalone sketches: pen, highlighter, eraser, lasso, line/rectangle/ellipse/arrow shapes, 7 colours, 3 widths, blank/ruled/grid/dotted paper, undo/redo, zoom/pan and rename; sketches are encrypted vector documents with encrypted previews, editable at any size
 - Quick capture: a "New note" launcher shortcut works even while the vault is locked — the note is created only after you unlock
 - A local code editor: file tree, syntax highlighting for Kotlin/Java/JS/TS/Python/JSON/XML/Markdown/Shell, line numbers, find/replace, go-to-line, undo/redo, workspace-wide search, font size and wrap
+- A universal File Workspace: every note, code file, PDF, book and drawing in one searchable list with type filters, sort, storage summary and bulk move/lock/trash actions
 - Encrypted backup export/import through the system file picker, duplicate-safe and password-protected if you choose
 - Auto-lock on background/screen-off, screen-capture protection, sensitive clipboard flags
 - Biometric unlock backed by the Android Keystore

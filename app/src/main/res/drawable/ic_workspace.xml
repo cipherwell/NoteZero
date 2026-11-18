@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Workspace glyph: a folder tree / file stack (tinted by material3 Icon). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="@android:color/black"
+        android:pathData="M3,4h6l2,2h4v2H3z M3,9h18v11H3z M6,12h8v1.5H6z M6,15h10v1.5H6z M6,18h6v1.5H6z" />
+</vector>

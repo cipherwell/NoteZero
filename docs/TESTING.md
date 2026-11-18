@@ -56,6 +56,14 @@ CI runs `assembleDebug`, `testDebugUnitTest`, and `check-offline.sh --gradle` on
 | `ui.library` | 17 | Sketch rows/open-studio, New drawing action + failed-create cleanup, preview-less sketches, existing PDF/EPUB/drawing behaviour |
 | Instrumented `SketchRendererInstrumentedTest` | 4 | Real in-memory PNG decode/bounds, hostile/oversized document fail-closed |
 
+## Increment-13 areas (universal Workspace)
+
+| Area | Tests | What it proves |
+|---|---|---|
+| `ui.workspace.WorkspaceQueryTest` (plain JVM) | 16 | Fail-closed visibility, row/filter/search(+snippet)/sort, storage summary, selection algebra, folder flattening |
+| `ui.workspace.WorkspaceScreenTest` (Robolectric) | 25 | Rows/filters/sort/search/summary, masked+hidden items absent, long-press multi-select + select-all, bulk move/lock/trash + confirmation, non-secret failures, note/code open callbacks, hosted PDF/book/sketch routing with test seams, re-auth for verified-locked rows |
+| `ui.AppRootTest` shell routing | +1 | Workspace opens from the Notes top bar and back returns to Notes |
+
 ## Backup-flow tests (Phase-2 SAF gap)
 
 | Test | What it proves | Tooling |
@@ -96,7 +104,7 @@ Commands:
 
 | Suite | Command | Result |
 |---|---|---|
-| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **1177 tests / 0 failures / 0 errors / 0 skipped** (99 classes) |
+| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **1219 tests / 0 failures / 0 errors / 0 skipped** (101 classes) |
 | Instrumented (emulator) | `adb shell am instrument -w com.cipherwell.notezero.test/androidx.test.runner.AndroidJUnitRunner` | **OK (15 tests)** incl. `NotePdfRenderInstrumentedTest`, `VaultFlowE2ETest` (notes + backup settings + code workspace + create sheet + PDF) and a real-`PdfRenderer` instrumented test |
 | Offline guarantee | `./scripts/check-offline.sh --gradle` | exit 0 |
 | Release signing | `apksigner verify --print-certs app-release.apk` | NoteZero upload key SHA-256 `FA:CA:DD:67:…:92:78` |
