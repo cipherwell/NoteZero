@@ -89,7 +89,14 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      // Robolectric + Compose tests allocate native bitmaps/fonts across a large suite; the
+      // Gradle default 512 MiB worker heap can GC-thrash until Compose reports AppNotIdle on CI.
+      all { test -> test.maxHeapSize = "2g" }
+    }
+  }
   // Keep the APK free of dependency blob metadata so builds stay reproducible.
   dependenciesInfo {
     includeInApk = false

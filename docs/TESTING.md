@@ -135,6 +135,8 @@ Commands:
 | Suite | Command | Result |
 |---|---|---|
 | Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **1490 tests / 0 failures / 0 errors / 0 skipped** (120 classes) |
+
+Unit tests run with a **2 GiB** worker heap (`testOptions.unitTests.all { maxHeapSize = "2g" }`); the old 512 MiB default could GC-thrash long Robolectric/Compose runs until Espresso reported `AppNotIdle` on CI.
 | Instrumented (emulator) | `adb shell am instrument -w com.cipherwell.notezero.test/androidx.test.runner.AndroidJUnitRunner` | **OK (38 tests)** incl. `NotePdfRenderInstrumentedTest`, `VaultFlowE2ETest` (notes + backup settings + code workspace + create sheet + PDF) and a real-`PdfRenderer` instrumented test |
 | Offline guarantee | `./scripts/check-offline.sh --gradle` | exit 0 |
 | Release signing | `apksigner verify --print-certs app-release.apk` | NoteZero upload key SHA-256 `FA:CA:DD:67:…:92:78` |
