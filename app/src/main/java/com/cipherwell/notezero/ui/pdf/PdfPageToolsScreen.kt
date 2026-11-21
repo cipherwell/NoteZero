@@ -1,5 +1,8 @@
 package com.cipherwell.notezero.ui.pdf
 
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,9 +15,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -31,14 +37,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.cipherwell.notezero.R
@@ -76,6 +88,7 @@ fun PdfPageToolsScreen(
     onPlanChange: (PdfPagePlan) -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit,
+    thumbnails: PdfThumbnails? = null,
     modifier: Modifier = Modifier,
 ) {
     // Local notices (last-page refusal / blank added) are screen state; save failures come from
@@ -213,6 +226,7 @@ fun PdfPageToolsScreen(
                             PageRow(
                                 index = index,
                                 entry = entry,
+                                thumbnail = entry.sourcePage?.let { source -> thumbnails?.bitmap(source) },
                                 total = plan.size,
                                 onRotateLeft = {
                                     localNotice = null
@@ -312,6 +326,7 @@ fun PdfPageToolsScreen(
 private fun PageRow(
     index: Int,
     entry: PdfPageEntry,
+    thumbnail: Bitmap?,
     total: Int,
     onRotateLeft: () -> Unit,
     onRotateRight: () -> Unit,
@@ -339,28 +354,42 @@ private fun PageRow(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = stringResource(R.string.pdf_pages_position, index + 1),
-                style = NoteZeroType.Callout,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
+            PageThumbnailPreview(
+                thumbnail = thumbnail,
+                quarterTurns = entry.quarterTurns,
+                page = entry.sourcePage,
+                blankLabel = sourceLabel.takeIf { entry.isBlank },
             )
-            Text(
-                text = stringResource(R.string.pdf_pages_rotation, entry.quarterTurns * 90),
-                style = NoteZeroType.Caption,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
+            Spacer(Modifier.width(NoteZeroSpacing.s))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(R.string.pdf_pages_position, index + 1),
+                        style = NoteZeroType.Callout,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = stringResource(R.string.pdf_pages_rotation, entry.quarterTurns * 90),
+                        style = NoteZeroType.Caption,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+                Text(
+                    text = sourceLabel,
+                    style = NoteZeroType.Caption,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
-        Text(
-            text = sourceLabel,
-            style = NoteZeroType.Caption,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
         // Row-scoped tag: the five controls repeat their contract tags on every page, so tests
         // address one page's control with hasTestTag + hasAnyAncestor(pdf_page_row_<index>).
         Row(
@@ -407,6 +436,56 @@ private fun PageRow(
                 onClick = onDelete,
                 enabled = true,
                 tag = "pdf_page_delete",
+            )
+        }
+    }
+}
+
+/**
+ * 56×72 dp preview of the row's planned output page.
+ *
+ * A source page shows its in-memory thumbnail, visually rotated by the entry's clockwise
+ * quarter-turns; a page whose thumbnail is unavailable (still loading / document too large) keeps
+ * the light placeholder, and an inserted blank page shows the blank label in the placeholder.
+ * The preview is decorative except for the content description naming the source page.
+ */
+@Composable
+private fun PageThumbnailPreview(
+    thumbnail: Bitmap?,
+    quarterTurns: Int,
+    page: Int?,
+    blankLabel: String?,
+) {
+    Box(
+        modifier = Modifier
+            .size(width = 56.dp, height = 72.dp)
+            .clip(RoundedCornerShape(NoteZeroSpacing.xs))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .testTag("pdf_page_thumb"),
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            thumbnail != null -> Image(
+                bitmap = thumbnail.asImageBitmap(),
+                contentDescription = stringResource(
+                    R.string.cd_pdf_page_tools_thumbnail,
+                    (page ?: 0) + 1,
+                ),
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(2.dp)
+                    .rotate(quarterTurns * 90f),
+            )
+
+            blankLabel != null -> Text(
+                text = blankLabel,
+                style = NoteZeroType.Caption,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(2.dp),
             )
         }
     }

@@ -163,6 +163,21 @@ its PendingIntent is immutable and its receiver is not exported. The only effect
 is the same pending quick-capture request as the launcher shortcut, which is honoured only
 after a successful unlock.
 
+### 3.9.8 PDF page thumbnails (increment 17)
+
+Thumbnails are **in-memory only** for one viewer session: the viewer lazily asks
+`AndroidPdfThumbnailRenderer` once (on first Pages/bookmarks/page-tools open), which writes the
+decrypted bytes to a single ephemeral app-private cache file (same bounded seekable-FD trade-off
+as the other renderers, deleted in `finally`), renders ≤100 pages at ≤144 px long edge on white
+ARGB bitmaps, and returns them as a caller-owned set. The viewer holds no PDF bytes in state, recycles
+every bitmap on replace/dispose, and fails closed to an empty set (numeric page fallback) on
+corrupt input/oversized pages/OOM; cancellation is rethrown. No thumbnail file, database column,
+backup field or plaintext cache exists; no titles/page content are logged; no new permission or
+dependency. The Pages overview grid intentionally covers the pages the viewer has rasterised (the
+existing 8-page render cap) so a cell is always a valid target; page tools still cover all pages up
+to 100. A full-document lazy-render viewer is a separate queued change; until then the numeric field
+retains the document's full range.
+
 ### 3.9.7 PDF page tools (increment 16)
 
 Page operations (rotate/delete/reorder/insert blank) are a **plan**, not an in-place edit: the

@@ -6,10 +6,13 @@ import android.graphics.Color
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertWidthIsAtLeast
+import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -116,12 +119,31 @@ class PdfPageToolsScreenTest : UiTestBase() {
         }
     }
 
+    /** Fake in-memory thumbnail renderer: counts calls and returns tiny fake bitmaps. */
+    private class FakeThumbnailRenderer(
+        private val pageCount: Int = 2,
+    ) : PdfThumbnailRenderer {
+        var calls: Int = 0
+            private set
+
+        override suspend fun render(context: Context, pdfBytes: ByteArray): PdfThumbnails {
+            calls++
+            val bitmaps = (0 until pageCount).map { index ->
+                Bitmap.createBitmap(12, 18, Bitmap.Config.ARGB_8888).apply {
+                    eraseColor(if (index % 2 == 0) Color.WHITE else Color.LTGRAY)
+                }
+            }
+            return PdfThumbnails(bitmaps)
+        }
+    }
+
     // ---- Direct screen harness -----------------------------------------------------------
 
     private fun openScreen(
         plan: PdfPagePlan,
         saving: Boolean = false,
         notice: String? = null,
+        thumbnails: PdfThumbnails? = null,
     ) {
         planState = mutableStateOf(plan)
         savedPlan = null
@@ -138,6 +160,7 @@ class PdfPageToolsScreenTest : UiTestBase() {
                     savedPlan = planState.value
                 },
                 onCancel = { cancelCalls++ },
+                thumbnails = thumbnails,
             )
         }
         composeRule.waitForIdle()
@@ -206,6 +229,7 @@ class PdfPageToolsScreenTest : UiTestBase() {
         exporter: FakePageToolsExporter = FakePageToolsExporter(),
         saver: FakePageCopySaver = FakePageCopySaver(),
         renderer: PdfPageRenderer = fakeRenderer(),
+        thumbnailRenderer: PdfThumbnailRenderer = FakeThumbnailRenderer(),
         onClose: () -> Unit = {},
     ) {
         setThemedContent {
@@ -216,6 +240,7 @@ class PdfPageToolsScreenTest : UiTestBase() {
                 renderer = renderer,
                 pageToolsExporter = exporter,
                 pageCopySaver = saver,
+                thumbnailRenderer = thumbnailRenderer,
             )
         }
         composeRule.waitForIdle()
@@ -542,5 +567,65 @@ class PdfPageToolsScreenTest : UiTestBase() {
             .assertExists()
         assertEquals(0, exporter.calls)
         assertEquals(0, saver.calls)
+    }
+
+    // ---- Page previews (in-memory thumbnails) --------------------------------------------
+
+    @Test
+    fun `page rows show the source page thumbnail in a 56x72 dp preview`() {
+        val thumbnailBitmaps = (0 until 2).map {
+            Bitmap.createBitmap(12, 18, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.WHITE) }
+        }
+        openScreen(PdfPagePlan.of(2), thumbnails = PdfThumbnails(thumbnailBitmaps))
+        scrollToRow(0)
+
+        composeRule.onAllNodes(hasContentDescription("Page 1 preview"), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+            .let { assertFalse("the source page preview must show its thumbnail", it.isEmpty()) }
+        val previews = composeRule.onAllNodesWithTag("pdf_page_thumb")
+        assertTrue(previews.fetchSemanticsNodes().isNotEmpty())
+        previews[0].assertWidthIsEqualTo(56.dp)
+        previews[0].assertHeightIsEqualTo(72.dp)
+    }
+
+    @Test
+    fun `blank page row shows a labelled placeholder instead of a thumbnail`() {
+        // A plan with exactly one output page: an inserted blank (the source page was deleted).
+        val blankOnly = PdfPagePlan.of(1).insertBlank().delete(0).plan
+        val thumbnail = Bitmap.createBitmap(12, 18, Bitmap.Config.ARGB_8888).apply {
+            eraseColor(Color.WHITE)
+        }
+        openScreen(blankOnly, thumbnails = PdfThumbnails(listOf(thumbnail)))
+        scrollToRow(0)
+
+        assertEquals(1, composeRule.onAllNodesWithTag("pdf_page_thumb").fetchSemanticsNodes().size)
+        assertTrue(
+            "a blank page must not render a thumbnail image",
+            composeRule.onAllNodes(hasContentDescription("Page 1 preview"), useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .isEmpty(),
+        )
+        assertTrue(
+            "the placeholder keeps the blank label in addition to the row label",
+            composeRule.onAllNodesWithText("Blank page").fetchSemanticsNodes().size >= 2,
+        )
+    }
+
+    @Test
+    fun `opening page tools lazily renders thumbnails and shows them in the rows`() {
+        val (repository, itemId) = repositoryWithPdf()
+        val thumbnailRenderer = FakeThumbnailRenderer(pageCount = 2)
+        openViewer(repository, itemId, thumbnailRenderer = thumbnailRenderer)
+        assertEquals("no thumbnail work before page tools opens", 0, thumbnailRenderer.calls)
+
+        openTools()
+        composeRule.waitUntil(5_000) { thumbnailRenderer.calls == 1 }
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodes(hasContentDescription("Page 1 preview"), useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
+        assertTrue(composeRule.onAllNodesWithTag("pdf_page_thumb").fetchSemanticsNodes().isNotEmpty())
+        assertEquals(1, thumbnailRenderer.calls)
     }
 }

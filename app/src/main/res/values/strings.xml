@@ -733,4 +733,12 @@
     <string name="pdf_pages_blank_added">Blank page added.</string>
     <string name="pdf_pages_changed">Pages changed; save a copy to keep them.</string>
 
+    <!-- PDF visual page navigation (increment 17): in-memory thumbnails -->
+    <string name="pdf_page_overview">Pages</string>
+    <string name="pdf_page_overview_hint">Tap a page to jump; type a page number for long documents.</string>
+    <string name="pdf_thumbnails_loading">Loading page thumbnails…</string>
+    <string name="pdf_thumbnails_unavailable">Page thumbnails are unavailable for this document.</string>
+    <string name="cd_pdf_page_thumbnail">Page %1$d</string>
+    <string name="cd_pdf_page_tools_thumbnail">Page %1$d preview</string>
+
 </resources>

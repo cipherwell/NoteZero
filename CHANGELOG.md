@@ -3,6 +3,38 @@
 All notable changes to NoteZero are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [Unreleased] — PDF visual page navigation: in-memory thumbnails (2026-11-20, increment 17)
+
+### Added
+- `PdfThumbnails` (bounded caller-owned bitmap set with idempotent recycle) and
+  `PdfThumbnailRenderer` / `AndroidPdfThumbnailRenderer` (≤100 pages, ≤144 px long edge, white
+  ARGB backgrounds, one ephemeral app-private cache file deleted in `finally`, fail-closed empty
+  on corrupt/OOM, cancellation rethrown, no logging).
+- Lazy, once-per-viewer-session thumbnail loading in `PdfViewerScreen`; re-reads decrypted
+  attachment bytes only when a thumbnail surface opens; recycles on replace/dispose; no PDF bytes
+  held in state.
+- **Pages overview**: the page-jump dialog now shows a 3-column thumbnail grid with current-page
+  emphasis and page numbers (tap to jump/close), retaining the existing numeric field/error/Go/
+  Cancel fallback, plus loading/unavailable states.
+- **Bookmark rows** show a 48×64 dp page thumbnail when available.
+- **Page-tools rows** show 56×72 dp previews (source page rotated by its quarter-turn, labelled
+  blank placeholder for inserted blanks); opening page tools triggers the lazy load.
+- Tests: +16 unit/Robolectric thumbnail/viewer tests and +5 instrumented real-`PdfRenderer`
+  thumbnail tests; full suite **1467 / 0 failures / 118 classes**, **32 instrumented tests**.
+  Docs `docs/CONTRACTS-PHASE16.md`, `docs/PDF-THUMBNAILS.md`, VERIFICATION §22, DECISIONS #28,
+  THREAT-MODEL §3.9.8; screenshots 49–51.
+
+### Notes
+- The thumbnail grid intentionally shows the pages the viewer has rasterised (existing 8-page
+  render cap); the numeric field retains the document's full range, and page tools operate on all
+  pages up to 100. A full-document lazy-render viewer is a separate queued improvement.
+
+### Verified (measured)
+- Emulator QA on a 12-page PDF: overview thumbnails/current-page emphasis, thumbnail jump 1→5,
+  bookmark thumbnail, page-tools previews incl. rotated page; 0 crashes.
+- Offline guard OK; token lint clean; no new permissions/dependencies; reproducible hashes in
+  VERIFICATION §22.
+
 ## [Unreleased] — PDF page tools: rotate/delete/reorder/insert blank (2026-11-20, increment 16)
 
 ### Added

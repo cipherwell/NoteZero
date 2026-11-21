@@ -10,7 +10,7 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 [VaultZero](https://github.com/cipherwell/Vault-Zero) with an independent package
 (`com.cipherwell.notezero`), independent signing key and independent threat model.
 
-> Status: **Phase 5 — all-in-one workspace (increment 16)** — 2026-11-20.
+> Status: **Phase 5 — all-in-one workspace (increment 17)** — 2026-11-20.
 > Security core, notes MVP, encrypted SAF backup/restore, code editor (workspace
 > search/copy/export/indent), encrypted attachments (images/files/**drawings**),
 > **locked notes/folders**, **Markdown/HTML/PDF note export**, **table editing**,
@@ -26,7 +26,7 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 > extraction, TTS/translations, F-Droid) is in
 > [docs/ROADMAP-ALL-IN-ONE.md](docs/ROADMAP-ALL-IN-ONE.md), grounded in
 > [docs/RESEARCH-ALL-IN-ONE-2026-11-17.md](docs/RESEARCH-ALL-IN-ONE-2026-11-17.md).
-> Builds are green, **1451 unit tests + 27 device tests**, and **signed APK + AAB release
+> Builds are green, **1467 unit tests + 32 device tests**, and **signed APK + AAB release
 > builds are byte-for-byte reproducible**; an independent security audit previously found
 > no HIGH/CRITICAL issues and its findings are remediated. Device QA on a Pixel 9 Pro XL
 > (Android 17) and the emulator covered import, TOC, search, bookmarks, themes and
@@ -68,8 +68,10 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 | ![Library formats](docs/screenshots/41-library-formats.png) | ![Comic bookmarks](docs/screenshots/42-comic-bookmarks.png) | ![Code tabs](docs/screenshots/45-code-split-preview.png) |
 | **Multi-file tabs (state-preserving)** | **Quick-open switcher** | **PDF page tools** |
 | ![Tabs](docs/screenshots/43-code-tabs.png) | ![Quick open](docs/screenshots/44-code-quick-open.png) | ![PDF page tools](docs/screenshots/46-pdf-page-tools.png) |
-| **Page-tools copy: reordered + rotated + blank** | | |
-| ![Page-tools copy](docs/screenshots/47-pdf-page-tools-copy.png) | | |
+| **Page-tools copy: reordered + rotated + blank** | **Pages overview (thumbnails)** | **Page-tools previews** |
+| ![Page-tools copy](docs/screenshots/47-pdf-page-tools-copy.png) | ![Pages overview](docs/screenshots/49-pdf-page-overview.png) | ![Page-tools previews](docs/screenshots/51-pdf-page-tools-thumbnails.png) |
+| **Bookmark with thumbnail** | | |
+| ![Bookmark thumbnail](docs/screenshots/50-pdf-bookmark-thumbnail.png) | | |
 
 Screenshots are real emulator captures from the instrumented E2E run (debug build with
 `-PallowScreenshots=true`; normal builds set FLAG_SECURE, which makes `screencap` return a
@@ -224,6 +226,24 @@ Screenshots are real emulator captures from the instrumented E2E run (debug buil
   the original PDF untouched. 1451 unit tests / 0 failures (116 classes) and 27 instrumented tests
   green.
 
+## PDF visual page navigation: in-memory thumbnails (2026-11-20)
+
+- **Pages overview** (tap the page counter in the PDF viewer): a 3-column thumbnail grid with the
+  current-page emphasis and page numbers; tapping a page jumps there and closes the dialog. The
+  numeric field/Go remains as a fallback (and for documents beyond the viewer’s rendered pages).
+- **Bookmark rows** now show a small thumbnail of their page alongside the label/position.
+- **Page-tools rows** show a preview of each planned page; source previews rotate with the
+  page’s quarter-turn and blank pages show a labelled placeholder.
+- Thumbnails are rendered **lazily, once per viewer session, entirely in memory** (`PdfRenderer`
+  → one ephemeral app-private cache file deleted before use; ≤100 pages, ≤144 px long edge,
+  bounded heap); disposed/recycled when the viewer leaves; no thumbnail cache, no data-model or
+  permission change.
+- **Measured QA** (emulator, Android 17 image): opened a 12-page PDF, loaded the Pages overview
+  with thumbnails and current-page emphasis, jumped from page 1 to page 5 by thumbnail, added a
+  bookmark and saw its thumbnail in the bookmark panel, and opened page tools with source previews
+  including a rotated page; 1467 unit tests / 0 failures (118 classes) and 32 instrumented tests
+  green.
+
 ## Verified end to end (2026-11-15)
 
 - 913 unit tests / 0 failures (79 classes); 15 instrumented tests on a real emulator.
@@ -357,6 +377,7 @@ Full instructions (including signed release builds and this machine's exact setu
 | [docs/ATTACHMENTS.md](docs/ATTACHMENTS.md) | Encrypted attachment blob format, limits, AAD, lifecycle, threat notes |
 | [docs/PDF-ANNOTATION-UI.md](docs/PDF-ANNOTATION-UI.md) | PDF annotation layer, tags and flattened annotated export |
 | [docs/PDF-PAGE-TOOLS.md](docs/PDF-PAGE-TOOLS.md) | PDF page tools: plan/export/copy, bounds, tags, security, limitations |
+| [docs/PDF-THUMBNAILS.md](docs/PDF-THUMBNAILS.md) | In-memory PDF page thumbnails for overview/bookmarks/page tools |
 | [docs/VERIFICATION-2026-11-15.md](docs/VERIFICATION-2026-11-15.md) | Phase-1 evidence: builds, 290 unit tests, device E2E, signing, FLAG_SECURE |
 | [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | Dependency policy/inventory (offline-safe only) |
 | [docs/RELEASING.md](docs/RELEASING.md) | Release checklist, F-Droid eligibility |

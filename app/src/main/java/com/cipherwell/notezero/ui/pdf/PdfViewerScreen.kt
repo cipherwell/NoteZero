@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,8 +21,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -54,6 +59,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -76,6 +82,7 @@ import com.cipherwell.notezero.ui.attachments.AttachmentController
 import com.cipherwell.notezero.ui.components.common.NzIconButton
 import com.cipherwell.notezero.ui.theme.NoteZeroSpacing
 import com.cipherwell.notezero.ui.theme.NoteZeroType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -84,6 +91,9 @@ import kotlinx.coroutines.withContext
 
 /** Which plaintext egress the user confirmed in the export-choice dialog. */
 private enum class PdfExportKind { ORIGINAL, ANNOTATED }
+
+/** Aspect ratio of the white A4 page the viewer's placeholder cells mirror. */
+private const val A4_ASPECT_RATIO = 595f / 842f
 
 /**
  * Annotation callbacks of one rendered page, grouped so the page composable stays readable.
@@ -128,6 +138,7 @@ fun PdfViewerScreen(
     exportDispatcher: CoroutineDispatcher = Dispatchers.Default,
     pageToolsExporter: PdfPageToolsExporter = remember { AndroidPdfPageToolsExporter() },
     pageCopySaver: PdfPageCopySaver = remember { DefaultPdfPageCopySaver() },
+    thumbnailRenderer: PdfThumbnailRenderer = remember { AndroidPdfThumbnailRenderer() },
 ) {
     val context = LocalContext.current
     val items by repository.items.collectAsStateWithLifecycle()
@@ -146,6 +157,13 @@ fun PdfViewerScreen(
     var pagePlan by remember(itemId) { mutableStateOf(PdfPagePlan.of(0)) }
     var pageToolsSaving by remember(itemId) { mutableStateOf(false) }
     var pageToolsNotice by remember(itemId) { mutableStateOf<String?>(null) }
+
+    // In-memory page thumbnails: rendered lazily on the first thumbnail surface and owned by the
+    // viewer for this session only (no file/cache — see PdfThumbnails).
+    var thumbnails by remember(itemId) { mutableStateOf<PdfThumbnails?>(null) }
+    var thumbnailsLoading by remember(itemId) { mutableStateOf(false) }
+    var thumbnailsLoaded by remember(itemId) { mutableStateOf(false) }
+    var thumbnailsRequested by remember(itemId) { mutableStateOf(false) }
 
     val editor = remember(itemId) { PdfAnnotationEditor() }
     var annotationsLoaded by remember(itemId) { mutableStateOf(false) }
@@ -387,6 +405,49 @@ fun PdfViewerScreen(
         }
     }
 
+    // Thumbnails are loaded lazily, exactly once per viewer session: the first time the user
+    // opens a thumbnail surface (Pages overview, bookmarks or page tools) the decrypted bytes are
+    // re-read from the repository and rendered; later surfaces reuse the in-memory set. The bytes
+    // are only ever held by this coroutine, never stored in composition state.
+    LaunchedEffect(thumbnailsRequested, itemId) {
+        if (!thumbnailsRequested || thumbnailsLoaded) return@LaunchedEffect
+        thumbnailsLoading = true
+        val attachmentId = attachment?.id
+        val bytes = if (attachmentId != null) {
+            try {
+                repository.attachmentBytes(itemId, attachmentId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                null
+            }
+        } else {
+            null
+        }
+        val rendered = if (bytes == null) {
+            PdfThumbnails(emptyList())
+        } else {
+            try {
+                thumbnailRenderer.render(context, bytes)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // The UI falls back to the numeric page field, never to a broken grid.
+                PdfThumbnails(emptyList())
+            }
+        }
+        thumbnails = rendered
+        thumbnailsLoaded = true
+        thumbnailsLoading = false
+    }
+
+    // Free the thumbnail bitmaps when the viewer leaves (or when a new set replaces this one);
+    // never recycle a set that is still attached to the composition, only the previous one.
+    DisposableEffect(thumbnails) {
+        val owned = thumbnails
+        onDispose { owned?.recycle() }
+    }
+
     // Persist the current page shortly after it settles (debounced by effect restart on change).
     LaunchedEffect(currentPage, pages.totalPages) {
         if (loading || failed || pages.totalPages <= 0) return@LaunchedEffect
@@ -498,7 +559,10 @@ fun PdfViewerScreen(
                         NzIconButton(
                             icon = Icons.Filled.List,
                             contentDescription = stringResource(R.string.pdf_reader_bookmarks),
-                            onClick = { showBookmarks = true },
+                            onClick = {
+                                thumbnailsRequested = true
+                                showBookmarks = true
+                            },
                             modifier = Modifier.testTag("pdf_bookmarks_open"),
                         )
                     }
@@ -510,6 +574,7 @@ fun PdfViewerScreen(
                         onClick = {
                             pagePlan = PdfPagePlan.of(pages.totalPages)
                             pageToolsNotice = null
+                            thumbnailsRequested = true
                             showPageTools = true
                         },
                         enabled = !failed && pages.totalPages > 0,
@@ -549,6 +614,7 @@ fun PdfViewerScreen(
                         onClick = {
                             pageError = null
                             pageInput = (currentPage + 1).toString()
+                            thumbnailsRequested = true
                             showPageJump = true
                         },
                         modifier = Modifier.testTag("pdf_page_progress"),
@@ -877,6 +943,7 @@ fun PdfViewerScreen(
                 } else {
                     LazyColumn(modifier = Modifier.fillMaxWidth()) {
                         items(bookmarks) { bookmark ->
+                            val bookmarkThumbnail = thumbnails?.bitmap(bookmark.position)
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -892,6 +959,23 @@ fun PdfViewerScreen(
                                     .testTag("pdf_bookmark_row"),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
+                                // Text-only while thumbnails are still loading or unavailable:
+                                // a bookmark row never shows a broken image.
+                                if (bookmarkThumbnail != null) {
+                                    Image(
+                                        bitmap = bookmarkThumbnail.asImageBitmap(),
+                                        contentDescription = stringResource(
+                                            R.string.cd_pdf_page_thumbnail,
+                                            bookmark.position + 1,
+                                        ),
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(width = 48.dp, height = 64.dp)
+                                            .clip(RoundedCornerShape(NoteZeroSpacing.xs))
+                                            .testTag("pdf_bookmark_thumbnail"),
+                                    )
+                                    Spacer(Modifier.width(NoteZeroSpacing.s))
+                                }
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = bookmark.label,
@@ -940,12 +1024,91 @@ fun PdfViewerScreen(
 
     if (showPageJump) {
         val total = pages.totalPages.coerceAtLeast(1)
+        // The viewer rasterises a bounded number of pages (PdfPages), so the overview only
+        // offers jump targets that actually exist in the pager; the numeric field keeps the
+        // document's real 1..total range as the fallback for long or capped documents.
+        val thumbnailSet = thumbnails
+        val gridCells = thumbnailSet
+            ?.takeUnless { it.isEmpty }
+            ?.size
+            ?.coerceAtMost(pages.renderedPages)
+            ?: 0
         AlertDialog(
             onDismissRequest = { showPageJump = false },
             modifier = Modifier.testTag("pdf_page_jump_dialog"),
-            title = { Text(stringResource(R.string.pdf_page_jump), style = NoteZeroType.Heading) },
+            title = {
+                Text(
+                    text = stringResource(R.string.pdf_page_overview),
+                    style = NoteZeroType.Heading,
+                    modifier = Modifier.testTag("pdf_page_overview_title"),
+                )
+            },
             text = {
                 Column {
+                    Text(
+                        text = stringResource(R.string.pdf_page_overview_hint),
+                        style = NoteZeroType.Caption,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag("pdf_page_overview_hint"),
+                    )
+                    Spacer(Modifier.height(NoteZeroSpacing.xs))
+                    when {
+                        gridCells > 0 -> LazyVerticalGrid(
+                            columns = GridCells.Fixed(3),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 360.dp)
+                                .testTag("pdf_page_overview_grid"),
+                            contentPadding = PaddingValues(vertical = NoteZeroSpacing.xxs),
+                            horizontalArrangement = Arrangement.spacedBy(NoteZeroSpacing.xs),
+                            verticalArrangement = Arrangement.spacedBy(NoteZeroSpacing.xs),
+                        ) {
+                            items(
+                                count = gridCells,
+                                key = { index -> "pdf_page_thumb_$index" },
+                            ) { index ->
+                                PageOverviewThumbnail(
+                                    page = index,
+                                    bitmap = thumbnailSet?.bitmap(index),
+                                    selected = index == currentPage,
+                                    onClick = {
+                                        showPageJump = false
+                                        scope.launch {
+                                            listState.scrollToItem(
+                                                index.coerceIn(0, (pages.renderedPages - 1).coerceAtLeast(0)),
+                                            )
+                                        }
+                                    },
+                                )
+                            }
+                        }
+
+                        thumbnailsLoading || !thumbnailsLoaded -> Row(
+                            modifier = Modifier.testTag("pdf_thumbnails_loading"),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Spacer(Modifier.width(NoteZeroSpacing.s))
+                            Text(
+                                text = stringResource(R.string.pdf_thumbnails_loading),
+                                style = NoteZeroType.Caption,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+
+                        else -> Text(
+                            text = stringResource(R.string.pdf_thumbnails_unavailable),
+                            style = NoteZeroType.Caption,
+                            color = com.cipherwell.notezero.ui.theme.LocalNoteZeroColors.current.warningText,
+                            modifier = Modifier
+                                .semantics { liveRegion = LiveRegionMode.Polite }
+                                .testTag("pdf_thumbnails_unavailable"),
+                        )
+                    }
+                    Spacer(Modifier.height(NoteZeroSpacing.s))
                     OutlinedTextField(
                         value = pageInput,
                         onValueChange = {
@@ -1013,6 +1176,7 @@ fun PdfViewerScreen(
                     pageToolsNotice = null
                 }
             },
+            thumbnails = thumbnails,
         )
     }
 }
@@ -1065,6 +1229,76 @@ private fun PageImage(
             style = NoteZeroType.Caption,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.align(Alignment.CenterHorizontally),
+        )
+    }
+}
+
+/**
+ * One page cell of the Pages overview: a thumbnail (or a light placeholder when the renderer
+ * could not produce that page), the 1-based page number and a primary-colour emphasis for the
+ * page the reader is currently on. Tapping the cell is the visual jump action — the caller
+ * scrolls the pager and closes the dialog.
+ */
+@Composable
+private fun PageOverviewThumbnail(
+    page: Int,
+    bitmap: Bitmap?,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(NoteZeroSpacing.xs)
+    val emphasis = if (selected) 2.dp else 1.dp
+    Column(
+        modifier = Modifier
+            .testTag("pdf_page_thumb_$page")
+            .clickable(onClick = onClick)
+            .padding(NoteZeroSpacing.xxs),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(
+                    if (bitmap != null) {
+                        bitmap.width.toFloat() / bitmap.height.toFloat()
+                    } else {
+                        A4_ASPECT_RATIO
+                    },
+                )
+                .clip(shape)
+                .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+                .border(
+                    width = emphasis,
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant
+                    },
+                    shape = shape,
+                ),
+        ) {
+            if (bitmap != null) {
+                // Inset so the selection border stays visible above the page image.
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = stringResource(R.string.cd_pdf_page_thumbnail, page + 1),
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(2.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = (page + 1).toString(),
+            style = NoteZeroType.Caption,
+            color = if (selected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            maxLines = 1,
         )
     }
 }

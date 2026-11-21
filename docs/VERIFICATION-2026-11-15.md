@@ -1027,3 +1027,65 @@ Fixture: 3-page PDF (ALPHA/BETA/GAMMA) imported through Library → PDF file pic
   (observed on the 411 dp emulator). All controls remain reachable and ≥48 dp.
 - Actionable page thumbnails, PDF text extraction/search and sticky-note text in flattened copies
   remain queued.
+
+---
+
+## 22. Increment 17 — PDF visual page navigation: in-memory page thumbnails (2026-11-20)
+
+Scope: page-thumbnail navigation for PDFs (Pages overview, bookmark rows, page-tools previews).
+Contract: `docs/CONTRACTS-PHASE16.md`; implementation/limits: `docs/PDF-THUMBNAILS.md`;
+policy: DECISIONS #28; threat note: THREAT-MODEL §3.9.8.
+
+### 22.1 Implementation
+
+| Check | Result |
+|---|---|
+| Thumbnail set | `PdfThumbnails`: caller-owned bounded bitmap list, `bitmap(page)`/`size`/`isEmpty`/idempotent `recycle`; no file/db/cache |
+| Renderer | `PdfThumbnailRenderer` + `AndroidPdfThumbnailRenderer`: ≤100 pages, ≤144 px long edge, white ARGB, never upscaled; one ephemeral app-private `PdfRenderer` cache file deleted in `finally`; corrupt/empty/OOM → empty set; cancellation rethrown; no logging |
+| Lazy viewer load | thumbnails requested only on first Pages/bookmarks/page-tools open; re-reads `attachmentBytes` at that moment and holds no PDF bytes in state; `PdfThumbnails` recycled on replace/dispose |
+| Pages overview | existing `pdf_page_jump_dialog` now titled Pages with hint, bounded 3-column grid (`pdf_page_overview_grid`, `pdf_page_thumb_<i>`, current-page emphasis, tap to jump+close), loading/unavailable states; numeric field/error/Go/Cancel kept as fallback |
+| Bookmarks | 48×64 dp page thumbnail in each `pdf_bookmark_row` when available (`pdf_bookmark_thumbnail`), text-only while loading/failed |
+| Page tools | optional `thumbnails` param; 56×72 dp preview per row (`pdf_page_thumb`, contentDescription `cd_pdf_page_tools_thumbnail`), source preview rotated by quarter-turns, labelled blank placeholder |
+| Tests | +16 unit/Robolectric (thumbnail set 4, UI 7, viewer +2, page-tools +3) and +5 instrumented real-`PdfRenderer` thumbnail tests; full suite **1467 / 0 failures / 118 classes**; **32 instrumented tests OK** |
+
+### 22.2 Emulator device QA (measured)
+
+Fixture: 12-page PDF imported through Library → PDF file picker (E2E vault).
+
+| Step | Evidence |
+|---|---|
+| Pages overview | tapping the viewer page counter opened **Pages** with a 3-column thumbnail grid; current page had a blue emphasis border/page number labels; grid showed the viewer-rasterised pages 1–8 plus the numeric field/Go/Cancel fallback |
+| Thumbnail jump | tapping the page-5 thumbnail closed the dialog and moved the viewer to **5 / 12** |
+| Bookmark thumbnail | added a bookmark on page 5; the Bookmarks panel showed a **thumbnail of page 5** next to the label/position |
+| Page-tools previews | opened Page tools for the 12-page PDF; each row showed its source-page preview, page 2 rotated to **Rotation: 90°** showed the preview sideways; 12 pages available for page operations |
+| Crashes | 0 NoteZero FATAL/ANR during the flow |
+| Screenshots | `49-pdf-page-overview`, `50-pdf-bookmark-thumbnail`, `51-pdf-page-tools-thumbnails` |
+
+Instrumented validation: real `AndroidPdfThumbnailRenderer` 5/5 (3-page count/dimensions/colour,
+blank page white, corrupt/empty fail-closed, max-page/long-edge no-upscale, temp-file cleanup).
+
+### 22.3 Security + release verification
+
+| Check | Result |
+|---|---|
+| Offline guard | `./scripts/check-offline.sh --gradle` → `OK: NoteZero is offline by construction.` |
+| Token lint | PDF thumbnail/viewer code token-clean |
+| Hygiene | no TODO/FIXME/TEMP DEBUG/logging in the new thumbnail code; no new permissions/dependencies; no plaintext thumbnail file/cache (only the existing ephemeral `PdfRenderer` file, deleted before use) |
+| Reproducible APK | **REPRODUCIBLE** — sha256 `749e86dab63e11f4f0bdbdbec6236fe6a9844e17e1df3b71a060ca6b001f43c1` |
+| Reproducible AAB | **REPRODUCIBLE** — sha256 `cb9ce8927ead02d3090ae1757d38407d2b018b017eef9e4473740e480a8a936d` |
+| Artifacts | `releases/notezero-0.1.0-release.apk` / `.aab` replaced; `releases/SHA256SUMS` updated |
+| Certificate | Cipherwell signing certificate unchanged |
+| Owner phone | release APK installed over the existing vault; phone left locked; 0 NoteZero crash entries |
+
+### 22.4 Residual notes
+
+- **Existing 8-page viewer render cap:** the Pages overview deliberately shows only pages the
+  viewer has rasterised so every thumbnail is a real jump target; the numeric field retains the
+  document's full 1..N range, and page tools still plan/export all pages up to 100. A full-document
+  lazy-render viewer is queued (not faked in the overview).
+- Thumbnails are rendered once per viewer session on demand; opening another thumbnail surface
+  reuses the set, and the set is recycled on leaving/replacing the viewer. No thumbnail cache
+  survives a lock/reopen.
+- The page-tools preview for an unavailable thumbnail is a light placeholder; blank entries show a
+  labelled placeholder. The page-tools exporter itself is unchanged.
+- No new top-bar action was added (the bar already has five 48 dp actions).

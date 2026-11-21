@@ -48,7 +48,10 @@ Deliver:
   codec/fuzz/UI/instrumented tests, docs + VERIFICATION §16.
 - **Shipped in increment 16:** page tools (rotate/delete/reorder/insert blank) that save a new
   encrypted flattened copy, with annotation rotation/reorder handling, 100-page/1600px/pixel-budget
-  bounds, plan/UI/instrumented tests and device QA. **Still queued:** page thumbnails, text-layer
+  bounds, plan/UI/instrumented tests and device QA.
+- **Shipped in increment 17:** in-memory page thumbnails in the Pages overview, bookmark rows and
+  page-tools rows (lazy, bounded, no cache), with numeric fallback and viewer/page-tools tests.
+  **Still queued:** full-document lazy-render viewer beyond the 8-page render cap, text-layer
   search/extraction (needs a vetted PDF text engine) and rendering sticky-note text into flattened
   copies.
 

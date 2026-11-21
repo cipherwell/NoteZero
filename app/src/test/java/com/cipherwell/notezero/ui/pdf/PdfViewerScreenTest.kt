@@ -1,11 +1,16 @@
 package com.cipherwell.notezero.ui.pdf
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -19,6 +24,8 @@ import com.cipherwell.notezero.ui.FakeNoteRepository
 import com.cipherwell.notezero.ui.UiTestBase
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -61,6 +68,31 @@ class PdfViewerScreenTest : UiTestBase() {
             }
         }
         PdfPages(bitmaps, total)
+    }
+
+    /** Fake thumbnail renderer: counts calls, records the bytes it was handed and its bitmaps. */
+    private class FakeThumbnailRenderer(
+        private val pageCount: Int = 3,
+    ) : PdfThumbnailRenderer {
+        var calls: Int = 0
+            private set
+        var lastBytes: ByteArray? = null
+            private set
+        var rendered: PdfThumbnails? = null
+            private set
+        val bitmaps: MutableList<Bitmap> = mutableListOf()
+
+        override suspend fun render(context: Context, pdfBytes: ByteArray): PdfThumbnails {
+            calls++
+            lastBytes = pdfBytes
+            val created = (0 until pageCount).map { index ->
+                Bitmap.createBitmap(12, 18, Bitmap.Config.ARGB_8888).apply {
+                    eraseColor(if (index % 2 == 0) Color.WHITE else Color.LTGRAY)
+                }
+            }
+            bitmaps += created
+            return PdfThumbnails(created).also { rendered = it }
+        }
     }
 
     @Test
@@ -191,6 +223,7 @@ class PdfViewerScreenTest : UiTestBase() {
                 itemId = itemId,
                 onClose = {},
                 renderer = fakeRenderer(pages = 3, total = 3),
+                thumbnailRenderer = FakeThumbnailRenderer(),
             )
         }
         composeRule.waitForIdle()
@@ -199,7 +232,6 @@ class PdfViewerScreenTest : UiTestBase() {
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("pdf_bookmarks_dialog").assertExists()
         composeRule.onNodeWithTag("pdf_bookmark_row").assertExists()
-
         composeRule.onNodeWithTag("pdf_bookmark_delete").performClick()
         composeRule.waitUntil(5_000) {
             repository.items.value.firstOrNull { it.id == itemId }?.readingState?.bookmarks?.isEmpty() == true
@@ -215,6 +247,7 @@ class PdfViewerScreenTest : UiTestBase() {
                 itemId = itemId,
                 onClose = {},
                 renderer = fakeRenderer(pages = 2, total = 2),
+                thumbnailRenderer = FakeThumbnailRenderer(),
             )
         }
         composeRule.waitUntil(5_000) {
@@ -323,5 +356,91 @@ class PdfViewerScreenTest : UiTestBase() {
         // Both the progress button and the page caption may show "2 / 3"; either proves the
         // saved position was restored.
         assertTrue(composeRule.onAllNodesWithText("2 / 3").fetchSemanticsNodes().isNotEmpty())
+    }
+
+    @Test
+    fun `thumbnails load lazily on the first thumbnail surface and only once per session`() {
+        val (repository, itemId) = repositoryWithPdf()
+        val thumbnailRenderer = FakeThumbnailRenderer(pageCount = 3)
+        setThemedContent {
+            PdfViewerScreen(
+                repository = repository,
+                itemId = itemId,
+                onClose = {},
+                renderer = fakeRenderer(pages = 3, total = 3),
+                thumbnailRenderer = thumbnailRenderer,
+            )
+        }
+        composeRule.waitUntil(5_000) {
+            repository.items.value.firstOrNull { it.id == itemId }?.readingState?.total == 3
+        }
+        composeRule.waitForIdle()
+        assertEquals("no thumbnail work before a thumbnail surface opens", 0, thumbnailRenderer.calls)
+
+        // The Pages overview is the first thumbnail surface: that is where the decrypted bytes
+        // are re-read and the in-memory set is rendered, once.
+        composeRule.onNodeWithTag("pdf_page_progress").performClick()
+        composeRule.waitUntil(5_000) { thumbnailRenderer.calls == 1 }
+        composeRule.waitForIdle()
+        assertTrue(thumbnailRenderer.lastBytes!!.contentEquals(BlankPdf.create()))
+        composeRule.onNodeWithTag("pdf_page_jump_cancel").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("pdf_page_jump_dialog").assertDoesNotExist()
+
+        // Bookmarks reuse the already-rendered in-memory set (no second decrypt/render).
+        composeRule.onNodeWithTag("pdf_bookmarks_open").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("pdf_bookmarks_dialog").assertExists()
+        assertEquals(1, thumbnailRenderer.calls)
+        composeRule.onNodeWithTag("pdf_bookmarks_close").performClick()
+        composeRule.waitForIdle()
+
+        // Page tools also reuse it and receive the same set for the row previews.
+        composeRule.onNodeWithTag("pdf_page_tools").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("pdf_page_tools_screen").assertExists()
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithTag("pdf_page_thumb").fetchSemanticsNodes().isNotEmpty()
+        }
+        assertEquals(1, thumbnailRenderer.calls)
+    }
+
+    @Test
+    fun `leaving the viewer recycles the in-memory thumbnails`() {
+        val (repository, itemId) = repositoryWithPdf()
+        val thumbnailRenderer = FakeThumbnailRenderer(pageCount = 3)
+        var showViewer by mutableStateOf(true)
+        setThemedContent {
+            if (showViewer) {
+                PdfViewerScreen(
+                    repository = repository,
+                    itemId = itemId,
+                    onClose = { showViewer = false },
+                    renderer = fakeRenderer(pages = 3, total = 3),
+                    thumbnailRenderer = thumbnailRenderer,
+                )
+            }
+        }
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithTag("pdf_page_progress").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("pdf_page_progress").performClick()
+        composeRule.waitUntil(5_000) { thumbnailRenderer.rendered != null }
+        composeRule.waitForIdle()
+        val thumbnails = thumbnailRenderer.rendered
+        assertNotNull(thumbnails)
+        assertFalse(thumbnails!!.isEmpty)
+        val bitmaps = thumbnailRenderer.bitmaps.toList()
+        assertTrue(bitmaps.isNotEmpty())
+
+        // Leaving the viewer disposes the composition: the DisposableEffect recycles the set.
+        composeRule.runOnUiThread { showViewer = false }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("pdf_viewer").assertDoesNotExist()
+        assertTrue(
+            "every thumbnail bitmap must be recycled on dispose",
+            bitmaps.all { it.isRecycled },
+        )
+        assertTrue("the recycled set is emptied", thumbnails.isEmpty)
     }
 }

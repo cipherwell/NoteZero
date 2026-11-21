@@ -17,6 +17,7 @@ Features:
 - PDF reader with page jump, progress and bookmarks; reading positions and bookmarks are stored encrypted inside your vault
 - PDF annotation editor: ink, highlighter, highlight boxes, sticky notes, eraser, undo/redo and colour/width tools; annotations are encrypted with your vault and can be exported as a flattened annotated PDF copy
 - PDF page tools: rotate, delete, reorder and insert blank pages, then save a new encrypted flattened PDF copy; annotations follow their page and the original document is never modified
+- Visual PDF navigation: in-memory page thumbnails in a Pages overview, encrypted bookmark rows and page-tools previews (no thumbnail cache)
 - Draw sketches with finger or stylus; drawings are stored as encrypted PNG attachments, never as plaintext files
 - A drawing studio for standalone sketches: pen, highlighter, eraser, lasso, line/rectangle/ellipse/arrow shapes, 7 colours, 3 widths, blank/ruled/grid/dotted paper, undo/redo, zoom/pan and rename; sketches are encrypted vector documents with encrypted previews, editable at any size
 - Quick capture: a "New note" launcher shortcut works even while the vault is locked — the note is created only after you unlock

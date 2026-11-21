@@ -17,7 +17,7 @@ modified or re-written — they stay exactly as they were, byte for byte.
 | `ui/pdf/PdfPageDrawing.kt` | Shared draw-one-page helper (page bitmap + annotations on the A4 canvas, quarter-turn aware) used by **both** exporters |
 | `ui/pdf/PdfPageToolsExporter.kt` | `PdfPageToolsExporter` seam + `AndroidPdfPageToolsExporter` (`android.graphics.pdf`, ephemeral cache render file) |
 | `ui/pdf/PdfPageCopySaver.kt` | `PdfPageCopySaver` seam + `DefaultPdfPageCopySaver` (new encrypted `PDF_FILE` item via `importAttachment`), copy-name helpers |
-| `ui/pdf/PdfPageToolsScreen.kt` | Full-screen tools overlay: warning/hint, page rows, controls, notices, bottom actions |
+| `ui/pdf/PdfPageToolsScreen.kt` | Full-screen tools overlay: warning/hint, page rows (with optional in-memory page-thumbnail previews — see `docs/PDF-THUMBNAILS.md`), controls, notices, bottom actions |
 | `ui/pdf/PdfViewerScreen.kt` | Top-bar action `pdf_page_tools`, overlay state, save coroutine, Back handling, injected seams |
 | `ui/pdf/PdfFlattenedExporter.kt` | Refactored to call `PdfPageDrawing` (public behaviour unchanged) |
 | `ui/pdf/PdfExportGateway.kt` | Extracted shared `pdfDisplayBaseName` display-name helper (annotated-export name unchanged) |
@@ -153,10 +153,13 @@ closes only the overlay (a second Back then closes the viewer); Back is ignored 
 flight so the result is never missed, and the save itself cannot be interrupted (the encrypted
 import is already in flight).
 
-Row content: position label (`pdf_pages_position`), source label (`pdf_pages_source`, or
-`pdf_pages_blank` for an inserted page), rotation label (`pdf_pages_rotation`), and five 48 dp
-icon controls. Move up/down are disabled (with a muted tint and disabled semantics) at the page
-bounds; rotate is always meaningful; delete stays enabled because deleting the only page is a
+Row content: optional 56×72 dp source-page thumbnail preview (tag `pdf_page_thumb`, rotated
+with the entry's quarter-turns; blank/loading rows show a light placeholder — see
+`docs/PDF-THUMBNAILS.md`), position label (`pdf_pages_position`), source label
+(`pdf_pages_source`, or `pdf_pages_blank` for an inserted page), rotation label
+(`pdf_pages_rotation`), and five 48 dp icon controls. Move up/down are disabled (with a muted
+tint and disabled semantics) at the page bounds; rotate is always meaningful; delete stays
+enabled because deleting the only page is a
 **refusal with a visible notice**, not a silent disabled control. Changes show the non-secret
 dirty notice `pdf_pages_changed`; insert-blank announces `pdf_pages_blank_added`; a refused
 last-page delete shows `pdf_pages_last_page`. Above 100 source pages the overlay shows
