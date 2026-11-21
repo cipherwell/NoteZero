@@ -10,7 +10,7 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 [VaultZero](https://github.com/cipherwell/Vault-Zero) with an independent package
 (`com.cipherwell.notezero`), independent signing key and independent threat model.
 
-> Status: **Phase 5 — all-in-one workspace (increment 15)** — 2026-11-18.
+> Status: **Phase 5 — all-in-one workspace (increment 16)** — 2026-11-20.
 > Security core, notes MVP, encrypted SAF backup/restore, code editor (workspace
 > search/copy/export/indent), encrypted attachments (images/files/**drawings**),
 > **locked notes/folders**, **Markdown/HTML/PDF note export**, **table editing**,
@@ -19,11 +19,14 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 > **Library** with **encrypted EPUB/PDF readers**: document import (EPUB 2/3 + PDF),
 > table of contents, in-book search, bookmarks, paper/sepia/night themes with typography
 > controls, page navigation, and an **encrypted reading state** (position, progress,
-> bookmarks) that survives lock/unlock, backup and restart. The product direction and
-> phased plan (PDF annotation, drawing studio, universal file workspace, more formats) are
-> in [docs/ROADMAP-ALL-IN-ONE.md](docs/ROADMAP-ALL-IN-ONE.md), grounded in
+> bookmarks) that survives lock/unlock, backup and restart, plus an **annotation layer with
+> flattened export**, **PDF page tools** (rotate/delete/reorder/insert blank into a new
+> encrypted copy), **TXT/FB2/CBZ reading**, a **drawing studio**, a **universal file
+> workspace** and an **IDE-style code workspace**. The remaining phased plan (PDF text
+> extraction, TTS/translations, F-Droid) is in
+> [docs/ROADMAP-ALL-IN-ONE.md](docs/ROADMAP-ALL-IN-ONE.md), grounded in
 > [docs/RESEARCH-ALL-IN-ONE-2026-11-17.md](docs/RESEARCH-ALL-IN-ONE-2026-11-17.md).
-> Builds are green, **1397 unit tests + 23 device tests**, and **signed APK + AAB release
+> Builds are green, **1451 unit tests + 27 device tests**, and **signed APK + AAB release
 > builds are byte-for-byte reproducible**; an independent security audit previously found
 > no HIGH/CRITICAL issues and its findings are remediated. Device QA on a Pixel 9 Pro XL
 > (Android 17) and the emulator covered import, TOC, search, bookmarks, themes and
@@ -63,8 +66,10 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 | ![TXT reader](docs/screenshots/38-txt-reader.png) | ![FB2 reader](docs/screenshots/39-fb2-reader.png) | ![Comic reader](docs/screenshots/40-comic-reader.png) |
 | **Library with all e-book formats** | **Comic bookmarks (encrypted)** | **Code tabs + split preview** |
 | ![Library formats](docs/screenshots/41-library-formats.png) | ![Comic bookmarks](docs/screenshots/42-comic-bookmarks.png) | ![Code tabs](docs/screenshots/45-code-split-preview.png) |
-| **Multi-file tabs (state-preserving)** | **Quick-open switcher** | |
-| ![Tabs](docs/screenshots/43-code-tabs.png) | ![Quick open](docs/screenshots/44-code-quick-open.png) | |
+| **Multi-file tabs (state-preserving)** | **Quick-open switcher** | **PDF page tools** |
+| ![Tabs](docs/screenshots/43-code-tabs.png) | ![Quick open](docs/screenshots/44-code-quick-open.png) | ![PDF page tools](docs/screenshots/46-pdf-page-tools.png) |
+| **Page-tools copy: reordered + rotated + blank** | | |
+| ![Page-tools copy](docs/screenshots/47-pdf-page-tools-copy.png) | | |
 
 Screenshots are real emulator captures from the instrumented E2E run (debug build with
 `-PallowScreenshots=true`; normal builds set FLAG_SECURE, which makes `screencap` return a
@@ -199,6 +204,26 @@ Screenshots are real emulator captures from the instrumented E2E run (debug buil
   Markdown file and rotated to landscape to show the split editor/preview; 0 crashes after the fix.
   1397 unit tests / 0 failures (113 classes) and 23 instrumented tests green.
 
+## PDF page tools: rotate / delete / reorder / insert blank (2026-11-20)
+
+- **Page tools** in the PDF viewer (top-bar action) let you rotate pages 90°/180°/270°, delete
+  pages, move pages up/down and insert blank pages, with a live position/source/rotation list.
+- The result is saved as a **new flattened, encrypted PDF copy** in the same folder; the original
+  PDF and its annotation layer are never modified. A clear warning states that text, links and
+  form fields are not preserved.
+- **Annotations follow their page**: reordered pages keep their ink/highlights/notes, rotations
+  rotate the annotations with the page, deleted-page annotations disappear from the copy, and
+  inserted blank pages are white A4.
+- **Bounds/fail-closed**: at most 100 pages, each source page rendered at ≤1600 px long edge with
+  a total pixel budget for long copies; a transient app-private render file is deleted in a
+  `finally` block; corrupt/oversized/hostile input returns a clean error and the original viewer
+  never loses data.
+- **Measured QA** (emulator, Android 17 image): imported a 3-page PDF (ALPHA/BETA/GAMMA), rotated
+  page 1 by 90°, moved page 3 to the top, inserted a blank page and deleted page 2; saved
+  `qa-pdf-pages (pages).pdf`; the new encrypted item opened as GAMMA → rotated ALPHA → blank, with
+  the original PDF untouched. 1451 unit tests / 0 failures (116 classes) and 27 instrumented tests
+  green.
+
 ## Verified end to end (2026-11-15)
 
 - 913 unit tests / 0 failures (79 classes); 15 instrumented tests on a real emulator.
@@ -330,6 +355,8 @@ Full instructions (including signed release builds and this machine's exact setu
 | [docs/STRINGS.md](docs/STRINGS.md) | String-resource conventions and deliberate inline exceptions |
 | [PRIVACY.md](PRIVACY.md) | Privacy policy (no collection, no network) |
 | [docs/ATTACHMENTS.md](docs/ATTACHMENTS.md) | Encrypted attachment blob format, limits, AAD, lifecycle, threat notes |
+| [docs/PDF-ANNOTATION-UI.md](docs/PDF-ANNOTATION-UI.md) | PDF annotation layer, tags and flattened annotated export |
+| [docs/PDF-PAGE-TOOLS.md](docs/PDF-PAGE-TOOLS.md) | PDF page tools: plan/export/copy, bounds, tags, security, limitations |
 | [docs/VERIFICATION-2026-11-15.md](docs/VERIFICATION-2026-11-15.md) | Phase-1 evidence: builds, 290 unit tests, device E2E, signing, FLAG_SECURE |
 | [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | Dependency policy/inventory (offline-safe only) |
 | [docs/RELEASING.md](docs/RELEASING.md) | Release checklist, F-Droid eligibility |

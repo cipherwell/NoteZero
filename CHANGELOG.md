@@ -3,6 +3,46 @@
 All notable changes to NoteZero are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [Unreleased] — PDF page tools: rotate/delete/reorder/insert blank (2026-11-20, increment 16)
+
+### Added
+
+**PDF page tools**
+- New `PdfPagePlan` pure model (A4 output plan: source page/blank + clockwise quarter-turns,
+  rotate left/right, move up/down, delete-with-last-page-refusal, insert blank, reset; 100-page
+  cap; hostile-position safe; no duplicates/out-of-range pages).
+- `PdfPageToolsExporter` seam + `AndroidPdfPageToolsExporter`: renders planned pages on demand with
+  `PdfRenderer` (≤1600 px long edge, ~48 MiB total pixel budget), draws each scaled-to-fit/centred
+  on a white A4 `PdfDocument` page with the quarter-turn applied, and flattens that page's
+  annotations through the shared `PdfPageDrawing` helper (annotations rotate/move with the page;
+  deleted pages' annotations are dropped). One ephemeral app-private cache file, deleted in
+  `finally`; returns null on any failure; no logging.
+- `PdfPageCopySaver` seam + `DefaultPdfPageCopySaver`: creates a new encrypted `PDF_FILE` item in
+  the source folder (title `… (pages).pdf`), imports the flattened bytes through
+  `repository.importAttachment`, trashes the half-created row on failure; original untouched.
+- `PdfPageToolsScreen` full-screen overlay opened from the PDF viewer top bar: warning/hint,
+  scrollable page rows with 48dp rotate/move/delete controls, insert blank/reset/cancel/save,
+  last-page and too-many-pages notices, saving/locked/failure states; Back closes only the overlay.
+- Viewer save flow re-reads the attachment bytes at save time, re-checks unlocked/item-alive before
+  writing, and shows a saved-copy notice with the new title.
+- **Tests**: +54 PDF tests (plan 23, screen 20, saver 8, viewer 3) and 4 instrumented real-
+  `PdfRenderer` export tests; full suite 1451 / 0 failures / 116 classes; 27 instrumented tests
+  green. Docs `docs/CONTRACTS-PHASE15.md`, `docs/PDF-PAGE-TOOLS.md`, VERIFICATION §21, DECISIONS
+  #27, THREAT-MODEL §3.9.7; screenshots 46–48.
+
+### Fixed
+- Refactored the flattened annotated exporter onto the shared `PdfPageDrawing` helper so the two
+  exports cannot drift (public annotated-export behaviour unchanged).
+- Instrumented page-tools fixture ink moved off the sampled page centre (test-only; previously the
+  red page-centre assertion read the annotation stroke instead of the page colour).
+
+### Verified (measured)
+- 1451 unit tests / 0 failures / 116 classes; 27 instrumented tests OK.
+- Device QA as above (rotate/move/insert/delete/save/reopen); original PDF retained 3 pages; new
+  copy 3 pages in expected order with rotated page and white blank; saved notice shown; 0 crashes.
+- Offline guard OK; token lint clean; no new permissions/dependencies; no logging/TODO leftovers.
+- Reproducible APK/AAB hashes recorded in VERIFICATION §21; screenshots 46–48.
+
 ## [Unreleased] — IDE-style code workspace: tabs, quick open, templates, split preview (2026-11-18, increment 15)
 
 ### Added

@@ -163,6 +163,21 @@ its PendingIntent is immutable and its receiver is not exported. The only effect
 is the same pending quick-capture request as the launcher shortcut, which is honoured only
 after a successful unlock.
 
+### 3.9.7 PDF page tools (increment 16)
+
+Page operations (rotate/delete/reorder/insert blank) are a **plan**, not an in-place edit: the
+`PdfPagePlan` value holds only source-page indices/blank markers and quarter-turns (≤100 pages),
+and the output is always a new flattened PDF item. The exporter re-runs `PdfRenderer` on the
+decrypted bytes through one ephemeral app-private cache file (same bounded, no-backup, deleted-in-
+`finally` trade-off as viewing/annotated export), renders each source page at ≤1600 px with a
+~48 MiB total pixel budget, and flattens the page's annotations through the shared
+`PdfPageDrawing` transform; deleted pages' annotations are dropped, reordered/rotated pages keep
+them. Bad plans, out-of-range pages, corrupt PDFs, missing native renderer and OOM return null
+(no throw, no partial item); the save path re-reads bytes, re-checks unlocked/item-alive before
+writing, and imports only through the encrypted `NZAT` attachment pipeline (half-created row is
+trashed on failure). No plaintext output file/URI, no logging of titles/page content, no new
+permissions/dependencies. The original PDF and its annotation envelope are never mutated.
+
 ### 3.9.6 Additional book formats and the shared reader (increment 14)
 
 `BOOK_FILE` now accepts EPUB/FB2/TXT/CBZ, with the format detected from the decrypted bytes at
@@ -228,7 +243,8 @@ SAF `CreateDocument`, renders in memory via `android.graphics.pdf` (no temp file
 already bounded by the viewer), re-checks the vault is unlocked/owned before writing, and drops
 pending bytes on lock. It is a rasterised copy (text not selectable, sticky-note markers only) —
 documented in the UI copy and `docs/PDF-ANNOTATION-UI.md`. The original encrypted PDF bytes are
-never mutated by annotation or export; no page-operations/text-object editing exists yet.
+never mutated by annotation or export; page operations (increment 16) are a separate
+flatten-and-copy flow (§3.9.7), and text-object editing remains out of scope.
 
 **Bounds/robustness.** The exporter returns null (never throws) for empty/mismatched input,
 recycled bitmaps, platform errors or OOM, hard-fails above 32 pages instead of silently truncating,

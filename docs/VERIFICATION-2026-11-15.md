@@ -967,3 +967,63 @@ permission or dependency changes.
 - A transient status-bar/tab-strip overlap was observed immediately after an adb-driven rotation;
   it settles on the next frame (final screenshots show correct insets) and was not reproducible
   in normal use.
+
+---
+
+## 21. Increment 16 — PDF page tools: rotate/delete/reorder/insert blank → flattened encrypted copy (2026-11-20)
+
+Scope: `docs/ROADMAP-ALL-IN-ONE.md` Phase 11 page tools. Contract: `docs/CONTRACTS-PHASE15.md`;
+implementation/limits: `docs/PDF-PAGE-TOOLS.md`; policy: DECISIONS #27; threat note:
+THREAT-MODEL §3.9.7.
+
+### 21.1 Implementation
+
+| Check | Result |
+|---|---|
+| Page plan | pure `PdfPagePlan`: source/blank entries + clockwise quarter-turns; rotate left/right, move up/down, delete (last page refused), insert blank, reset; 100-page cap; duplicate/out-of-range/hostile positions safe; `isTooLarge` invalid plan for >100 source pages |
+| Export | `PdfPageToolsExporter` seam + `AndroidPdfPageToolsExporter`: on-demand `PdfRenderer` per planned page, scaled-to-fit/centred white A4, quarter-turn applied (swapped fit extents), annotations flattened through the shared `PdfPageDrawing` helper (rotate/move with page; deleted pages lose annotations; blanks have none); one ephemeral app-private cache file deleted in `finally`; ≤1600 px/page, ~48 MiB total pixel budget, ≤100 pages; null on any failure, no logging |
+| Save | `PdfPageCopySaver` + default: new encrypted `PDF_FILE` item in source folder titled `<base> (pages).pdf`; `importAttachment` (NZAT/AES-256-GCM) only; blank/locked/empty refused; half-created row trashed on failure; original untouched |
+| UI | top-bar `pdf_page_tools` action opens full-screen overlay: warning/hint, page rows (48dp rotate/move/delete), insert blank/reset/cancel/save, position/source/rotation labels, dirty/last-page/too-many notices, saving/locked/failure states; Back closes overlay only; save re-reads bytes and re-checks unlocked/item-alive |
+| Tests | +54 PDF unit tests (plan 23, screen 20, saver 8, viewer 3) and 4 instrumented real-`PdfRenderer` tests; full suite **1451 / 0 failures / 116 classes**; **27 instrumented tests OK** |
+
+### 21.2 Emulator device QA (measured)
+
+Fixture: 3-page PDF (ALPHA/BETA/GAMMA) imported through Library → PDF file picker.
+
+| Step | Evidence |
+|---|---|
+| Open page tools | PDF viewer top bar showed **Page tools**; overlay listed 3 pages with rotation 0° and From page 1–3, warning visible |
+| Edit plan | rotated page 1 right (Rotation 90°), moved page 3 to the top (rows reordered to From page 3/1/2), inserted a blank page (Page 4 = Blank page), deleted page 2 (From page 2) → final plan From page 3, From page 1 (90°), Blank |
+| Save copy | **Save as new PDF** produced the notice `Saved a new copy: qa-pdf-pages (pages).pdf`; no plaintext SAF destination involved; original viewer stayed open |
+| Reopen copy | Library listed `qa-pdf-pages (pages).pdf` (71.0 KB); opening it showed 3 pages: **PAGE GAMMA**, then **PAGE ALPHA rotated 90°**, then a white blank page — matching the edited plan |
+| Original | Original `qa-pdf-pages` remained 3 pages with unchanged reading state; it was never mutated |
+| Crashes | 0 NoteZero FATAL/ANR during the flow |
+| Screenshots | `46-pdf-page-tools`, `47-pdf-page-tools-copy`, `48-pdf-viewer-page-tools-action` |
+
+### 21.3 Security + release verification
+
+| Check | Result |
+|---|---|
+| Instrumented export | `PdfPageToolsExportInstrumentedTest` 4/4 on real `PdfRenderer`/`PdfDocument`: reorder/rotation/blank/deleted pages, annotation rotation behaviour, corrupt/oversized/out-of-range/empty plans return null |
+| Offline guard | `./scripts/check-offline.sh --gradle` → `OK: NoteZero is offline by construction.` |
+| Token lint | PDF page-tools code token-clean |
+| Hygiene | no TODO/FIXME/TEMP DEBUG/logging in the page-tools code; no new permissions/dependencies |
+| Reproducible APK | **REPRODUCIBLE** — sha256 `55e3f4da9ce288b0f6a287191010e100099ddf57bb42525ee076ac1da0a2edef` |
+| Reproducible AAB | **REPRODUCIBLE** — sha256 `6c185d2ae04466b34a5ed47e9ddfa1feb2b3ee1d4a5417404fe113e5ecc63c2e` |
+| Artifacts | `releases/notezero-0.1.0-release.apk` / `.aab` replaced; `releases/SHA256SUMS` updated |
+| Certificate | Cipherwell signing certificate unchanged |
+| Owner phone | not connected during this run (`adb devices` showed only the emulator); install skipped — release artifact verified on the emulator/debug QA path |
+
+### 21.4 Residual notes
+
+- The copy is **image-only** by design: text, links, form fields, selectable text and accessibility
+  semantics of the original are not preserved; this is stated in the overlay warning and is the
+  same honest boundary as the annotated export.
+- `MAX_PAGES = 100`; above that the overlay shows the "too many pages" error and never truncates.
+  Long copies use a lower per-page resolution (bounded total pixel budget) to avoid OOM.
+- Page-tools output is a new item; there is no "replace original in place" action (deliberate, so
+  the original is always recoverable). Annotations of deleted pages are not in the copy.
+- The viewer top bar now has five 48 dp actions; on narrow screens the title ellipsizes earlier
+  (observed on the 411 dp emulator). All controls remain reachable and ≥48 dp.
+- Actionable page thumbnails, PDF text extraction/search and sticky-note text in flattened copies
+  remain queued.

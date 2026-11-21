@@ -76,16 +76,23 @@ internal fun writePdfExportBytes(
 }.getOrDefault(false)
 
 /** Suggested SAF name for a flattened copy of [originalName] (never a path). */
-internal fun annotatedPdfFileName(originalName: String): String {
+internal fun annotatedPdfFileName(originalName: String): String =
+    "${pdfDisplayBaseName(originalName, MAX_BASE_NAME_LENGTH)}-annotated$PDF_EXTENSION"
+
+/**
+ * Display-name base shared by the PDF display-name helpers (annotated export, page-tools copy):
+ * trims, drops a trailing `.pdf` extension (any case) and bounds the result. The returned value
+ * is display data only — it is never used as a file name or a path.
+ */
+internal fun pdfDisplayBaseName(originalName: String, maxLength: Int): String {
     val trimmed = originalName.trim()
-    val withoutExtension = if (trimmed.endsWith(".pdf", ignoreCase = true)) {
+    val withoutExtension = if (trimmed.endsWith(PDF_EXTENSION, ignoreCase = true)) {
         trimmed.dropLast(PDF_EXTENSION.length)
     } else {
         trimmed
     }
-    val base = withoutExtension.trim().ifBlank { "document" }
-    return "${base.take(MAX_BASE_NAME_LENGTH)}-annotated.pdf"
+    return withoutExtension.trim().ifBlank { "document" }.take(maxLength.coerceAtLeast(1))
 }
 
-private const val MAX_BASE_NAME_LENGTH = 64
-private const val PDF_EXTENSION = ".pdf"
+internal const val MAX_BASE_NAME_LENGTH = 64
+internal const val PDF_EXTENSION = ".pdf"

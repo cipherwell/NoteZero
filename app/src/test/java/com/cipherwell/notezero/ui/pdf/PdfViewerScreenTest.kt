@@ -2,6 +2,10 @@ package com.cipherwell.notezero.ui.pdf
 
 import android.graphics.Bitmap
 import android.graphics.Color
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -225,6 +229,80 @@ class PdfViewerScreenTest : UiTestBase() {
         composeRule.waitForIdle()
 
         composeRule.onNodeWithTag("pdf_page_error", useUnmergedTree = true).assertExists()
+    }
+
+    @Test
+    fun `page tools action opens the overlay and back closes only the overlay`() {
+        val (repository, itemId) = repositoryWithPdf()
+        var closed = 0
+        lateinit var dispatcher: OnBackPressedDispatcher
+        setThemedContent {
+            dispatcher = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+            PdfViewerScreen(
+                repository = repository,
+                itemId = itemId,
+                onClose = { closed++ },
+                renderer = fakeRenderer(pages = 2, total = 2),
+            )
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("pdf_page_tools").assertIsEnabled()
+        composeRule.onNodeWithTag("pdf_page_tools").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("pdf_page_tools_screen").assertExists()
+
+        // System Back closes the tools overlay only: the viewer stays open.
+        composeRule.runOnUiThread { dispatcher.onBackPressed() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("pdf_page_tools_screen").assertDoesNotExist()
+        composeRule.onNodeWithTag("pdf_viewer").assertExists()
+        assertEquals(0, closed)
+
+        // A second Back leaves the viewer, exactly like before page tools existed.
+        composeRule.runOnUiThread { dispatcher.onBackPressed() }
+        composeRule.waitForIdle()
+        assertEquals(1, closed)
+    }
+
+    @Test
+    fun `page tools action is disabled when the PDF failed to render`() {
+        val (repository, itemId) = repositoryWithPdf()
+        setThemedContent {
+            PdfViewerScreen(
+                repository = repository,
+                itemId = itemId,
+                onClose = {},
+                renderer = PdfPageRenderer { _, _ -> PdfPages(emptyList(), 0) },
+            )
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("pdf_page_tools").assertExists()
+        composeRule.onNodeWithTag("pdf_page_tools").assertIsNotEnabled()
+    }
+
+    @Test
+    fun `page tools action is hidden while annotating and returns afterwards`() {
+        val (repository, itemId) = repositoryWithPdf()
+        setThemedContent {
+            PdfViewerScreen(
+                repository = repository,
+                itemId = itemId,
+                onClose = {},
+                renderer = fakeRenderer(pages = 1, total = 1),
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("pdf_page_tools").assertExists()
+
+        composeRule.onNodeWithTag("pdf_annotate_toggle").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("pdf_page_tools").assertDoesNotExist()
+
+        composeRule.onNodeWithTag("pdf_annotate_done").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("pdf_page_tools").assertExists()
     }
 
     @Test

@@ -43,6 +43,9 @@ CI runs `assembleDebug`, `testDebugUnitTest`, and `check-offline.sh --gradle` on
 | `ui.pdf.PdfAnnotationEditorTest` | 16 | State machine: tools, undo/redo, eraser hit-tests, note edit/delete, bounds/fail-closed |
 | `ui.pdf.PdfAnnotationPaletteTest` | 8 | Token-derived colours/widths, index bounds, shared overlay/exporter palette |
 | Instrumented `PdfFlattenedExportInstrumentedTest` | 4 | Real `PdfDocument` output accepted by `PdfRenderer` with matching page count, hostile/oversized fail-closed, max-density export |
+| `PdfPagePlanTest` | 23 | Pure plan algebra: rotate/move/delete/insert/reset, bounds, 100-page cap, last-page refusal, hostile positions |
+| `PdfPageToolsScreenTest` + `PdfPageCopySaverTest` | 20 + 8 | Overlay controls/notices and save wiring via fake exporter/saver; encrypted-copy creation, import failure cleanup, name bounds |
+| Instrumented `PdfPageToolsExportInstrumentedTest` | 4 | Real `PdfRenderer`/`PdfDocument`: reorder/rotation/blank/delete page output, map/annotation handling, hostile input fail-closed |
 
 ## Increment-12 areas (drawing studio)
 
@@ -85,7 +88,7 @@ CI runs `assembleDebug`, `testDebugUnitTest`, and `check-offline.sh --gradle` on
 | `ui.code.CodeQuickOpenTest` + `CodeQuickOpenScreenTest` | 7 + 7 | Filtering/ordering, locked/hidden exclusion, dialog open/empty state, opening activates/creates a tab |
 | `ui.code.CodeTemplatesTest` + `NewCodeFileDialogTest` | 5 + 9 | Template name/extension/body swaps, format/template mismatch -> blank body, cancel creates nothing |
 | `ui.code.CodeEditorScreenTest` / `CodeEditorViewModelTest` / `CodeWorkspaceViewModelTest` | 17 / 37 / 26 | Split-preview gating, editor behaviour unchanged, workspace create-body/quick-open state, existing tags |
-| Full suite | **1397 / 0 failures / 113 classes** | No regressions in notes/reader/PDF/workspace/library suites |
+| Full suite | **1451 / 0 failures / 116 classes** | No regressions in notes/reader/PDF/workspace/library suites |
 
 ## Backup-flow tests (Phase-2 SAF gap)
 
@@ -127,8 +130,8 @@ Commands:
 
 | Suite | Command | Result |
 |---|---|---|
-| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **1397 tests / 0 failures / 0 errors / 0 skipped** (113 classes) |
-| Instrumented (emulator) | `adb shell am instrument -w com.cipherwell.notezero.test/androidx.test.runner.AndroidJUnitRunner` | **OK (15 tests)** incl. `NotePdfRenderInstrumentedTest`, `VaultFlowE2ETest` (notes + backup settings + code workspace + create sheet + PDF) and a real-`PdfRenderer` instrumented test |
+| Unit (JVM + Robolectric) | `./gradlew :app:testDebugUnitTest` | **1451 tests / 0 failures / 0 errors / 0 skipped** (116 classes) |
+| Instrumented (emulator) | `adb shell am instrument -w com.cipherwell.notezero.test/androidx.test.runner.AndroidJUnitRunner` | **OK (27 tests)** incl. `NotePdfRenderInstrumentedTest`, `VaultFlowE2ETest` (notes + backup settings + code workspace + create sheet + PDF) and a real-`PdfRenderer` instrumented test |
 | Offline guarantee | `./scripts/check-offline.sh --gradle` | exit 0 |
 | Release signing | `apksigner verify --print-certs app-release.apk` | NoteZero upload key SHA-256 `FA:CA:DD:67:…:92:78` |
 

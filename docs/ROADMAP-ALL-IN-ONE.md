@@ -45,9 +45,12 @@ Deliver:
   external tools, instrumented real-PdfRenderer acceptance, device QA with a real PDF.
 - **Shipped in increment 11:** encrypted annotation layer (ink/highlighter/rectangle highlights/
   sticky notes/eraser/undo-redo, payload v5), annotate-mode UI, flattened annotated-copy export,
-  codec/fuzz/UI/instrumented tests, docs + VERIFICATION §16. **Still queued:** page
-  thumbnails, rotate/delete/insert/reorder page operations, text-layer search/extraction (needs a
-  vetted PDF text engine) and rendering sticky-note text into flattened copies.
+  codec/fuzz/UI/instrumented tests, docs + VERIFICATION §16.
+- **Shipped in increment 16:** page tools (rotate/delete/reorder/insert blank) that save a new
+  encrypted flattened copy, with annotation rotation/reorder handling, 100-page/1600px/pixel-budget
+  bounds, plan/UI/instrumented tests and device QA. **Still queued:** page thumbnails, text-layer
+  search/extraction (needs a vetted PDF text engine) and rendering sticky-note text into flattened
+  copies.
 
 ## Phase 12 — Drawing studio (shipped, increment 12)
 
@@ -77,9 +80,11 @@ Deliver:
 - **Shipped in increment 13:** universal Workspace ("Files") over every item kind with type
   filters, unified offline search/snippets, sort, storage summary, multi-select bulk
   move/lock/trash (confirmation + fail-closed), type-aware openers/deep links, fail-closed lock
-  masking + re-auth, 41 workspace tests and shell routing. **Still queued:** multi-tab editor,
-  split Markdown preview, offline symbol search, file templates, content-level EPUB/PDF text
-  search (needs a vetted text engine), multi-select export, disk-usage view.
+  masking + re-auth, 41 workspace tests and shell routing.
+- **Shipped in increment 15:** code-workspace multi-file tabs (drafts/undo preserved), quick-open
+  switcher, new-file templates and split Markdown preview on wide layouts, plus a line-number
+  render fix. **Still queued:** offline symbol search beyond content search, content-level
+  EPUB/PDF text search (needs a vetted text engine), multi-select export and disk-usage view.
 
 ## Phase 14 — More formats, reading comfort, release polish (formats shipped, increment 14)
 

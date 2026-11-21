@@ -702,4 +702,35 @@
     <string name="code_split_preview">Split</string>
     <string name="cd_code_preview_pane">Markdown preview</string>
 
+    <!-- PDF page tools (increment 16): reorder/rotate/delete/insert-blank as a flattened copy -->
+    <string name="pdf_page_tools">Page tools</string>
+    <string name="cd_pdf_page_tools">Page tools</string>
+    <string name="pdf_pages_title">Page tools</string>
+    <string name="pdf_pages_warning">Saving creates a flattened image-only PDF. Text, links and form fields are not preserved. Annotations are included; the original PDF stays unchanged.</string>
+    <string name="pdf_pages_hint">Reorder, rotate, delete or insert blank pages, then save a new encrypted PDF copy in this folder.</string>
+    <string name="pdf_pages_position">Page %1$d</string>
+    <string name="pdf_pages_source">From page %1$d</string>
+    <string name="pdf_pages_blank">Blank page</string>
+    <string name="pdf_pages_rotation">Rotation: %1$d°</string>
+    <string name="cd_pdf_pages_rotate_left">Rotate page left</string>
+    <string name="cd_pdf_pages_rotate_right">Rotate page right</string>
+    <string name="cd_pdf_pages_move_up">Move page up</string>
+    <string name="cd_pdf_pages_move_down">Move page down</string>
+    <string name="cd_pdf_pages_delete">Delete page</string>
+    <string name="pdf_pages_insert_blank">Insert blank page</string>
+    <string name="pdf_pages_reset">Reset</string>
+    <string name="pdf_pages_cancel">Cancel</string>
+    <string name="pdf_pages_save_copy">Save as new PDF</string>
+    <string name="pdf_pages_saving">Saving…</string>
+    <string name="pdf_pages_saved">Saved a new copy: %1$s</string>
+    <string name="pdf_pages_save_failed">Could not save the page-tools copy.</string>
+    <string name="pdf_pages_export_failed">Could not build the page-tools copy.</string>
+    <string name="pdf_pages_locked">Vault locked; the page-tools copy was discarded.</string>
+    <string name="pdf_pages_last_page">The copy needs at least one page.</string>
+    <string name="pdf_pages_too_many">This PDF has too many pages for page tools (maximum %1$d).</string>
+    <string name="pdf_pages_copy_suffix"> (pages)</string>
+    <string name="pdf_pages_count">%1$d pages</string>
+    <string name="pdf_pages_blank_added">Blank page added.</string>
+    <string name="pdf_pages_changed">Pages changed; save a copy to keep them.</string>
+
 </resources>

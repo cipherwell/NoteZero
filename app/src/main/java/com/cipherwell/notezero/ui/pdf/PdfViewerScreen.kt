@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.List
@@ -125,6 +126,8 @@ fun PdfViewerScreen(
     flattenedExporter: PdfFlattenedExporter = remember { AndroidPdfFlattenedExporter() },
     exportGateway: PdfExportGateway = rememberSafPdfExportGateway(),
     exportDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    pageToolsExporter: PdfPageToolsExporter = remember { AndroidPdfPageToolsExporter() },
+    pageCopySaver: PdfPageCopySaver = remember { DefaultPdfPageCopySaver() },
 ) {
     val context = LocalContext.current
     val items by repository.items.collectAsStateWithLifecycle()
@@ -139,6 +142,10 @@ fun PdfViewerScreen(
     var notice by remember(itemId) { mutableStateOf<String?>(null) }
     var showExportChoice by remember(itemId) { mutableStateOf(false) }
     var pendingExport by remember(itemId) { mutableStateOf<PdfExportKind?>(null) }
+    var showPageTools by remember(itemId) { mutableStateOf(false) }
+    var pagePlan by remember(itemId) { mutableStateOf(PdfPagePlan.of(0)) }
+    var pageToolsSaving by remember(itemId) { mutableStateOf(false) }
+    var pageToolsNotice by remember(itemId) { mutableStateOf<String?>(null) }
 
     val editor = remember(itemId) { PdfAnnotationEditor() }
     var annotationsLoaded by remember(itemId) { mutableStateOf(false) }
@@ -180,6 +187,12 @@ fun PdfViewerScreen(
     val exportLockedNotice = stringResource(R.string.attach_export_locked)
     val annotatedWrittenNotice = stringResource(R.string.pdf_export_annotated_written)
     val annotatedFailedNotice = stringResource(R.string.pdf_export_annotated_failed)
+    val pageCopySuffix = stringResource(R.string.pdf_pages_copy_suffix)
+    // The page-tools save flow is a separate coroutine from the annotated export; these are
+    // captured here (the save runs outside composition but only uses formatted one-shot copy).
+    val pageToolsLockedNotice = stringResource(R.string.pdf_pages_locked)
+    val pageToolsExportFailedNotice = stringResource(R.string.pdf_pages_export_failed)
+    val pageToolsSaveFailedNotice = stringResource(R.string.pdf_pages_save_failed)
 
     fun persistAnnotations() {
         val layer = editor.value
@@ -287,6 +300,66 @@ fun PdfViewerScreen(
         }
     }
 
+    /**
+     * Saves the page-tools plan as a new flattened encrypted PDF item.
+     *
+     * Security order matters: the decrypted bytes are re-read from the repository **at save
+     * time** (never cached from the viewer load), the plan is exported off the main thread, and
+     * the vault/item are re-checked before the bytes are handed to the saver — so a vault that
+     * locks mid-export drops the plaintext instead of writing it. The original document and its
+     * annotation layer are never modified; only a new encrypted item is created.
+     */
+    fun savePageCopy() {
+        if (pageToolsSaving) return
+        val plan = pagePlan
+        if (!plan.isValid) return
+        val attachmentId = attachment?.id
+        val copyName = pageCopyFileName(title, pageCopySuffix)
+        pageToolsSaving = true
+        pageToolsNotice = null
+        scope.launch {
+            try {
+                val source = repository.items.value.firstOrNull { it.id == itemId }
+                if (repository.status.value != VaultStatus.UNLOCKED || source == null) {
+                    pageToolsNotice = pageToolsLockedNotice
+                    return@launch
+                }
+                val bytes = attachmentId?.let { id ->
+                    runCatching { repository.attachmentBytes(itemId, id) }.getOrNull()
+                }
+                if (bytes == null) {
+                    pageToolsNotice = pageToolsExportFailedNotice
+                    return@launch
+                }
+                val layer = editor.value
+                val exported = withContext(exportDispatcher) {
+                    pageToolsExporter.export(context, bytes, plan, layer)
+                }
+                if (exported == null) {
+                    pageToolsNotice = pageToolsExportFailedNotice
+                    return@launch
+                }
+                // Re-check after the CPU work: the vault may have locked (or the item been
+                // trashed) while the export was running off the main thread.
+                val sourceNow = repository.items.value.firstOrNull { it.id == itemId }
+                if (repository.status.value != VaultStatus.UNLOCKED || sourceNow == null) {
+                    pageToolsNotice = pageToolsLockedNotice
+                    return@launch
+                }
+                val savedId = pageCopySaver.save(repository, sourceNow, copyName, exported)
+                if (savedId == null) {
+                    pageToolsNotice = pageToolsSaveFailedNotice
+                } else {
+                    pageToolsNotice = null
+                    showPageTools = false
+                    notice = context.getString(R.string.pdf_pages_saved, copyName)
+                }
+            } finally {
+                pageToolsSaving = false
+            }
+        }
+    }
+
     LaunchedEffect(itemId, attachment?.id) {
         loading = true
         failed = false
@@ -335,10 +408,18 @@ fun PdfViewerScreen(
         onDispose { owned.forEach { it.recycle() } }
     }
 
-    // Back first leaves annotate mode so a drawing gesture can never close the document by
-    // accident; a second Back (or the toolbar arrow outside annotate mode) closes the viewer.
+    // Back closes the page-tools overlay first (it is modal), then leaves annotate mode, then
+    // closes the viewer — a drawing gesture or an open tools sheet can never close the document
+    // by accident.
     fun handleBack() {
-        if (annotateMode) {
+        if (showPageTools) {
+            // While the copy is being saved the overlay stays put so its result is not missed;
+            // the save itself cannot be interrupted (the encrypted import is already in flight).
+            if (!pageToolsSaving) {
+                showPageTools = false
+                pageToolsNotice = null
+            }
+        } else if (annotateMode) {
             annotateMode = false
         } else {
             onClose()
@@ -421,6 +502,19 @@ fun PdfViewerScreen(
                             modifier = Modifier.testTag("pdf_bookmarks_open"),
                         )
                     }
+                }
+                if (!annotateMode) {
+                    NzIconButton(
+                        icon = Icons.Filled.Build,
+                        contentDescription = stringResource(R.string.cd_pdf_page_tools),
+                        onClick = {
+                            pagePlan = PdfPagePlan.of(pages.totalPages)
+                            pageToolsNotice = null
+                            showPageTools = true
+                        },
+                        enabled = !failed && pages.totalPages > 0,
+                        modifier = Modifier.testTag("pdf_page_tools"),
+                    )
                 }
                 NzIconButton(
                     icon = Icons.Filled.Share,
@@ -903,6 +997,22 @@ fun PdfViewerScreen(
             },
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             shape = com.cipherwell.notezero.ui.theme.NoteZeroShapes.sheet,
+        )
+    }
+
+    if (showPageTools) {
+        PdfPageToolsScreen(
+            plan = pagePlan,
+            saving = pageToolsSaving,
+            notice = pageToolsNotice,
+            onPlanChange = { updated -> pagePlan = updated },
+            onSave = { savePageCopy() },
+            onCancel = {
+                if (!pageToolsSaving) {
+                    showPageTools = false
+                    pageToolsNotice = null
+                }
+            },
         )
     }
 }
