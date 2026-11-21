@@ -51,9 +51,11 @@ Deliver:
   bounds, plan/UI/instrumented tests and device QA.
 - **Shipped in increment 17:** in-memory page thumbnails in the Pages overview, bookmark rows and
   page-tools rows (lazy, bounded, no cache), with numeric fallback and viewer/page-tools tests.
-  **Still queued:** full-document lazy-render viewer beyond the 8-page render cap, text-layer
-  search/extraction (needs a vetted PDF text engine) and rendering sticky-note text into flattened
-  copies.
+  **Still queued:** text-layer search/extraction (needs a vetted PDF text engine) and rendering
+  sticky-note text into flattened copies.
+- **Shipped in increment 18:** full-document lazy PDF viewer (one open `PdfPageSession`, per-page
+  on-demand rendering, all-page jump/bookmark/annotate, all-page thumbnails and annotated export,
+  unlinked ephemeral PDF). The old 8-page viewer cap is gone.
 
 ## Phase 12 — Drawing studio (shipped, increment 12)
 

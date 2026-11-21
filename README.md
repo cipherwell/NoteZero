@@ -10,7 +10,7 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 [VaultZero](https://github.com/cipherwell/Vault-Zero) with an independent package
 (`com.cipherwell.notezero`), independent signing key and independent threat model.
 
-> Status: **Phase 5 — all-in-one workspace (increment 17)** — 2026-11-20.
+> Status: **Phase 5 — all-in-one workspace (increment 18)** — 2026-11-20.
 > Security core, notes MVP, encrypted SAF backup/restore, code editor (workspace
 > search/copy/export/indent), encrypted attachments (images/files/**drawings**),
 > **locked notes/folders**, **Markdown/HTML/PDF note export**, **table editing**,
@@ -26,7 +26,7 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 > extraction, TTS/translations, F-Droid) is in
 > [docs/ROADMAP-ALL-IN-ONE.md](docs/ROADMAP-ALL-IN-ONE.md), grounded in
 > [docs/RESEARCH-ALL-IN-ONE-2026-11-17.md](docs/RESEARCH-ALL-IN-ONE-2026-11-17.md).
-> Builds are green, **1467 unit tests + 32 device tests**, and **signed APK + AAB release
+> Builds are green, **1490 unit tests + 38 device tests**, and **signed APK + AAB release
 > builds are byte-for-byte reproducible**; an independent security audit previously found
 > no HIGH/CRITICAL issues and its findings are remediated. Device QA on a Pixel 9 Pro XL
 > (Android 17) and the emulator covered import, TOC, search, bookmarks, themes and
@@ -70,8 +70,10 @@ NoteZero is the second Cipherwell app, built to the same security bar as
 | ![Tabs](docs/screenshots/43-code-tabs.png) | ![Quick open](docs/screenshots/44-code-quick-open.png) | ![PDF page tools](docs/screenshots/46-pdf-page-tools.png) |
 | **Page-tools copy: reordered + rotated + blank** | **Pages overview (thumbnails)** | **Page-tools previews** |
 | ![Page-tools copy](docs/screenshots/47-pdf-page-tools-copy.png) | ![Pages overview](docs/screenshots/49-pdf-page-overview.png) | ![Page-tools previews](docs/screenshots/51-pdf-page-tools-thumbnails.png) |
-| **Bookmark with thumbnail** | | |
-| ![Bookmark thumbnail](docs/screenshots/50-pdf-bookmark-thumbnail.png) | | |
+| **Bookmark with thumbnail** | **Full document: page 12 of 12** | **All-pages overview** |
+| ![Bookmark thumbnail](docs/screenshots/50-pdf-bookmark-thumbnail.png) | ![Page 12](docs/screenshots/52-pdf-full-document-page12.png) | ![Pages overview](docs/screenshots/53-pdf-all-pages-overview.png) |
+| **Annotated copy: page 10 (flattened export)** | | |
+| ![Annotated export](docs/screenshots/54-pdf-annotated-export-page10.png) | | |
 
 Screenshots are real emulator captures from the instrumented E2E run (debug build with
 `-PallowScreenshots=true`; normal builds set FLAG_SECURE, which makes `screencap` return a
@@ -244,6 +246,25 @@ Screenshots are real emulator captures from the instrumented E2E run (debug buil
   including a rotated page; 1467 unit tests / 0 failures (118 classes) and 32 instrumented tests
   green.
 
+## Full-document lazy PDF viewer (2026-11-20)
+
+- The **8-page viewer render cap is gone**: one `PdfPageSession` keeps the document open for the
+  viewing session and a `LazyColumn` spans the real `pageCount`; each page is rasterised only when
+  its row is composed, with an A4 placeholder while loading and a per-page failure notice.
+- The decrypted PDF is written to one app-private cache file that is **unlinked immediately after
+  opening**, so no plaintext path exists for the whole session; page bitmaps are in-memory and
+  recycled as rows leave composition. No thumbnail/page cache, no new permissions or deps.
+- Jump/bookmark/annotate now work on **every page** (e.g. page 10/12), and the Pages overview
+  covers all thumbnail-rendered pages (up to 100).
+- **Annotated export** now uses the all-pages page-tools exporter with an identity plan (up to
+  100 pages; above that a clear refusal, nothing written) instead of only the previously-rasterised
+  pages.
+- **Measured QA** (emulator, Android 17 image): a 12-page PDF scrolled 1 → 12 with lazy
+  placeholders; jumped to page 10; drew an annotation on page 10; exported a 12-page flattened
+  annotated copy and verified the ink on exported page 10 with `pdftoppm`; the overview showed
+  pages 10–12 and all 12 thumbnails; no PDF session temp file remained in app cache; 1490 unit
+  tests / 0 failures (120 classes) and 38 instrumented tests green.
+
 ## Verified end to end (2026-11-15)
 
 - 913 unit tests / 0 failures (79 classes); 15 instrumented tests on a real emulator.
@@ -378,6 +399,7 @@ Full instructions (including signed release builds and this machine's exact setu
 | [docs/PDF-ANNOTATION-UI.md](docs/PDF-ANNOTATION-UI.md) | PDF annotation layer, tags and flattened annotated export |
 | [docs/PDF-PAGE-TOOLS.md](docs/PDF-PAGE-TOOLS.md) | PDF page tools: plan/export/copy, bounds, tags, security, limitations |
 | [docs/PDF-THUMBNAILS.md](docs/PDF-THUMBNAILS.md) | In-memory PDF page thumbnails for overview/bookmarks/page tools |
+| [docs/PDF-LAZY-VIEWER.md](docs/PDF-LAZY-VIEWER.md) | Full-document lazy PDF page session, lifecycle, unlinked temp, bounds |
 | [docs/VERIFICATION-2026-11-15.md](docs/VERIFICATION-2026-11-15.md) | Phase-1 evidence: builds, 290 unit tests, device E2E, signing, FLAG_SECURE |
 | [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | Dependency policy/inventory (offline-safe only) |
 | [docs/RELEASING.md](docs/RELEASING.md) | Release checklist, F-Droid eligibility |

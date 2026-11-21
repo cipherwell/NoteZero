@@ -53,8 +53,8 @@ fun interface PdfPageToolsExporter {
  * Security / temporary file: `PdfRenderer` needs a **seekable file descriptor**, so the
  * decrypted bytes are written to a single ephemeral app-private cache file for the duration of
  * the export and deleted in the `finally` block (the exact trade-off documented for
- * [AndroidPdfPageRenderer] in DECISIONS #20 / THREAT-MODEL: one file, app-private cache,
- * short-lived, no backup). The output is returned in memory and reaches disk only through the
+ * [AndroidPdfPageSessionFactory] and [AndroidPdfPageRenderer] in DECISIONS #20 / THREAT-MODEL:
+ * one file, app-private cache, short-lived, no backup). The output is returned in memory and reaches disk only through the
  * encrypted attachment pipeline; nothing is logged.
  *
  * Bounds: a plan is re-validated against the actual document (at most [maxPages] pages, no

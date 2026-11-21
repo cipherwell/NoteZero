@@ -68,16 +68,6 @@ class PdfThumbnailsUiTest : UiTestBase() {
         }
     }
 
-    private fun fakePageRenderer(pages: Int = 3, total: Int = pages): PdfPageRenderer =
-        PdfPageRenderer { _, _ ->
-            val bitmaps = (0 until pages).map { index ->
-                Bitmap.createBitmap(12, 18, Bitmap.Config.ARGB_8888).apply {
-                    eraseColor(if (index % 2 == 0) Color.WHITE else Color.LTGRAY)
-                }
-            }
-            PdfPages(bitmaps, total)
-        }
-
     private fun repositoryWithPdf(bookmarks: List<ReadingBookmark> = emptyList()): Pair<FakeNoteRepository, String> {
         val repository = FakeNoteRepository(
             initialStatus = VaultStatus.UNLOCKED,
@@ -108,15 +98,16 @@ class PdfThumbnailsUiTest : UiTestBase() {
         repository: FakeNoteRepository,
         itemId: String,
         thumbnailRenderer: PdfThumbnailRenderer,
-        pages: Int = 3,
-        total: Int = pages,
+        total: Int = 3,
     ) {
         setThemedContent {
             PdfViewerScreen(
                 repository = repository,
                 itemId = itemId,
                 onClose = {},
-                renderer = fakePageRenderer(pages = pages, total = total),
+                pageSessionFactory = FakePdfPageSessionFactory(
+                    FakePdfPageSession(pageCount = total),
+                ),
                 thumbnailRenderer = thumbnailRenderer,
             )
         }

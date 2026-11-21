@@ -16,7 +16,7 @@ dependency, permission, network access or top-bar action was added.
 | File | Contents |
 |---|---|
 | `ui/pdf/PdfThumbnails.kt` | `PdfThumbnails` (bounded bitmap set + idempotent `recycle`), `PdfThumbnailRenderer` seam, `AndroidPdfThumbnailRenderer(maxPages = 100, longEdgePx = 144)` |
-| `ui/pdf/PdfViewerScreen.kt` | Lazy-load state/coroutine, dispose/recycle, Pages overview dialog (grid + numeric fallback), bookmark-row thumbnails, injected `thumbnailRenderer`, pass-through to page tools |
+| `ui/pdf/PdfViewerScreen.kt` | Lazy-load state/coroutine, dispose/recycle, Pages overview dialog (grid + numeric fallback), bookmark-row thumbnails, injected `thumbnailRenderer`, pass-through to page tools; full-document lazy paging now comes from `PdfPageSession` (see `docs/PDF-LAZY-VIEWER.md`) |
 | `ui/pdf/PdfPageToolsScreen.kt` | Optional `thumbnails: PdfThumbnails? = null`; 56×72 dp preview per page row (source page rotated by `quarterTurns * 90f`, labelled placeholder for blank entries) |
 | `test/.../ui/pdf/PdfThumbnailsTest.kt` | Wrapper unit tests (4) |
 | `test/.../ui/pdf/PdfThumbnailsUiTest.kt` | Overview grid/jump/fallback/loading + bookmark-row tests with fake renderer (7) |
@@ -97,12 +97,13 @@ and the hint copy is `pdf_page_overview_hint`.
 
 When thumbnails are available the dialog shows a bound-height (max 360 dp) 3-column
 `LazyVerticalGrid` of page cells: thumbnail, 1-based page label and a primary-colour
-border/label for the current page. Tapping a cell scrolls the pager to that page and closes the
-dialog. The grid only offers pages the viewer has actually rasterised (`PdfPages`), because the
-viewer's own page renderer is capped at 8 pages — a cell is never a dead navigation target. Below
-the grid the existing numeric `OutlinedTextField` (`pdf_page_field`), error (`pdf_page_error`),
-Go (`pdf_page_jump_confirm`) and Cancel (`pdf_page_jump_cancel`) remain unchanged: this is the
-keyboard fallback and the only way to address document pages beyond the rendered set.
+border/label for the current page. Tapping a cell scrolls the lazy pager to that page and closes
+the dialog. The grid covers `min(pageCount, thumbnails.size)` — the viewer now has every page (see
+`docs/PDF-LAZY-VIEWER.md`), while the thumbnail renderer itself is capped at 100 pages — so every
+cell is a live navigation target and documents up to 100 pages get a full grid. Below the grid the
+existing numeric `OutlinedTextField` (`pdf_page_field`), error (`pdf_page_error`), Go
+(`pdf_page_jump_confirm`) and Cancel (`pdf_page_jump_cancel`) remain unchanged: this is the
+keyboard fallback and the only way to address page numbers beyond the 100-thumbnail cap.
 
 While the render is in flight the dialog shows a progress row (`pdf_thumbnails_loading`) and the
 numeric field is already usable. If the load produced nothing, the dialog shows
@@ -191,10 +192,10 @@ export JAVA_HOME=/usr/lib/jvm/java-17-openjdk
 - **In-memory only, per session.** Thumbnails are rendered again on every viewer open; a
   100-page document pays one bounded render pass the first time a thumbnail surface opens. They
   are deliberately not persisted (plaintext/cache-free requirement), so no cross-session speedup.
-- **Viewer page cap still applies.** The existing viewer rasterises at most 8 pages
-  (`AndroidPdfPageRenderer`), so the overview's thumbnail cells only cover those rendered pages;
-  the numeric field is the only navigation for the rest of a long document. The renderer itself
-  is capped at 100 pages for reuse by the page-tools previews and future work.
+- **Grid capped by the thumbnail renderer.** The viewer can now page through the whole document
+  (one lazy `PdfPageSession`), and the overview covers every page up to the thumbnail renderer's
+  **100-page** cap; a longer document gets 100 grid cells and the numeric field for the rest. This
+  keeps the overview heap bounded (~5.8 MiB worst case) without a plaintext thumbnail cache.
 - **Thumbnails are approximate page previews**, not a substitute for the rendered page: detail is
   at most 144 px long edge, so fine print is unreadable in a thumbnail by design.
 - **Page-tools previews are visual only.** Rotation is applied with a graphics layer; the actual
@@ -207,8 +208,8 @@ export JAVA_HOME=/usr/lib/jvm/java-17-openjdk
 
 - 3-page PDF: open Pages — three thumbnails with readable page numbers, the current page
   highlighted; tap page 2/3 and verify the viewer lands on that page and the dialog closes.
-- >8-page PDF: Pages shows thumbnails for the rasterised pages only; typing a higher page number
-  in the field still navigates/behaves as today; `pdf_pages_capped` copy remains visible.
+- 12-page PDF: Pages shows all 12 thumbnails; tapping the last cell jumps to the last page (the
+  old `pdf_pages_capped` notice is gone — the whole document is reachable by scrolling/jump).
 - >100-page or unreadable PDF: opening Pages must show `pdf_thumbnails_unavailable` (or the
   capped state) and the numeric field must stay usable — no ANR and no broken grid.
 - Bookmarks: open the panel — rows show 48×64 dp thumbnails of their pages (independently of the

@@ -28,7 +28,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -110,21 +109,24 @@ private class PdfAnnotationActions(
 /**
  * Full-screen viewer for an encrypted PDF item.
  *
- * The PDF bytes are decrypted from the vault, rasterised to in-memory bitmaps and shown on a
- * paged list; nothing is cached and no file survives viewing (see [AndroidPdfPageRenderer] for
- * the bounded ephemeral-render-file trade-off). Annotations are edited as a normalised layer
- * (never touching the original PDF) and persisted encrypted through
+ * The PDF bytes are decrypted from the vault and opened as **one** [PdfPageSession]: the document
+ * handle stays open for the viewing session while each page is rasterised lazily, only while its
+ * row is composed (see [AndroidPdfPageSessionFactory] for the unlinked ephemeral-file trade-off).
+ * Every page of the document is reachable by scrolling or page jump; nothing is cached to disk and
+ * page bitmaps are recycled as their rows leave the composition. Annotations are edited as a
+ * normalised layer (never touching the original PDF) and persisted encrypted through
  * [NoteRepository.savePdfAnnotations]; only an explicit export turns them into plaintext.
  *
  * "Export decrypted copy" is the only plaintext egress and goes through the same SAF
  * `CreateDocument` + explicit-warning flow as attachment export, bracketed by
  * [AttachmentController] so the picker does not lock the vault mid-export. When annotations
  * exist the user first chooses the untouched original or a flattened (rasterised) copy; the
- * flattened copy is rendered in memory by [PdfFlattenedExporter] and written through
- * [PdfExportGateway], with a final vault-unlocked re-check before any byte is written.
+ * flattened copy is built from the encrypted bytes in memory by the shared [PdfPageToolsExporter]
+ * (identity page plan, same 100-page cap as page tools) and written through [PdfExportGateway],
+ * with a final vault-unlocked re-check before any byte is written.
  *
- * A vault lock replaces this screen with the unlock UI at the shell level; bitmaps are
- * recycled as soon as the composition leaves.
+ * A vault lock replaces this screen with the unlock UI at the shell level; the session is closed
+ * and page bitmaps are recycled as soon as the composition leaves.
  */
 @Composable
 fun PdfViewerScreen(
@@ -132,8 +134,7 @@ fun PdfViewerScreen(
     itemId: String,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
-    renderer: PdfPageRenderer = remember { AndroidPdfPageRenderer() },
-    flattenedExporter: PdfFlattenedExporter = remember { AndroidPdfFlattenedExporter() },
+    pageSessionFactory: PdfPageSessionFactory = remember { AndroidPdfPageSessionFactory() },
     exportGateway: PdfExportGateway = rememberSafPdfExportGateway(),
     exportDispatcher: CoroutineDispatcher = Dispatchers.Default,
     pageToolsExporter: PdfPageToolsExporter = remember { AndroidPdfPageToolsExporter() },
@@ -148,7 +149,10 @@ fun PdfViewerScreen(
 
     val controller = remember(repository) { AttachmentController(repository) }
     var loading by remember(itemId) { mutableStateOf(true) }
-    var pages by remember(itemId) { mutableStateOf(PdfPages(emptyList(), 0)) }
+    // The one open document handle of this viewing session; pageCount drives the lazy list. No
+    // page bitmap lives here: each page row owns (and recycles) its own bitmap.
+    var session by remember(itemId) { mutableStateOf<PdfPageSession?>(null) }
+    var pageCount by remember(itemId) { mutableStateOf(0) }
     var failed by remember(itemId) { mutableStateOf(false) }
     var notice by remember(itemId) { mutableStateOf<String?>(null) }
     var showExportChoice by remember(itemId) { mutableStateOf(false) }
@@ -174,9 +178,10 @@ fun PdfViewerScreen(
     var noteDraft by remember(itemId) { mutableStateOf<PdfNoteDraft?>(null) }
 
     val readingState = item?.readingState
-    val listState = rememberLazyListState(
-        initialFirstVisibleItemIndex = (readingState?.position ?: 0).coerceAtLeast(0),
-    )
+    // The list always starts at the top: the encrypted reading position is applied after the
+    // document's real pageCount is known (below), so a stale/hostile stored position can never
+    // drive the lazy list out of its item range.
+    val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val currentPage = listState.firstVisibleItemIndex
     var showBookmarks by remember(itemId) { mutableStateOf(false) }
@@ -185,10 +190,10 @@ fun PdfViewerScreen(
     var showPageJump by remember(itemId) { mutableStateOf(false) }
     var pageInput by remember(itemId) { mutableStateOf("") }
     var pageError by remember(itemId) { mutableStateOf<String?>(null) }
-    val pageInvalidNotice = stringResource(R.string.pdf_page_invalid, pages.totalPages.coerceAtLeast(1))
+    val pageInvalidNotice = stringResource(R.string.pdf_page_invalid, pageCount.coerceAtLeast(1))
     val defaultBookmarkLabel = stringResource(
         R.string.pdf_bookmark_default,
-        (currentPage + 1).coerceAtMost(pages.totalPages.coerceAtLeast(1)),
+        (currentPage + 1).coerceAtMost(pageCount.coerceAtLeast(1)),
     )
     val bookmarkAddedNotice = stringResource(R.string.pdf_bookmark_saved)
     val bookmarkRemovedNotice = stringResource(R.string.pdf_bookmark_removed)
@@ -205,6 +210,10 @@ fun PdfViewerScreen(
     val exportLockedNotice = stringResource(R.string.attach_export_locked)
     val annotatedWrittenNotice = stringResource(R.string.pdf_export_annotated_written)
     val annotatedFailedNotice = stringResource(R.string.pdf_export_annotated_failed)
+    val annotatedTooManyNotice = stringResource(
+        R.string.pdf_annotated_export_too_many,
+        PdfPagePlan.MAX_PAGES,
+    )
     val pageCopySuffix = stringResource(R.string.pdf_pages_copy_suffix)
     // The page-tools save flow is a separate coroutine from the annotated export; these are
     // captured here (the save runs outside composition but only uses formatted one-shot copy).
@@ -275,14 +284,48 @@ fun PdfViewerScreen(
         }
     }
 
+    /**
+     * Builds and writes the annotated (flattened) copy of the whole document.
+     *
+     * The copy uses the same all-pages exporter as the page-tools copy with an identity
+     * [PdfPagePlan] (one page per source page, in order, no rotation). Security order matters:
+     * the decrypted bytes are **re-read from the repository at export time** (never taken from
+     * the viewer's session or a cached copy), the exporter runs off the main thread, and the
+     * vault/item are re-checked before the bytes are handed to the gateway — so a vault that
+     * locks while the picker is open drops the plaintext instead of writing it. Above the
+     * exporter's page cap nothing is read or written, only a notice is shown.
+     */
     fun writeAnnotatedExport(uri: Uri) {
         scope.launch {
-            // CPU work off the main thread; the bytes exist only in this coroutine.
             val layer = editor.value
-            val bytes = withContext(exportDispatcher) { flattenedExporter.export(pages, layer) }
+            if (pageCount > PdfPagePlan.MAX_PAGES) {
+                // The shared page exporter is capped at MAX_PAGES: refuse rather than truncate.
+                notice = annotatedTooManyNotice
+                return@launch
+            }
+            // Re-check the vault/item before reading any decrypted byte: a lock that happened
+            // while the destination picker was open must discard the export with its own notice.
+            if (repository.status.value != VaultStatus.UNLOCKED ||
+                repository.items.value.none { it.id == itemId }
+            ) {
+                notice = exportLockedNotice
+                return@launch
+            }
+            val attachmentId = attachment?.id
+            val bytes = attachmentId?.let { id ->
+                runCatching { repository.attachmentBytes(itemId, id) }.getOrNull()
+            }
+            if (bytes == null) {
+                notice = annotatedFailedNotice
+                return@launch
+            }
+            // CPU work off the main thread; the flattened bytes exist only in this coroutine.
+            val exported = withContext(exportDispatcher) {
+                pageToolsExporter.export(context, bytes, PdfPagePlan.of(pageCount), layer)
+            }
             val stillUnlocked = repository.status.value == VaultStatus.UNLOCKED &&
                 repository.items.value.any { it.id == itemId }
-            if (bytes == null) {
+            if (exported == null) {
                 notice = annotatedFailedNotice
                 return@launch
             }
@@ -291,7 +334,7 @@ fun PdfViewerScreen(
                 notice = exportLockedNotice
                 return@launch
             }
-            val written = runCatching { exportGateway.write(uri, bytes) }.getOrDefault(false)
+            val written = runCatching { exportGateway.write(uri, exported) }.getOrDefault(false)
             notice = if (written) annotatedWrittenNotice else annotatedFailedNotice
         }
     }
@@ -307,6 +350,13 @@ fun PdfViewerScreen(
     }
 
     fun launchAnnotatedExport() {
+        if (pageCount > PdfPagePlan.MAX_PAGES) {
+            // Refuse before opening a destination picker: no empty/partial file is ever created.
+            // The bracket armed by controller.beginExport() is closed here.
+            controller.onExportPickerCancelled()
+            notice = annotatedTooManyNotice
+            return
+        }
         val launched = runCatching {
             exportGateway.pickDestination(annotatedPdfFileName(fileLabel)) { uri ->
                 onAnnotatedDestinationPicked(uri)
@@ -378,6 +428,8 @@ fun PdfViewerScreen(
         }
     }
 
+    // Open exactly one document session after the bytes are read; nothing is rasterised here.
+    // A viewer may only list MAX_VIEW_PAGES rows, so a hostile page count fails like a bad file.
     LaunchedEffect(itemId, attachment?.id) {
         loading = true
         failed = false
@@ -386,23 +438,52 @@ fun PdfViewerScreen(
         } else {
             null
         }
-        val rendered = if (bytes != null) renderer.render(context, bytes) else PdfPages(emptyList(), 0)
-        pages = rendered
-        failed = bytes == null || rendered.bitmaps.isEmpty()
-        loading = false
-        if (!failed && rendered.totalPages > 0) {
-            val safePosition = (readingState?.position ?: 0)
-                .coerceIn(0, rendered.totalPages - 1)
-            runCatching {
-                repository.saveReadingState(
-                    itemId,
-                    (readingState ?: ReadingState()).copy(
-                        position = safePosition,
-                        total = rendered.totalPages,
-                    ),
-                )
-            }
+        val opened = if (bytes != null) {
+            runCatching { pageSessionFactory.open(context, bytes) }.getOrNull()
+        } else {
+            null
         }
+        val openedCount = opened?.pageCount ?: 0
+        if (opened == null || openedCount <= 0 || openedCount > MAX_VIEW_PAGES) {
+            runCatching { opened?.close() }
+            session = null
+            pageCount = 0
+            failed = true
+            loading = false
+            return@LaunchedEffect
+        }
+        session = opened
+        pageCount = openedCount
+        failed = false
+        loading = false
+        val safePosition = (readingState?.position ?: 0).coerceIn(0, openedCount - 1)
+        runCatching {
+            repository.saveReadingState(
+                itemId,
+                (readingState ?: ReadingState()).copy(
+                    position = safePosition,
+                    total = openedCount,
+                ),
+            )
+        }
+    }
+
+    // Restore the encrypted reading position once the real page count is known. Coerced so a
+    // stale/hostile position cannot ask the lazy list for a row that does not exist.
+    LaunchedEffect(pageCount) {
+        if (pageCount <= 0) return@LaunchedEffect
+        val safePosition = (readingState?.position ?: 0).coerceIn(0, pageCount - 1)
+        runCatching { listState.scrollToItem(safePosition) }
+    }
+
+    // The session owns the native document handle and the (already unlinked) temp file: close it
+    // as soon as the viewer leaves or a different item replaces this one. Page bitmaps belong to
+    // their rows and are recycled on row disposal, never here. The key is captured as a local
+    // value: DisposableEffect runs its block after composition, so reading the state inside the
+    // block could observe the next session and close it on the key-change disposal.
+    val sessionToClose = session
+    DisposableEffect(sessionToClose) {
+        onDispose { runCatching { sessionToClose?.close() } }
     }
 
     // Thumbnails are loaded lazily, exactly once per viewer session: the first time the user
@@ -442,31 +523,26 @@ fun PdfViewerScreen(
     }
 
     // Free the thumbnail bitmaps when the viewer leaves (or when a new set replaces this one);
-    // never recycle a set that is still attached to the composition, only the previous one.
-    DisposableEffect(thumbnails) {
-        val owned = thumbnails
-        onDispose { owned?.recycle() }
+    // never recycle a set that is still attached to the composition, only the previous one. The
+    // set is captured at composition time for the same reason as the page session above.
+    val thumbnailsToRecycle = thumbnails
+    DisposableEffect(thumbnailsToRecycle) {
+        onDispose { thumbnailsToRecycle?.recycle() }
     }
 
     // Persist the current page shortly after it settles (debounced by effect restart on change).
-    LaunchedEffect(currentPage, pages.totalPages) {
-        if (loading || failed || pages.totalPages <= 0) return@LaunchedEffect
+    LaunchedEffect(currentPage, pageCount) {
+        if (loading || failed || pageCount <= 0) return@LaunchedEffect
         delay(600)
-        val page = currentPage.coerceIn(0, pages.totalPages - 1)
+        val page = currentPage.coerceIn(0, pageCount - 1)
         val fresh = repository.items.value.firstOrNull { it.id == itemId }?.readingState
-        if (fresh?.position == page && fresh.total == pages.totalPages) return@LaunchedEffect
+        if (fresh?.position == page && fresh.total == pageCount) return@LaunchedEffect
         runCatching {
             repository.saveReadingState(
                 itemId,
-                (fresh ?: ReadingState()).copy(position = page, total = pages.totalPages),
+                (fresh ?: ReadingState()).copy(position = page, total = pageCount),
             )
         }
-    }
-
-    // Free the rendered page bitmaps as soon as the screen leaves (manually, not "eventually").
-    DisposableEffect(pages) {
-        val owned = pages.bitmaps
-        onDispose { owned.forEach { it.recycle() } }
     }
 
     // Back closes the page-tools overlay first (it is modal), then leaves annotate mode, then
@@ -488,6 +564,9 @@ fun PdfViewerScreen(
     }
 
     BackHandler { handleBack() }
+
+    // Captured as a local value so the lazy list can use a non-null session in its else branch.
+    val activeSession = session
 
     Box(
         modifier = modifier
@@ -530,7 +609,7 @@ fun PdfViewerScreen(
                         )
                     }
                 }
-                if (!failed && pages.bitmaps.isNotEmpty()) {
+                if (!failed && pageCount > 0) {
                     if (annotateMode) {
                         TextButton(
                             onClick = { annotateMode = false },
@@ -572,12 +651,12 @@ fun PdfViewerScreen(
                         icon = Icons.Filled.Build,
                         contentDescription = stringResource(R.string.cd_pdf_page_tools),
                         onClick = {
-                            pagePlan = PdfPagePlan.of(pages.totalPages)
+                            pagePlan = PdfPagePlan.of(pageCount)
                             pageToolsNotice = null
                             thumbnailsRequested = true
                             showPageTools = true
                         },
-                        enabled = !failed && pages.totalPages > 0,
+                        enabled = !failed && pageCount > 0,
                         modifier = Modifier.testTag("pdf_page_tools"),
                     )
                 }
@@ -595,7 +674,7 @@ fun PdfViewerScreen(
                 )
             }
 
-            if (!failed && pages.totalPages > 0) {
+            if (!failed && pageCount > 0) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -604,7 +683,7 @@ fun PdfViewerScreen(
                 ) {
                     LinearProgressIndicator(
                         progress = {
-                            ((currentPage + 1).toFloat() / pages.totalPages).coerceIn(0f, 1f)
+                            ((currentPage + 1).toFloat() / pageCount).coerceIn(0f, 1f)
                         },
                         modifier = Modifier
                             .weight(1f)
@@ -622,8 +701,8 @@ fun PdfViewerScreen(
                         Text(
                             text = stringResource(
                                 R.string.pdf_page_progress,
-                                (currentPage + 1).coerceAtMost(pages.totalPages),
-                                pages.totalPages,
+                                (currentPage + 1).coerceAtMost(pageCount),
+                                pageCount,
                             ),
                             style = NoteZeroType.Caption,
                         )
@@ -660,7 +739,7 @@ fun PdfViewerScreen(
                         }
                     }
 
-                    failed || pages.bitmaps.isEmpty() -> Text(
+                    failed || activeSession == null || pageCount <= 0 -> Text(
                         text = stringResource(R.string.pdf_error),
                         style = NoteZeroType.Body,
                         color = com.cipherwell.notezero.ui.theme.LocalNoteZeroColors.current.dangerText,
@@ -685,14 +764,13 @@ fun PdfViewerScreen(
                         verticalArrangement = Arrangement.spacedBy(NoteZeroSpacing.m),
                         userScrollEnabled = !annotateMode,
                     ) {
-                        itemsIndexed(
-                            pages.bitmaps,
-                            key = { index: Int, _: Bitmap -> "pdf_page_$index" },
-                        ) { index, bitmap ->
-                            PageImage(
-                                bitmap = bitmap,
-                                index = index,
-                                total = pages.totalPages,
+                        // Every document page is a row; the bitmap itself is produced lazily by
+                        // the row while it is composed and recycled when it leaves composition.
+                        items(count = pageCount, key = { index -> "pdf_page_$index" }) { index ->
+                            PdfPageItem(
+                                pageIndex = index,
+                                total = pageCount,
+                                session = activeSession,
                                 annotations = editor.value,
                                 annotateMode = annotateMode,
                                 tool = tool,
@@ -701,21 +779,11 @@ fun PdfViewerScreen(
                                 actions = annotationActions,
                             )
                         }
-                        if (pages.isTruncated) {
-                            item(key = "pdf_capped") {
-                                Text(
-                                    text = stringResource(R.string.pdf_pages_capped, pages.renderedPages),
-                                    style = NoteZeroType.Caption,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.testTag("pdf_pages_capped"),
-                                )
-                            }
-                        }
                     }
                 }
             }
 
-            if (annotateMode && !failed && pages.bitmaps.isNotEmpty()) {
+            if (annotateMode && !failed && pageCount > 0) {
                 PdfAnnotationPaletteBar(
                     tool = tool,
                     colorIndex = colorIndex,
@@ -900,10 +968,10 @@ fun PdfViewerScreen(
                         val label = bookmarkLabel.trim().ifBlank { defaultBookmarkLabel }
                         val current = repository.items.value.firstOrNull { it.id == itemId }?.readingState
                         val updated = (current ?: ReadingState()).copy(
-                            position = currentPage.coerceIn(0, (pages.totalPages - 1).coerceAtLeast(0)),
-                            total = pages.totalPages.coerceAtLeast(current?.total ?: 0),
+                            position = currentPage.coerceIn(0, (pageCount - 1).coerceAtLeast(0)),
+                            total = pageCount.coerceAtLeast(current?.total ?: 0),
                             bookmarks = (current?.bookmarks ?: emptyList()) + ReadingBookmark(
-                                position = currentPage.coerceIn(0, (pages.totalPages - 1).coerceAtLeast(0)),
+                                position = currentPage.coerceIn(0, (pageCount - 1).coerceAtLeast(0)),
                                 label = label,
                                 createdAt = System.currentTimeMillis(),
                             ),
@@ -951,7 +1019,7 @@ fun PdfViewerScreen(
                                         showBookmarks = false
                                         scope.launch {
                                             listState.scrollToItem(
-                                                bookmark.position.coerceIn(0, (pages.totalPages - 1).coerceAtLeast(0)),
+                                                bookmark.position.coerceIn(0, (pageCount - 1).coerceAtLeast(0)),
                                             )
                                         }
                                     }
@@ -1023,15 +1091,15 @@ fun PdfViewerScreen(
     }
 
     if (showPageJump) {
-        val total = pages.totalPages.coerceAtLeast(1)
-        // The viewer rasterises a bounded number of pages (PdfPages), so the overview only
-        // offers jump targets that actually exist in the pager; the numeric field keeps the
-        // document's real 1..total range as the fallback for long or capped documents.
+        val total = pageCount.coerceAtLeast(1)
+        // The overview covers min(pageCount, thumbnails.size): thumbnails themselves are capped
+        // (PdfThumbnails.MAX_PAGES), so a very long document still gets a full-range numeric
+        // field as the jump fallback while the grid shows the first 100 loaded pages.
         val thumbnailSet = thumbnails
         val gridCells = thumbnailSet
             ?.takeUnless { it.isEmpty }
             ?.size
-            ?.coerceAtMost(pages.renderedPages)
+            ?.coerceAtMost(pageCount)
             ?: 0
         AlertDialog(
             onDismissRequest = { showPageJump = false },
@@ -1075,7 +1143,7 @@ fun PdfViewerScreen(
                                         showPageJump = false
                                         scope.launch {
                                             listState.scrollToItem(
-                                                index.coerceIn(0, (pages.renderedPages - 1).coerceAtLeast(0)),
+                                                index.coerceIn(0, (pageCount - 1).coerceAtLeast(0)),
                                             )
                                         }
                                     },
@@ -1181,6 +1249,96 @@ fun PdfViewerScreen(
     }
 }
 
+/** Lazy render state of one page row: producing the bitmap, ready to show, or failed. */
+private sealed interface PdfPageRenderState {
+    object Loading : PdfPageRenderState
+    class Ready(val bitmap: Bitmap) : PdfPageRenderState
+    object Failed : PdfPageRenderState
+}
+
+/**
+ * One row of the lazy document pager.
+ *
+ * The page is rendered (only) while this row is composed: [LaunchedEffect] asks the session for
+ * the bitmap, a bounded A4-aspect placeholder is shown while that runs, and a failed render shows
+ * a non-secret placeholder instead of a crash or a broken image. The bitmap is recycled when the
+ * row leaves the composition (or when a replacement bitmap arrives), never while it is displayed.
+ */
+@Composable
+private fun PdfPageItem(
+    pageIndex: Int,
+    total: Int,
+    session: PdfPageSession,
+    annotations: PdfAnnotations,
+    annotateMode: Boolean,
+    tool: PdfAnnotationTool,
+    colorIndex: Int,
+    widthIndex: Int,
+    actions: PdfAnnotationActions,
+) {
+    val renderState = remember(pageIndex) {
+        mutableStateOf<PdfPageRenderState>(PdfPageRenderState.Loading)
+    }
+    val bitmap = (renderState.value as? PdfPageRenderState.Ready)?.bitmap
+    LaunchedEffect(session, pageIndex) {
+        renderState.value = PdfPageRenderState.Loading
+        val rendered = session.render(pageIndex)
+        renderState.value = if (rendered != null) {
+            PdfPageRenderState.Ready(rendered)
+        } else {
+            PdfPageRenderState.Failed
+        }
+    }
+    // One disposal owner per bitmap: replacing a bitmap recycles the previous one, leaving the
+    // composition recycles the current one. A bitmap that is still displayed is never recycled.
+    DisposableEffect(bitmap) {
+        val owned = bitmap
+        onDispose {
+            owned?.let { pageBitmap ->
+                runCatching { if (!pageBitmap.isRecycled) pageBitmap.recycle() }
+            }
+        }
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("pdf_page_$pageIndex"),
+    ) {
+        when (val state = renderState.value) {
+            is PdfPageRenderState.Ready -> PageImage(
+                bitmap = state.bitmap,
+                index = pageIndex,
+                total = total,
+                annotations = annotations,
+                annotateMode = annotateMode,
+                tool = tool,
+                colorIndex = colorIndex,
+                widthIndex = widthIndex,
+                actions = actions,
+            )
+
+            PdfPageRenderState.Loading -> PageImagePlaceholder(
+                message = stringResource(R.string.pdf_page_loading),
+                messageTag = "pdf_page_loading",
+            )
+
+            PdfPageRenderState.Failed -> PageImagePlaceholder(
+                message = stringResource(R.string.pdf_page_render_failed),
+                messageTag = "pdf_page_render_failed",
+                failed = true,
+            )
+        }
+        Spacer(Modifier.height(NoteZeroSpacing.xxs))
+        Text(
+            text = stringResource(R.string.pdf_page_indicator, pageIndex + 1, total),
+            style = NoteZeroType.Caption,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.align(Alignment.CenterHorizontally),
+        )
+    }
+}
+
+/** Rendered page frame: the bitmap plus its annotation/gesture overlay. */
 @Composable
 private fun PageImage(
     bitmap: Bitmap,
@@ -1193,42 +1351,68 @@ private fun PageImage(
     widthIndex: Int,
     actions: PdfAnnotationActions,
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Box(
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(bitmap.width.toFloat() / bitmap.height.toFloat())
+            .clip(RoundedCornerShape(NoteZeroSpacing.s))
+            .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+            .testTag("pdf_page_frame"),
+    ) {
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = stringResource(R.string.pdf_page_indicator, index + 1, total),
             modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(bitmap.width.toFloat() / bitmap.height.toFloat())
-                .clip(RoundedCornerShape(NoteZeroSpacing.s))
-                .background(MaterialTheme.colorScheme.surfaceContainerLowest)
-                .testTag("pdf_page_frame"),
-        ) {
-            Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = stringResource(R.string.pdf_page_indicator, index + 1, total),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .testTag("pdf_page"),
-            )
-            PdfAnnotationOverlay(
-                page = index,
-                annotations = annotations,
-                annotateMode = annotateMode,
-                tool = tool,
-                colorIndex = colorIndex,
-                widthIndex = widthIndex,
-                onStroke = actions.onStroke,
-                onHighlight = actions.onHighlight,
-                onErase = actions.onErase,
-                onNewNote = actions.onNewNote,
-                onOpenNote = actions.onOpenNote,
-            )
-        }
-        Spacer(Modifier.height(NoteZeroSpacing.xxs))
+                .fillMaxSize()
+                .testTag("pdf_page"),
+        )
+        PdfAnnotationOverlay(
+            page = index,
+            annotations = annotations,
+            annotateMode = annotateMode,
+            tool = tool,
+            colorIndex = colorIndex,
+            widthIndex = widthIndex,
+            onStroke = actions.onStroke,
+            onHighlight = actions.onHighlight,
+            onErase = actions.onErase,
+            onNewNote = actions.onNewNote,
+            onOpenNote = actions.onOpenNote,
+        )
+    }
+}
+
+/**
+ * Bounded A4-aspect page placeholder used while a page renders and when it fails. It reserves the
+ * final layout space (no scroll jump when the bitmap arrives) and never spins.
+ */
+@Composable
+private fun PageImagePlaceholder(
+    message: String,
+    messageTag: String,
+    failed: Boolean = false,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(A4_ASPECT_RATIO)
+            .clip(RoundedCornerShape(NoteZeroSpacing.s))
+            .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+            .testTag("pdf_page_frame"),
+        contentAlignment = Alignment.Center,
+    ) {
         Text(
-            text = stringResource(R.string.pdf_page_indicator, index + 1, total),
+            text = message,
             style = NoteZeroType.Caption,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.align(Alignment.CenterHorizontally),
+            color = if (failed) {
+                com.cipherwell.notezero.ui.theme.LocalNoteZeroColors.current.warningText
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            modifier = Modifier
+                .padding(NoteZeroSpacing.m)
+                .semantics { liveRegion = LiveRegionMode.Polite }
+                .testTag(messageTag),
         )
     }
 }

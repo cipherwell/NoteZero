@@ -1089,3 +1089,68 @@ blank page white, corrupt/empty fail-closed, max-page/long-edge no-upscale, temp
 - The page-tools preview for an unavailable thumbnail is a light placeholder; blank entries show a
   labelled placeholder. The page-tools exporter itself is unchanged.
 - No new top-bar action was added (the bar already has five 48 dp actions).
+
+---
+
+## 23. Increment 18 — full-document lazy PDF viewer (2026-11-20)
+
+Scope: remove the viewer's 8-page raster cap. Contract: `docs/CONTRACTS-PHASE17.md`;
+implementation/limits: `docs/PDF-LAZY-VIEWER.md`; policy: DECISIONS #29; threat note:
+THREAT-MODEL §3.9.9.
+
+### 23.1 Implementation
+
+| Check | Result |
+|---|---|
+| Page session | `PdfPageSession`/`PdfPageSessionFactory` + `AndroidPdfPageSessionFactory`: one open `PdfRenderer`; decrypted bytes written to an app-private cache file and **unlinked immediately after opening** (fallback delete-on-close); arbitrary page render on IO under a `Mutex`, white ARGB, ≤1600 px long edge, never upscaled; invalid/corrupt/OOM → null; idempotent close; `MAX_VIEW_PAGES = 2000` |
+| Viewer | `LazyColumn` over the document's real `pageCount`; each page row renders lazily only while composed with A4 `pdf_page_loading` placeholder and `pdf_page_render_failed` per-page failure; page bitmap recycled when the row leaves composition; full-range progress, page jump, bookmarks, annotations; session closed on dispose/item change; first-8-pages cap/`pdf_pages_capped` gone |
+| Thumbnails | Pages overview grid covers all thumbnail-rendered pages (up to 100) instead of the old rasterised prefix; bookmark/page-tools thumbnails unchanged |
+| Annotated export | uses the injected all-pages `pageToolsExporter` with `PdfPagePlan.of(pageCount)` (identity plan), re-reads bytes at export time, keeps SAF warning/unlock checks; >100 pages shows `pdf_annotated_export_too_many` and creates/writes nothing |
+| Legacy | `PdfPageRenderer`/`PdfPages`/`PdfFlattenedExporter` retained as standalone utilities with their tests; no viewer call site uses them |
+| Tests | +23 unit/Robolectric lazy-viewer/session tests and +6 instrumented real-`PdfRenderer` session tests; full suite **1490 / 0 failures / 120 classes**; **38 instrumented tests OK** |
+
+### 23.2 Emulator device QA (measured)
+
+Fixture: 12-page PDF (PAGE 01 … PAGE 12) imported through Library.
+
+| Step | Evidence |
+|---|---|
+| Full-document scroll | opened the 12-page PDF and scrolled from page 1 to **page 12/12**; pages 9–12 rendered lazily with no capped notice; session stayed responsive |
+| Page jump | Pages overview now covered all 12 thumbnails (scrolled grid showed 10/11/12); jumped to **page 10/12** |
+| Annotate page 10 | entered annotate mode on page 10, drew an ink stroke, tapped Done; annotation state persisted |
+| Annotated export | share → Annotated copy (flattened) → explicit UNENCRYPTED warning → SAF `qa-pdf-12-annotated.pdf`; `pdfinfo` reports **12 pages A4 (595×842 pt)**, and the exported page-10 render shows the ink stroke (`pdftoppm`), with no selectable text (flattened by design) |
+| All-page overview | Pages overview scrolled to cells **Page 10 / 11 / 12**; current-page emphasis and page numbers correct |
+| Bookmark | sheet bookmark thumbnails still render for the current page; page-12 reachable (overview/jump) |
+| Temp/cache | while the viewer was open, `run-as … ls cache` showed **no `pdf-session-*` file** (opened file unlinked); encrypted attachments remained `.nzb`; no plaintext PDF path |
+| Crashes | 0 NoteZero FATAL/ANR during the flow |
+| Screenshots | `52-pdf-full-document-page12`, `53-pdf-all-pages-overview`, `54-pdf-annotated-export-page10` |
+
+Instrumented validation: real `AndroidPdfPageSessionFactory`/session 6/6 (arbitrary page 10 colour,
+close idempotence, no temp file, corrupt/empty/out-of-range).
+
+### 23.3 Security + release verification
+
+| Check | Result |
+|---|---|
+| Offline guard | `./scripts/check-offline.sh --gradle` → `OK: NoteZero is offline by construction.` |
+| Token lint | PDF lazy-viewer/session code token-clean |
+| Hygiene | no TODO/FIXME/TEMP DEBUG/logging in the new session/viewer code; no new permissions/dependencies; no page/thumbnail plaintext cache (one unlinked ephemeral session PDF) |
+| Reproducible APK | **REPRODUCIBLE** — sha256 `5f6de22d7e8abf8dfffe668b8c8fdc49153f30267ddf6aae7dfee7341c3e80b3` |
+| Reproducible AAB | **REPRODUCIBLE** — sha256 `d59bd8a1942b7a27cfe3f64df2885882ed9763dd5d651a6e71e1f88fe5946d9f` |
+| Artifacts | `releases/notezero-0.1.0-release.apk` / `.aab` replaced; `releases/SHA256SUMS` updated |
+| Certificate | Cipherwell signing certificate unchanged |
+| Owner phone | release APK installed over the existing vault; left locked; 0 NoteZero crash entries |
+
+### 23.4 Residual notes
+
+- Pages render on demand; scrolling can briefly show the A4 loading placeholder and a page is
+  re-rendered when scrolled away and back. Page bitmaps are not cached beyond composition, which is
+  the memory/no-plaintext trade-off (documented).
+- The current page is derived from the LazyColumn's first visible row; on the very last page the
+  previous page can remain "current" while the last page is partially visible (observed when
+  adding a page-12 bookmark). Page 12 is reachable/visible and annotations work there.
+- Annotated copies remain **flattened image-only** and are capped at 100 pages; above that the
+  viewer refuses with `pdf_annotated_export_too_many` and writes nothing.
+- If a platform filesystem refuses unlink after opening, the session falls back to deleting the
+  ephemeral PDF at close (same app-private, no-backup, bounded trade-off).
+- `MAX_VIEW_PAGES = 2000`; above that the viewer shows the ordinary clean error.

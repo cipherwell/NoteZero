@@ -14,7 +14,7 @@ Features:
 - Library shelf for documents: import PDFs and EPUB books, see reading progress and continue where you left off
 - E-book reader for EPUB 2/3, FictionBook (FB2), plain text (TXT) and CBZ comics: table of contents, in-book search, bookmarks, font/line-spacing/margin controls and paper, sepia and night themes; comics get a paged reader with encrypted bookmarks and resume
 - Format detection is automatic on import; EPUB/FB2/TXT share the same reader tools while CBZ comics open a dedicated page reader
-- PDF reader with page jump, progress and bookmarks; reading positions and bookmarks are stored encrypted inside your vault
+- PDF reader for every page of the document (lazy on-demand rendering, no 8-page cap) with page jump, progress and bookmarks; reading positions and bookmarks are stored encrypted inside your vault
 - PDF annotation editor: ink, highlighter, highlight boxes, sticky notes, eraser, undo/redo and colour/width tools; annotations are encrypted with your vault and can be exported as a flattened annotated PDF copy
 - PDF page tools: rotate, delete, reorder and insert blank pages, then save a new encrypted flattened PDF copy; annotations follow their page and the original document is never modified
 - Visual PDF navigation: in-memory page thumbnails in a Pages overview, encrypted bookmark rows and page-tools previews (no thumbnail cache)

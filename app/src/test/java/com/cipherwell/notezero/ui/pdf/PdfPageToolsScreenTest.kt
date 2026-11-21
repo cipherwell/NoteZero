@@ -214,21 +214,12 @@ class PdfPageToolsScreenTest : UiTestBase() {
         return repository to created.id
     }
 
-    private fun fakeRenderer(pages: Int = 2, total: Int = 2): PdfPageRenderer = PdfPageRenderer { _, _ ->
-        val bitmaps = (0 until pages).map { index ->
-            Bitmap.createBitmap(24, 34, Bitmap.Config.ARGB_8888).apply {
-                eraseColor(if (index % 2 == 0) Color.WHITE else Color.LTGRAY)
-            }
-        }
-        PdfPages(bitmaps, total)
-    }
-
     private fun openViewer(
         repository: FakeNoteRepository,
         itemId: String,
         exporter: FakePageToolsExporter = FakePageToolsExporter(),
         saver: FakePageCopySaver = FakePageCopySaver(),
-        renderer: PdfPageRenderer = fakeRenderer(),
+        pageSession: PdfPageSession = FakePdfPageSession(pageCount = 2),
         thumbnailRenderer: PdfThumbnailRenderer = FakeThumbnailRenderer(),
         onClose: () -> Unit = {},
     ) {
@@ -237,7 +228,7 @@ class PdfPageToolsScreenTest : UiTestBase() {
                 repository = repository,
                 itemId = itemId,
                 onClose = onClose,
-                renderer = renderer,
+                pageSessionFactory = FakePdfPageSessionFactory(pageSession),
                 pageToolsExporter = exporter,
                 pageCopySaver = saver,
                 thumbnailRenderer = thumbnailRenderer,

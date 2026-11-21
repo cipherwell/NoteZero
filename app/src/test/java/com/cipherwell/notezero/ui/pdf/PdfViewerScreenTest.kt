@@ -61,15 +61,6 @@ class PdfViewerScreenTest : UiTestBase() {
         return repository to created.id
     }
 
-    private fun fakeRenderer(pages: Int, total: Int): PdfPageRenderer = PdfPageRenderer { _, _ ->
-        val bitmaps = (0 until pages).map { index ->
-            Bitmap.createBitmap(12, 18, Bitmap.Config.ARGB_8888).apply {
-                eraseColor(if (index % 2 == 0) Color.WHITE else Color.LTGRAY)
-            }
-        }
-        PdfPages(bitmaps, total)
-    }
-
     /** Fake thumbnail renderer: counts calls, records the bytes it was handed and its bitmaps. */
     private class FakeThumbnailRenderer(
         private val pageCount: Int = 3,
@@ -104,7 +95,7 @@ class PdfViewerScreenTest : UiTestBase() {
                 repository = repository,
                 itemId = itemId,
                 onClose = { closed++ },
-                renderer = fakeRenderer(pages = 2, total = 2),
+                pageSessionFactory = FakePdfPageSessionFactory(FakePdfPageSession(pageCount = 2)),
             )
         }
 
@@ -125,7 +116,7 @@ class PdfViewerScreenTest : UiTestBase() {
                 repository = repository,
                 itemId = itemId,
                 onClose = {},
-                renderer = PdfPageRenderer { _, _ -> PdfPages(emptyList(), 0) },
+                pageSessionFactory = FakePdfPageSessionFactory(null),
             )
         }
 
@@ -141,7 +132,7 @@ class PdfViewerScreenTest : UiTestBase() {
                 repository = repository,
                 itemId = itemId,
                 onClose = {},
-                renderer = fakeRenderer(pages = 1, total = 1),
+                pageSessionFactory = FakePdfPageSessionFactory(FakePdfPageSession(pageCount = 1)),
             )
         }
 
@@ -159,7 +150,7 @@ class PdfViewerScreenTest : UiTestBase() {
                 repository = repository,
                 itemId = itemId,
                 onClose = {},
-                renderer = fakeRenderer(pages = 3, total = 3),
+                pageSessionFactory = FakePdfPageSessionFactory(FakePdfPageSession(pageCount = 3)),
             )
         }
 
@@ -180,7 +171,7 @@ class PdfViewerScreenTest : UiTestBase() {
                 repository = repository,
                 itemId = itemId,
                 onClose = {},
-                renderer = fakeRenderer(pages = 3, total = 3),
+                pageSessionFactory = FakePdfPageSessionFactory(FakePdfPageSession(pageCount = 3)),
             )
         }
         composeRule.waitUntil(5_000) {
@@ -222,7 +213,7 @@ class PdfViewerScreenTest : UiTestBase() {
                 repository = repository,
                 itemId = itemId,
                 onClose = {},
-                renderer = fakeRenderer(pages = 3, total = 3),
+                pageSessionFactory = FakePdfPageSessionFactory(FakePdfPageSession(pageCount = 3)),
                 thumbnailRenderer = FakeThumbnailRenderer(),
             )
         }
@@ -246,7 +237,7 @@ class PdfViewerScreenTest : UiTestBase() {
                 repository = repository,
                 itemId = itemId,
                 onClose = {},
-                renderer = fakeRenderer(pages = 2, total = 2),
+                pageSessionFactory = FakePdfPageSessionFactory(FakePdfPageSession(pageCount = 2)),
                 thumbnailRenderer = FakeThumbnailRenderer(),
             )
         }
@@ -275,7 +266,7 @@ class PdfViewerScreenTest : UiTestBase() {
                 repository = repository,
                 itemId = itemId,
                 onClose = { closed++ },
-                renderer = fakeRenderer(pages = 2, total = 2),
+                pageSessionFactory = FakePdfPageSessionFactory(FakePdfPageSession(pageCount = 2)),
             )
         }
         composeRule.waitForIdle()
@@ -306,7 +297,7 @@ class PdfViewerScreenTest : UiTestBase() {
                 repository = repository,
                 itemId = itemId,
                 onClose = {},
-                renderer = PdfPageRenderer { _, _ -> PdfPages(emptyList(), 0) },
+                pageSessionFactory = FakePdfPageSessionFactory(null),
             )
         }
         composeRule.waitForIdle()
@@ -323,7 +314,7 @@ class PdfViewerScreenTest : UiTestBase() {
                 repository = repository,
                 itemId = itemId,
                 onClose = {},
-                renderer = fakeRenderer(pages = 1, total = 1),
+                pageSessionFactory = FakePdfPageSessionFactory(FakePdfPageSession(pageCount = 1)),
             )
         }
         composeRule.waitForIdle()
@@ -347,7 +338,7 @@ class PdfViewerScreenTest : UiTestBase() {
                 repository = repository,
                 itemId = itemId,
                 onClose = {},
-                renderer = fakeRenderer(pages = 3, total = 3),
+                pageSessionFactory = FakePdfPageSessionFactory(FakePdfPageSession(pageCount = 3)),
             )
         }
         composeRule.waitUntil(5_000) {
@@ -367,7 +358,7 @@ class PdfViewerScreenTest : UiTestBase() {
                 repository = repository,
                 itemId = itemId,
                 onClose = {},
-                renderer = fakeRenderer(pages = 3, total = 3),
+                pageSessionFactory = FakePdfPageSessionFactory(FakePdfPageSession(pageCount = 3)),
                 thumbnailRenderer = thumbnailRenderer,
             )
         }
@@ -416,7 +407,7 @@ class PdfViewerScreenTest : UiTestBase() {
                     repository = repository,
                     itemId = itemId,
                     onClose = { showViewer = false },
-                    renderer = fakeRenderer(pages = 3, total = 3),
+                    pageSessionFactory = FakePdfPageSessionFactory(FakePdfPageSession(pageCount = 3)),
                     thumbnailRenderer = thumbnailRenderer,
                 )
             }

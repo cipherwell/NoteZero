@@ -4,6 +4,10 @@ Phase-15 increment 16, section B of `docs/CONTRACTS-PHASE15.md`. This document d
 shipped page-tools overlay, the pure page plan, the flattened exporter, the encrypted copy saver,
 all test tags, bounds/security properties, limitations and the device-QA watch list.
 
+The viewer that hosts these tools is a full-document **lazy pager** (one open `PdfPageSession`,
+pages rendered only while composed — see `docs/PDF-LAZY-VIEWER.md`); page tools always plan over
+the document's real `pageCount`.
+
 Scope is deliberately honest: the page operations are applied by **flattening** the document into
 a brand-new encrypted PDF item. There is no PDF object editing, no external PDF library, no new
 dependency, no new permission and no network. The original PDF and its annotation layer are never
@@ -18,8 +22,8 @@ modified or re-written — they stay exactly as they were, byte for byte.
 | `ui/pdf/PdfPageToolsExporter.kt` | `PdfPageToolsExporter` seam + `AndroidPdfPageToolsExporter` (`android.graphics.pdf`, ephemeral cache render file) |
 | `ui/pdf/PdfPageCopySaver.kt` | `PdfPageCopySaver` seam + `DefaultPdfPageCopySaver` (new encrypted `PDF_FILE` item via `importAttachment`), copy-name helpers |
 | `ui/pdf/PdfPageToolsScreen.kt` | Full-screen tools overlay: warning/hint, page rows (with optional in-memory page-thumbnail previews — see `docs/PDF-THUMBNAILS.md`), controls, notices, bottom actions |
-| `ui/pdf/PdfViewerScreen.kt` | Top-bar action `pdf_page_tools`, overlay state, save coroutine, Back handling, injected seams |
-| `ui/pdf/PdfFlattenedExporter.kt` | Refactored to call `PdfPageDrawing` (public behaviour unchanged) |
+| `ui/pdf/PdfViewerScreen.kt` | Top-bar action `pdf_page_tools`, overlay state, save coroutine, Back handling, injected seams; also the lazy `PdfPageSession` pager and the annotated copy (identity plan through this exporter) |
+| `ui/pdf/PdfFlattenedExporter.kt` | Legacy utility: still tested on device, but the viewer no longer uses it — the annotated copy now goes through `PdfPageToolsExporter` with an identity plan (`docs/PDF-LAZY-VIEWER.md`) |
 | `ui/pdf/PdfExportGateway.kt` | Extracted shared `pdfDisplayBaseName` display-name helper (annotated-export name unchanged) |
 | `test/.../ui/pdf/PdfPagePlanTest.kt` | Pure plan tests (23) |
 | `test/.../ui/pdf/PdfPageToolsScreenTest.kt` | Robolectric overlay + viewer save-flow tests (20) |
@@ -73,14 +77,15 @@ For each plan entry, on a white A4 page (`595×842 pt`, the same size the annota
 
 The annotation drawing is the shared `PdfPageDrawing.drawPage` helper extracted from
 `AndroidPdfFlattenedExporter`: the annotated-copy export and the page-tools copy therefore render
-ink/highlights/notes identically. The flattened exporter's public behaviour is unchanged (same
-A4 pages, same fit/centre/annotation geometry, same `null` failure contract); only its internal
-call site changed.
+ink/highlights/notes identically. Since increment 18 the viewer's annotated export uses **this**
+exporter directly with the identity plan `PdfPagePlan.of(pageCount)` (so it shares the 100-page
+cap and the `pdf_annotated_export_too_many` refusal); `PdfFlattenedExporter` is retained only as a
+standalone utility and is no longer reachable from the viewer.
 
 Failure contract: **`null` on any failure and no exception/log output** — empty bytes, an invalid
 or oversized plan, a plan that references a page the document does not have, a corrupt PDF, a
 missing native renderer, OOM, a render/encode error. Coroutine cancellation is rethrown (the
-caller's coroutine must end properly), matching `AndroidPdfPageRenderer` in the viewer. Every
+caller's coroutine must end properly), matching the viewer's `AndroidPdfPageSession`. Every
 created `Bitmap`, `PdfRenderer.Page`, `PdfRenderer` and `PdfDocument` is recycled/closed on every
 path, including early returns.
 

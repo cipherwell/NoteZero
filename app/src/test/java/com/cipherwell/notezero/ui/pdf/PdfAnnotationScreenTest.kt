@@ -1,7 +1,6 @@
 package com.cipherwell.notezero.ui.pdf
 
-import android.graphics.Bitmap
-import android.graphics.Color
+import android.content.Context
 import android.net.Uri
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsEnabled
@@ -29,6 +28,7 @@ import com.cipherwell.notezero.ui.UiTestBase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -38,27 +38,38 @@ import org.robolectric.annotation.Config
 import java.io.ByteArrayInputStream
 
 /**
- * Robolectric tests for the PDF annotation editor and the flattened-export wiring.
+ * Robolectric tests for the PDF annotation editor and the annotated-export wiring.
  *
  * The platform `PdfRenderer`/`android.graphics.pdf` have no Robolectric implementation, so the
- * screen runs with an injected page renderer, an injected [PdfFlattenedExporter] and an injected
- * [PdfExportGateway]; the real exporter is covered by `PdfFlattenedExportInstrumentedTest` on a
- * device. Annotations are asserted through the encrypted repository item (`pdfAnnotations`), not
- * through pixel probes.
+ * screen runs with an injected page-session factory, an injected [PdfPageToolsExporter] (the same
+ * all-pages exporter the page-tools copy uses) and an injected [PdfExportGateway]; the real
+ * exporter is covered by `PdfPageToolsExportInstrumentedTest` on a device. Annotations are
+ * asserted through the encrypted repository item (`pdfAnnotations`), not through pixel probes.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [34])
 class PdfAnnotationScreenTest : UiTestBase() {
 
-    private class FakeFlattenedExporter : PdfFlattenedExporter {
+    /**
+     * Fake of the shared all-pages exporter: records the identity plan, the annotation layer and
+     * the decrypted bytes the viewer re-read at export time.
+     */
+    private class FakePageToolsExporter : PdfPageToolsExporter {
         var calls: Int = 0
-        var exportedPages: PdfPages? = null
+        var exportedBytes: ByteArray? = null
+        var exportedPlan: PdfPagePlan? = null
         var exportedAnnotations: PdfAnnotations? = null
         var result: ByteArray? = "%PDF-1.4 fake flattened".toByteArray()
 
-        override fun export(pages: PdfPages, annotations: PdfAnnotations): ByteArray? {
+        override suspend fun export(
+            context: Context,
+            pdfBytes: ByteArray,
+            plan: PdfPagePlan,
+            annotations: PdfAnnotations,
+        ): ByteArray? {
             calls += 1
-            exportedPages = pages
+            exportedBytes = pdfBytes.copyOf()
+            exportedPlan = plan
             exportedAnnotations = annotations
             return result
         }
@@ -109,20 +120,12 @@ class PdfAnnotationScreenTest : UiTestBase() {
         return repository to created.id
     }
 
-    private fun pageRenderer(pages: Int = 1, total: Int = pages): PdfPageRenderer = PdfPageRenderer { _, _ ->
-        val bitmaps = (0 until pages).map {
-            Bitmap.createBitmap(60, 30, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.WHITE) }
-        }
-        PdfPages(bitmaps, total)
-    }
-
     private fun openScreen(
         repository: FakeNoteRepository,
         itemId: String,
-        exporter: FakeFlattenedExporter = FakeFlattenedExporter(),
+        exporter: FakePageToolsExporter = FakePageToolsExporter(),
         gateway: FakeExportGateway = FakeExportGateway(),
-        pages: Int = 1,
-        total: Int = pages,
+        pageCount: Int = 1,
     ) {
         closed = 0
         setThemedContent {
@@ -130,8 +133,10 @@ class PdfAnnotationScreenTest : UiTestBase() {
                 repository = repository,
                 itemId = itemId,
                 onClose = { closed += 1 },
-                renderer = pageRenderer(pages = pages, total = total),
-                flattenedExporter = exporter,
+                pageSessionFactory = FakePdfPageSessionFactory(
+                    FakePdfPageSession(pageCount = pageCount),
+                ),
+                pageToolsExporter = exporter,
                 exportGateway = gateway,
                 exportDispatcher = Dispatchers.Unconfined,
             )
@@ -387,7 +392,7 @@ class PdfAnnotationScreenTest : UiTestBase() {
         val (repository, itemId) = repositoryWithPdf()
         val stored = strokeLayer(diagonalStroke())
         runBlocking { repository.savePdfAnnotations(itemId, stored) }
-        val exporter = FakeFlattenedExporter()
+        val exporter = FakePageToolsExporter()
         val gateway = FakeExportGateway()
         openScreen(repository, itemId, exporter = exporter, gateway = gateway)
 
@@ -404,7 +409,12 @@ class PdfAnnotationScreenTest : UiTestBase() {
 
         assertEquals(1, exporter.calls)
         assertEquals(stored, exporter.exportedAnnotations)
-        assertEquals(1, exporter.exportedPages?.totalPages)
+        // Identity plan: one output page per source page, in order, no rotation.
+        assertEquals(PdfPagePlan.of(1), exporter.exportedPlan)
+        assertEquals(listOf(0), exporter.exportedPlan?.entries?.map { it.sourcePage })
+        assertFalse("the annotated copy must be the unmodified document", exporter.exportedPlan!!.hasChanges())
+        // The decrypted bytes are re-read from the repository at export time.
+        assertTrue(exporter.exportedBytes!!.contentEquals(BlankPdf.create()))
         assertEquals(FakeExportGateway.DESTINATION, gateway.writtenUri)
         assertNotNull(gateway.writtenBytes)
         assertEquals(
@@ -419,7 +429,7 @@ class PdfAnnotationScreenTest : UiTestBase() {
     fun `original export option keeps the existing decrypted-copy flow`() {
         val (repository, itemId) = repositoryWithPdf()
         runBlocking { repository.savePdfAnnotations(itemId, strokeLayer(diagonalStroke())) }
-        val exporter = FakeFlattenedExporter()
+        val exporter = FakePageToolsExporter()
         val gateway = FakeExportGateway()
         openScreen(repository, itemId, exporter = exporter, gateway = gateway)
 
@@ -429,7 +439,7 @@ class PdfAnnotationScreenTest : UiTestBase() {
         composeRule.waitForIdle()
 
         composeRule.onNodeWithTag("pdf_export_warning").assertExists()
-        assertEquals("the flattened exporter must not run", 0, exporter.calls)
+        assertEquals("the annotated exporter must not run", 0, exporter.calls)
         assertNull(gateway.writtenBytes)
     }
 
@@ -437,7 +447,7 @@ class PdfAnnotationScreenTest : UiTestBase() {
     fun `annotated export failure writes nothing and reports the failure`() {
         val (repository, itemId) = repositoryWithPdf()
         runBlocking { repository.savePdfAnnotations(itemId, strokeLayer(diagonalStroke())) }
-        val exporter = FakeFlattenedExporter().apply { result = null }
+        val exporter = FakePageToolsExporter().apply { result = null }
         val gateway = FakeExportGateway()
         openScreen(repository, itemId, exporter = exporter, gateway = gateway)
 
@@ -458,7 +468,7 @@ class PdfAnnotationScreenTest : UiTestBase() {
     fun `cancelled annotated export writes nothing`() {
         val (repository, itemId) = repositoryWithPdf()
         runBlocking { repository.savePdfAnnotations(itemId, strokeLayer(diagonalStroke())) }
-        val exporter = FakeFlattenedExporter()
+        val exporter = FakePageToolsExporter()
         val gateway = FakeExportGateway().apply { destination = null }
         openScreen(repository, itemId, exporter = exporter, gateway = gateway)
 
@@ -484,8 +494,8 @@ class PdfAnnotationScreenTest : UiTestBase() {
                 repository = repository,
                 itemId = itemId,
                 onClose = { closed += 1 },
-                renderer = PdfPageRenderer { _, _ -> PdfPages(emptyList(), 0) },
-                flattenedExporter = FakeFlattenedExporter(),
+                pageSessionFactory = FakePdfPageSessionFactory(null),
+                pageToolsExporter = FakePageToolsExporter(),
                 exportGateway = FakeExportGateway(),
                 exportDispatcher = Dispatchers.Unconfined,
             )

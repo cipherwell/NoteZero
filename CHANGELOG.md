@@ -3,6 +3,36 @@
 All notable changes to NoteZero are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [Unreleased] — full-document lazy PDF viewer (2026-11-20, increment 18)
+
+### Added
+- **`PdfPageSession` / `PdfPageSessionFactory`** with `AndroidPdfPageSessionFactory`: one open
+  `PdfRenderer` per viewer, decrypted bytes written to an app-private cache file that is
+  **unlinked immediately after opening**, per-page renders on IO serialised by a `Mutex` (white
+  ARGB, ≤1600 px long edge, never upscaled), fail-closed null on invalid/corrupt/OOM, idempotent
+  close; `MAX_VIEW_PAGES = 2000` guard.
+- **Viewer refactor**: `LazyColumn` spans the real `pageCount`; each `PdfPageItem` renders lazily
+  while composed with A4 `pdf_page_loading` placeholders / `pdf_page_render_failed`, recycles page
+  bitmaps on item disposal; full-range reading progress, jumps, bookmarks and annotations; the
+  first-8-pages cap and `pdf_pages_capped` notice are gone (legacy `PdfPageRenderer`/`PdfPages` and
+  `PdfFlattenedExporter` remain standalone utilities).
+- **Pages overview** now covers all thumbnail-rendered pages up to 100 with current-page emphasis;
+  numeric fallback remains.
+- **Annotated export** moved to the all-pages `pageToolsExporter` with an identity plan (≤100
+  pages; above that `pdf_annotated_export_too_many` and nothing written), keeping the explicit
+  SAF warning/lock/re-read rules.
+- Tests: +23 unit/Robolectric lazy-viewer/session tests and +6 instrumented real-`PdfRenderer`
+  session tests; full suite **1490 / 0 failures / 120 classes**, **38 instrumented tests**.
+  Docs `docs/CONTRACTS-PHASE17.md`, `docs/PDF-LAZY-VIEWER.md`, VERIFICATION §23, DECISIONS #29,
+  THREAT-MODEL §3.9.9; screenshots 52–54.
+
+### Verified (measured)
+- 12-page PDF: scroll 1→12, jump to page 10, annotate page 10, export 12-page flattened annotated
+  copy (ink verified on exported page 10 via `pdftoppm`), overview all 12, no session temp file
+  left; 0 crashes.
+- Offline guard OK; token lint clean; no new permissions/dependencies; reproducible hashes in
+  VERIFICATION §23.
+
 ## [Unreleased] — PDF visual page navigation: in-memory thumbnails (2026-11-20, increment 17)
 
 ### Added

@@ -20,8 +20,12 @@ data class PdfPages(
 }
 
 /**
- * Renders a decrypted PDF to bitmaps for the viewer. Injectable so the screen is testable in
- * Robolectric, where the platform PDF renderer has no native implementation.
+ * Legacy eager renderer: rasterises a bounded prefix (8 pages) of a decrypted PDF.
+ *
+ * **The viewer no longer uses this**: since increment 18 `PdfViewerScreen` pages the whole document
+ * lazily through one [PdfPageSession] (see `docs/PDF-LAZY-VIEWER.md`). This type and [PdfPages]
+ * are kept as a standalone utility (their instrumented tests still exercise the native renderer)
+ * and can be removed in a later cleanup.
  */
 fun interface PdfPageRenderer {
     suspend fun render(context: Context, bytes: ByteArray): PdfPages

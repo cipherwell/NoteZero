@@ -18,9 +18,10 @@ import kotlin.math.min
  * plaintext survives the call and nothing is logged: the returned bytes are the caller's
  * only copy until they reach the user-chosen SAF destination.
  *
- * Injectable into `PdfViewerScreen` so Robolectric tests can assert the export wiring without
- * the native `android.graphics.pdf` implementation (the real one is exercised by
- * `PdfFlattenedExportInstrumentedTest` on a device/emulator).
+ * Legacy utility: the viewer no longer takes this exporter (since increment 18 the annotated copy
+ * is built by the shared [PdfPageToolsExporter] with an identity [PdfPagePlan], see
+ * `docs/PDF-LAZY-VIEWER.md`). The class and its instrumented test are retained so the rasterised
+ * flatten path stays covered; it can be removed in a later cleanup.
  */
 fun interface PdfFlattenedExporter {
     fun export(pages: PdfPages, annotations: PdfAnnotations): ByteArray?

@@ -13,8 +13,9 @@ import kotlin.math.min
 
 /**
  * The single implementation of "draw one rendered page + its annotations onto a PDF page
- * canvas", shared by the annotated-copy exporter ([AndroidPdfFlattenedExporter]) and the
- * page-tools exporter ([AndroidPdfPageToolsExporter]).
+ * canvas", shared by the viewer's annotated copy and the page-tools copy — both go through
+ * [PdfPageToolsExporter] ([AndroidPdfPageToolsExporter]) with a [PdfPagePlan]; the legacy
+ * [AndroidPdfFlattenedExporter] uses it too.
  *
  * Sharing this code is what keeps annotation rendering from drifting between the two exports:
  * annotations are drawn in **bitmap space** (normalised coordinates × the rendered bitmap's

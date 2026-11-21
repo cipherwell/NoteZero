@@ -741,4 +741,9 @@
     <string name="cd_pdf_page_thumbnail">Page %1$d</string>
     <string name="cd_pdf_page_tools_thumbnail">Page %1$d preview</string>
 
+    <!-- PDF full-document lazy rendering (increment 18) -->
+    <string name="pdf_page_render_failed">Could not render this page.</string>
+    <string name="pdf_page_loading">Rendering page…</string>
+    <string name="pdf_annotated_export_too_many">Annotated copy supports up to %1$d pages.</string>
+
 </resources>

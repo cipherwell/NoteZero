@@ -163,6 +163,22 @@ its PendingIntent is immutable and its receiver is not exported. The only effect
 is the same pending quick-capture request as the launcher shortcut, which is honoured only
 after a successful unlock.
 
+### 3.9.9 Full-document lazy PDF viewer (increment 18)
+
+The viewer now keeps one open platform `PdfRenderer` session instead of eagerly rasterising the
+first 8 pages. The decrypted bytes are written to one app-private cache file, opened read-only and
+**unlinked immediately**, so no plaintext PDF path exists for the session; if the filesystem
+refuses unlink, the file is deleted on close (documented fallback). Page bitmaps are rendered only
+while their `LazyColumn` row is composed, under IO + a `Mutex` (PdfRenderer is not thread-safe),
+≤1600 px long edge and never upscaled; each bitmap is recycled when its row leaves composition and
+a per-page failure shows a non-secret placeholder. `MAX_VIEW_PAGES = 2000` bounds a hostile page
+count. The session closes on viewer dispose/item change, and close is idempotent even if a render is
+in flight. No page/thumbnail file, database column or plaintext cache is added; no title/page
+content is logged; no new permission or dependency. Annotated copies use the all-pages page-tools
+exporter (≤100 pages, refuse above without creating a destination file), not the old rendered-prefix
+flattener. `PdfPageRenderer`/`PdfPages`/`PdfFlattenedExporter` remain legacy utilities with their
+own instrumented tests but are no longer reachable from the viewer.
+
 ### 3.9.8 PDF page thumbnails (increment 17)
 
 Thumbnails are **in-memory only** for one viewer session: the viewer lazily asks

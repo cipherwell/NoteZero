@@ -20,8 +20,8 @@ import java.util.UUID
  * [AndroidPdfThumbnailRenderer] is ephemeral and deleted before the set is returned).
  *
  * The set is intentionally tiny and immutable in shape: one small bitmap per rendered page,
- * page indices 0-based exactly like [PdfPages]. A missing index (a page beyond the renderer cap,
- * or a failed render) is `null` rather than a broken image, so the UI can fall back to text.
+ * page indices 0-based exactly like [PdfPageSession]. A missing index (a page beyond the renderer
+ * cap, or a failed render) is `null` rather than a broken image, so the UI can fall back to text.
  */
 class PdfThumbnails(bitmaps: List<Bitmap>) {
 
@@ -65,8 +65,9 @@ fun interface PdfThumbnailRenderer {
  *
  * `PdfRenderer` needs a **seekable file descriptor**, so the decrypted bytes are written to one
  * ephemeral app-private cache file for the duration of the render and deleted in the `finally`
- * block — exactly the documented trade-off of [AndroidPdfPageRenderer] (DECISIONS #20 /
- * THREAT-MODEL): one file, app-private cache, short-lived, no plaintext PDF survives. The file
+ * block — exactly the documented trade-off of [AndroidPdfPageSessionFactory] and
+ * [AndroidPdfPageRenderer] (DECISIONS #20 / THREAT-MODEL): one file, app-private cache,
+ * short-lived, no plaintext PDF survives. The file
  * name is random per render so two concurrent renders can never share it.
  *
  * Resource bounds: at most [maxPages] pages are rasterised, each on a white ARGB_8888 bitmap with
